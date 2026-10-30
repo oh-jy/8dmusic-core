@@ -1,0 +1,9 @@
+.gradle/
+build/
+app/build/
+core/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+fix_structure.py
