@@ -4,9 +4,11 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** 本机歌曲索引、手动添加歌曲、队列视图与播放列表的持久化入口。 */
 class MusicStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
     var sort = preferences.getString("sort", "name") ?: "name"
@@ -52,6 +54,30 @@ class MusicStore(private val context: Context) {
 
     fun library(): List<MusicItem> = (loadAdded() + scan()).distinctBy { it.uri }
 
+    fun mergeScan(fresh: List<MusicItem>): List<MusicItem> = (loadAdded() + fresh).distinctBy { it.uri }
+
+    /**
+     * MediaStore/SAF 的 content Uri 不一定允许随机读取和重复打开。
+     * 按歌曲 id 缓存到应用私有目录，解码器后续只读这份稳定副本，绝不改源文件。
+     */
+    fun readableUri(item: MusicItem): Uri {
+        val dir = File(context.filesDir, "picked").apply { mkdirs() }
+        val extension = item.name.substringAfterLast('.', "mp3").lowercase()
+        val target = File(dir, "music_${item.id}.$extension")
+        if (target.exists() && target.length() > 1024) return Uri.fromFile(target)
+        context.contentResolver.openInputStream(Uri.parse(item.uri)).use { input ->
+            requireNotNull(input) { "打不开音频流" }
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+        return Uri.fromFile(target)
+    }
+
+    fun dropCache(item: MusicItem) {
+        File(context.filesDir, "picked").listFiles()?.forEach {
+            if (it.name.startsWith("music_${item.id}.")) it.delete()
+        }
+    }
+
     fun cached(): List<MusicItem> = jsonSongs(preferences.getString("songs", "[]"))
 
     fun saveLibrary(songs: List<MusicItem>) {
@@ -60,14 +86,16 @@ class MusicStore(private val context: Context) {
 
     fun view(songs: List<MusicItem>): List<MusicItem> {
         val playlist = playlists.getOrNull(playlistIndex)
-        val q = query.trim().lowercase()
+        val q = sanitizeQuery(query).trim().lowercase()
         val filtered = songs.filter { song ->
             song.duration <= 30 * 60 * 1000 && song.id !in hidden &&
                 (playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
                 (q.isEmpty() || matches(song, q))
         }
         if (sort != "manual") {
-            return filtered.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) {
+            // ICU Collator 让中文按拼音排序，与 UTS 的 Locale.CHINA 行为一致。
+            val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+            return filtered.sortedWith(compareBy(collator) {
                 when (sort) {
                     "artist" -> "${it.artist} ${it.name}"
                     "album" -> "${it.album} ${it.name}"
@@ -95,10 +123,26 @@ class MusicStore(private val context: Context) {
         if (from !in songs.indices || to !in songs.indices || from == to) return
         val ids = songs.map { it.id }.toMutableList()
         ids.add(to, ids.removeAt(from))
+        adoptManualOrder(ids)
+        commitManualOrder()
+    }
+
+    /** 首次拖动采用当前可见顺序，隐藏项原位保留。 */
+    fun adoptManualOrder(visibleIds: List<Long>) {
+        val visible = visibleIds.toSet()
+        var next = 0
+        manualOrder = buildList {
+            manualOrder.forEach { id ->
+                if (id in visible) add(visibleIds[next++]) else add(id)
+            }
+            while (next < visibleIds.size) add(visibleIds[next++])
+        }.toMutableList()
         sort = "manual"
-        manualOrder = (ids + manualOrder).distinct().toMutableList()
+    }
+
+    fun commitManualOrder() {
         saveOrder()
-        preferences.edit().putString("sort", sort).apply()
+        preferences.edit().putString("sort", "manual").apply()
     }
 
     fun hide(item: MusicItem) {
@@ -113,6 +157,7 @@ class MusicStore(private val context: Context) {
 
     fun addPlaylist(name: String, songs: List<MusicItem>): Boolean {
         if (name.isBlank() || playlists.size >= 10 || songs.isEmpty()) return false
+        // 带过滤词的是搜索型列表，后续扫描到匹配歌曲会自动纳入。
         playlists.add(Playlist(name.trim(), songs.map { it.id }, query.trim().lowercase()))
         playlistIndex = playlists.lastIndex
         savePlaylists()
@@ -126,7 +171,18 @@ class MusicStore(private val context: Context) {
         savePlaylists()
     }
 
-    private fun matches(song: MusicItem, query: String) = "${song.name} ${song.artist} ${song.album}".lowercase().contains(query)
+    fun removeFromPlaylist(index: Int, item: MusicItem) {
+        val playlist = playlists.getOrNull(index) ?: return
+        // 搜索型列表移除一首后固化为快照，否则刷新时该歌曲会再次出现。
+        playlists[index] = playlist.copy(ids = playlist.ids.filterNot { it == item.id }, rule = "")
+        savePlaylists()
+    }
+
+    private fun matches(song: MusicItem, query: String) = "${song.name} ${song.artist} ${song.album}".lowercase().contains(sanitizeQuery(query))
+    private fun sanitizeQuery(value: String) = value.filterNot {
+        // 清理输入法可能提交的零宽/控制字符，避免不可见过滤词让列表永远为空。
+        it in charArrayOf('\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u00ad') || (it.code < 0x20 && it != '\t')
+    }
     private fun saveOrder() = save("manual", JSONArray(manualOrder).toString())
     private fun saveHidden() { preferences.edit().putStringSet("hidden", hidden.map { it.toString() }.toSet()).apply() }
     private fun savePlaylists() {

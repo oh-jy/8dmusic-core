@@ -9,6 +9,19 @@ import kotlin.test.assertTrue
 
 class PipelineTest {
     @Test
+    fun `streaming pcm publishes head and keeps container duration`() {
+        val pcm = PcmBuffer(44100, 2, false, 2_000_000)
+        val head = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        repeat(2) { head.putShort((it + 1).toShort()); head.putShort(0) }
+        pcm.append(head.array())
+        assertEquals(2, pcm.frames)
+        assertEquals(2.0, pcm.estimatedDurationSec)
+        assertEquals(1.0 / 32768.0, pcm.sample(0, 0))
+        pcm.append(head.array())
+        assertEquals(4, pcm.frames)
+    }
+
+    @Test
     fun `pcm handles stereo and reverse without byte reversal`() {
         val bytes = ByteBuffer.allocate(16).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         repeat(4) { frame ->
@@ -60,5 +73,16 @@ class PipelineTest {
         assertEquals(101.0, output.short.toDouble(), 1.0)
         assertEquals(2.0, output.short.toDouble(), 1.0)
         assertEquals(102.0, output.short.toDouble(), 1.0)
+    }
+
+    @Test
+    fun `slider values use declared precision and standard preset remains matchable`() {
+        assertEquals(8.0, clampSlider("period", 8.04), 0.0)
+        assertEquals(36.0, clampSlider("elev", 35.7), 0.0)
+        assertEquals("8.0 秒", formatValue("period", 8.0))
+        assertEquals("35 °", formatValue("elev", 35.0))
+        val preset = DEFAULT_SPACE_PRESET
+        assertEquals(preset.name, matchPreset(preset.period, preset.elev, preset.depth,
+            preset.room, preset.wet, preset.rt60, preset.phase, preset.direction, preset.width, preset.raw))
     }
 }

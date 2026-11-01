@@ -204,5 +204,5 @@ fun clampSlider(key: String, v: Double): Double {
 fun formatValue(key: String, v: Double): String {
     val d = sliderOf(key) ?: return v.toString()
     return if (d.digits == 0) round(v).toLong().toString() + d.unit
-    else String.format("%.1f", v) + d.unit
+    else String.format(java.util.Locale.US, "%.${d.digits.coerceAtMost(2)}f", v) + d.unit
 }

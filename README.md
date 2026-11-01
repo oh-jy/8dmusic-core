@@ -32,9 +32,9 @@ $env:JAVA_HOME="$env:USERPROFILE\AppData\Local\mise\installs\java\corretto-21.0.
 D:\temp\tools\gradle-8.14.3\bin\gradle.bat :app:assembleDebug --no-daemon
 ```
 
-当前产物：`app/build/outputs/apk/debug/app-debug.apk`（约 3.2MB）。
+当前产物：`build/outputs/apk/debug/app-debug.apk`。
 
-也可直接运行 `build.ps1`，自动设置 JDK/SDK 环境并编译。
+也可直接运行 `build.ps1`，自动设置 JDK/SDK 环境并编译；Gradle/Kotlin 工程缓存也写入 `build/`。
 
 ## 迁移进度
 

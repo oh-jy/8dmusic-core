@@ -3,52 +3,152 @@ package jiangyi.spatial8d.audio
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
-import android.media.AudioManager
-import android.content.Context
 
+/** 音频链路的唯一持有者，同时把真实播放状态同步给锁屏与通知栏。 */
 class PlaybackService : Service() {
     inner class Binder : android.os.Binder() {
         val service: PlaybackService get() = this@PlaybackService
     }
 
-    val player = SpatialPlayer()
-    private val binder = Binder()
-    private val noisyReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) player.pause()
-        }
+    interface Controls {
+        fun play()
+        fun pause()
+        fun previous()
+        fun next()
     }
+
+    val player = SpatialPlayer(this)
+    val radio = RadioPlayer()
+    var controls: Controls? = null
+    private val binder = Binder()
+    private lateinit var session: MediaSession
+    private var title = "8D 空间音频"
+    private var subtitle = ""
+    private var playing = false
+    private var positionMs = 0L
+    private var durationMs = 0L
 
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel("playback", "音频播放", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW)
         )
-        val notification: Notification = NotificationCompat.Builder(this, "playback")
-            .setContentTitle("8D 空间音频")
-            .setContentText("后台音频播放")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setOngoing(true)
-            .build()
-        startForeground(1, notification)
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY), Context.RECEIVER_NOT_EXPORTED)
+        session = MediaSession(this, "Spatial8D").apply {
+            setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
+            setCallback(object : MediaSession.Callback() {
+                override fun onPlay() = controls?.play() ?: Unit
+                override fun onPause() = controls?.pause() ?: Unit
+                override fun onSkipToPrevious() = controls?.previous() ?: Unit
+                override fun onSkipToNext() = controls?.next() ?: Unit
+                override fun onSeekTo(position: Long) { player.seek(position / 1000.0) }
+            })
+            isActive = true
+        }
+    }
+
+    /** 每次页面刷新都复用此方法，确保电台与本地歌曲使用同一套系统控制。 */
+    fun updateMedia(title: String, subtitle: String, playing: Boolean, position: Double = 0.0, duration: Double = 0.0) {
+        this.title = title.ifBlank { "8D 空间音频" }
+        this.subtitle = subtitle
+        this.playing = playing
+        positionMs = (position * 1000).toLong().coerceAtLeast(0)
+        durationMs = (duration * 1000).toLong().coerceAtLeast(0)
+        session.setMetadata(MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, this.title)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs).build())
+        val state = if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+        session.setPlaybackState(PlaybackState.Builder().setActions(
+            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+                PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SEEK_TO
+        ).setState(state, if (durationMs > 0) positionMs else PlaybackState.PLAYBACK_POSITION_UNKNOWN,
+            if (playing) 1f else 0f).build())
+        val notification = buildNotification()
+        if (playing) {
+            if (Build.VERSION.SDK_INT >= 29) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else startForeground(NOTIFICATION_ID, notification)
         } else {
-            @Suppress("DEPRECATION") registerReceiver(noisyReceiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY))
+            stopForeground(false)
+            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val launch = packageManager.getLaunchIntentForPackage(packageName)
+        val content = PendingIntent.getActivity(this, 0, launch,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val style = Notification.MediaStyle().setMediaSession(session.sessionToken)
+        style.setShowActionsInCompactView(0, 1, 2)
+        return Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle(title).setContentText(subtitle).setContentIntent(content)
+            .setVisibility(Notification.VISIBILITY_PUBLIC).setOnlyAlertOnce(true).setOngoing(playing)
+            .setShowWhen(false)
+            .addAction(android.R.drawable.ic_media_previous, "上一首", action("previous"))
+            .addAction(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                if (playing) "暂停" else "播放", action(if (playing) "pause" else "play"))
+            .addAction(android.R.drawable.ic_media_next, "下一首", action("next"))
+            .setStyle(style).build()
+    }
+
+    private fun action(command: String): PendingIntent {
+        val intent = Intent(this, PlaybackService::class.java).setAction(command)
+        return PendingIntent.getService(this, command.hashCode(), intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 通知栏可在页面已销毁时唤醒服务，先建立绑定再投递播放动作。
+        if (controls == null && intent?.action != null) {
+            startActivity(packageManager.getLaunchIntentForPackage(packageName)?.apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            })
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                dispatchControl(intent.action)
+            }, 500)
+        } else dispatchControl(intent?.action)
+        return START_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // 滑出任务不等于暂停；播放时保留媒体前台服务，系统回收后允许重建服务。
+        if (!playing && !player.isPlaying && !radio.isPlaying) stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun dispatchControl(action: String?) {
+        when (action) {
+            "play" -> controls?.play()
+            "pause" -> controls?.pause()
+            "previous" -> controls?.previous()
+            "next" -> controls?.next()
         }
     }
 
     override fun onBind(intent: Intent): IBinder = binder
 
     override fun onDestroy() {
-        unregisterReceiver(noisyReceiver)
+        stopForeground(true)
+        session.isActive = false
+        session.release()
         player.stop()
+        radio.stop()
+        radio.stopRecording()
         super.onDestroy()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "playback"
+        private const val NOTIFICATION_ID = 1
     }
 }

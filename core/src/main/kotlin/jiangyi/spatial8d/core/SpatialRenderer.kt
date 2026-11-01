@@ -93,6 +93,41 @@ class SpatialRenderer(sampleRate: Double) {
         }
         return out.array()
     }
+
+    fun render(
+        mono: DoubleArray,
+        frames: Int,
+        seconds: Double,
+        reverse: Boolean,
+        raw: PcmBuffer? = null,
+        rawFrames: Int = raw?.frames ?: 0
+    ): ByteArray {
+        require(frames in 0..mono.size)
+        val out = ByteBuffer.allocate(frames * 4).order(ByteOrder.LITTLE_ENDIAN)
+        if (raw != null && engine.rawEnabled()) {
+            for (i in 0 until frames) {
+                val source = if (reverse) rawFrames - 1 - (seconds * engine.sr).toInt() - i
+                    else (seconds * engine.sr).toInt() + i
+                out.putShort(clip16(raw.sample(source, 0)))
+                out.putShort(clip16(raw.sample(source, minOf(1, raw.channels - 1))))
+            }
+            return out.array()
+        }
+        if (denoise && reducer == null) reducer = NoiseReducer(engine.sr)
+        engine.process(mono, outL, outR, frames, seconds)
+        for (i in 0 until frames) {
+            var l = outL[i]
+            var r = outR[i]
+            if (denoise) {
+                val pair = reducer!!.process(l, r)
+                l = pair[0]
+                r = pair[1]
+            }
+            out.putShort(clip16(l))
+            out.putShort(clip16(r))
+        }
+        return out.array()
+    }
 }
 
 private class NoiseReducer(sr: Double) {

@@ -1,0 +1,162 @@
+package jiangyi.spatial8d.ui
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Typeface
+import android.os.SystemClock
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewGroup
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
+import jiangyi.spatial8d.audio.LyricsResult
+import kotlin.math.abs
+
+/**
+ * 可嵌入空间曲线同尺寸面板的歌词视图。进度单位是毫秒，主线程周期性调用 setPosition。
+ * 用户拖动后暂停自动滚动三秒；点击当前行或松手三秒后继续跟随人声。
+ */
+class LyricsView(context: Context) : ScrollView(context) {
+    var dark = true
+        set(value) { field = value; applyColors() }
+
+    private val palette get() = ThemeUi.palette(dark)
+    private val content = LinearLayout(context).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+    }
+    private val rows = mutableListOf<TextView>()
+    private var lyrics: LyricsResult? = null
+    private var positionMs = 0L
+    private var activeIndex = -2
+    private var manualUntil = 0L
+    private var touching = false
+    private var topPadding = 0
+    private var bottomPadding = 0
+
+    init {
+        isFillViewport = true
+        isVerticalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
+        clipToPadding = false
+        addView(content, ViewGroup.LayoutParams(-1, -2))
+        setLyrics(null)
+    }
+
+    /** null 表示暂无歌词；instrumental 和无时间轴文本不会伪造逐行高亮。 */
+    fun setLyrics(value: LyricsResult?) {
+        lyrics = value
+        activeIndex = -2
+        manualUntil = 0
+        content.removeAllViews()
+        rows.clear()
+        val p = palette
+        when {
+            value == null -> message("暂无匹配歌词")
+            value.instrumental -> message("纯音乐，无歌词")
+            value.synchronized -> value.lines.forEach { line ->
+                val row = TextView(context).apply {
+                    text = line.text
+                    textSize = 15f
+                    gravity = Gravity.CENTER
+                    maxLines = 3
+                    setPadding(dp(20f), dp(9f), dp(20f), dp(9f))
+                    layoutParams = LinearLayout.LayoutParams(-1, -2)
+                    setOnClickListener {
+                        manualUntil = 0
+                        setPosition(line.timeMs, true)
+                    }
+                }
+                rows += row
+                content.addView(row)
+            }
+            value.plainLyrics.isNotBlank() -> message(value.plainLyrics)
+            else -> message("该歌曲暂无歌词")
+        }
+        updatePadding()
+        setPosition(positionMs, true)
+    }
+
+    /** 外部播放器仍是唯一进度来源；force 仅用于切歌或用户返回当前行。 */
+    fun setPosition(positionMs: Long, force: Boolean = false) {
+        this.positionMs = positionMs.coerceAtLeast(0)
+        val lines = lyrics?.lines ?: return
+        val index = lines.indexOfLast { it.timeMs <= this.positionMs }
+        if (index != activeIndex) {
+            activeIndex = index
+            applyColors()
+        }
+        if (force || (!touching && SystemClock.uptimeMillis() >= manualUntil)) {
+            if (force) manualUntil = 0
+            scrollToLine(index)
+        }
+    }
+
+    /** 清除旧曲目的歌词和进度，避免异步加载返回前显示上一首歌。 */
+    fun clear() {
+        positionMs = 0
+        setLyrics(null)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        updatePadding()
+        post { scrollToLine(activeIndex, false) }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touching = true
+                parent?.requestDisallowInterceptTouchEvent(true)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                touching = false
+                manualUntil = SystemClock.uptimeMillis() + 3_000
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    private fun message(text: String) {
+        content.addView(TextView(context).apply {
+            this.text = text
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(palette.sub)
+            setPadding(dp(24f), dp(12f), dp(24f), dp(12f))
+        }, LinearLayout.LayoutParams(-1, -2))
+    }
+
+    private fun applyColors() {
+        val p = palette
+        rows.forEachIndexed { index, row ->
+            val played = index <= activeIndex
+            row.setTextColor(if (played) p.accent else p.sub)
+            row.typeface = if (index == activeIndex) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            row.alpha = if (index == activeIndex) 1f else if (played) 0.85f else 0.72f
+        }
+        if (rows.isEmpty()) {
+            (content.getChildAt(0) as? TextView)?.setTextColor(p.sub)
+        }
+    }
+
+    private fun updatePadding() {
+        topPadding = (height * 0.40f).toInt().coerceAtLeast(dp(24f))
+        bottomPadding = (height * 0.48f).toInt().coerceAtLeast(dp(24f))
+        content.setPadding(0, topPadding, 0, bottomPadding)
+    }
+
+    private fun scrollToLine(index: Int, animated: Boolean = true) {
+        val target = if (index < 0) 0 else rows.getOrNull(index)?.let {
+            (it.top + topPadding + it.height / 2 - height / 2).coerceAtLeast(0)
+        } ?: 0
+        if (abs(scrollY - target) < 2) return
+        if (animated) smoothScrollTo(0, target) else scrollTo(0, target)
+    }
+
+    private fun dp(value: Float) = ThemeUi.dp(context, value)
+}

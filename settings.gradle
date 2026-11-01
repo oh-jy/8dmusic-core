@@ -16,3 +16,9 @@ dependencyResolutionManagement {
 
 rootProject.name = '8dmusic-kt'
 include ':core', ':app'
+
+gradle.projectsLoaded {
+    gradle.rootProject.allprojects { project ->
+        project.layout.buildDirectory.value(rootProject.layout.projectDirectory.dir('build'))
+    }
+}
