@@ -6,13 +6,14 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaDataSource
 import android.net.Uri
+
 import jiangyi.spatial8d.core.PcmBuffer
 import java.nio.ByteOrder
 
 class AudioDecoder(private val context: Context) {
     /**
      * MediaExtractor + MediaCodec 顺序解码，调用方必须在后台线程执行。
-     * 解出约 125ms 就回调 onHead，后续继续抬高同一 PCM 缓冲的水位；
+     * 首个有效 PCM 输出就回调 onHead，后续继续抬高同一 PCM 缓冲的水位；
      * isActive 对应页面加载代号，阻止旧歌的迟到回调污染新曲。
      */
     fun decode(uri: Uri, onProgress: (Int) -> Unit, isActive: () -> Boolean = { true },
@@ -31,6 +32,12 @@ class AudioDecoder(private val context: Context) {
         onFormat: (PcmBuffer) -> Unit): PcmBuffer {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
+        var lastPercent = -1
+        fun reportProgress(percent: Int) {
+            if (percent == lastPercent) return
+            lastPercent = percent
+            onProgress(percent)
+        }
         try {
             setSource(extractor)
             val track = (0 until extractor.trackCount).firstOrNull { index ->
@@ -68,7 +75,7 @@ class AudioDecoder(private val context: Context) {
                             codec.queueInputBuffer(index, 0, size, extractor.sampleTime, 0)
                             extractor.advance()
                             if (durationUs > 0 && extractor.sampleTime > 0) {
-                                onProgress((extractor.sampleTime * 100 / durationUs).toInt().coerceIn(0, 95))
+                                reportProgress((extractor.sampleTime * 100 / durationUs).toInt().coerceIn(0, 95))
                             }
                         }
                     }
@@ -93,7 +100,7 @@ class AudioDecoder(private val context: Context) {
                             val bytes = ByteArray(info.size)
                             buffer.get(bytes)
                             output?.append(bytes)
-                            if (!headPublished && output != null && output!!.frames >= sampleRate / 8) {
+                            if (!headPublished && output != null && output!!.frames > 0) {
                                 headPublished = true
                                 onHead(output!!, durationUs)
                             }
@@ -108,7 +115,7 @@ class AudioDecoder(private val context: Context) {
                 channels = codec.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             }
             check(channels in 1..8 && sampleRate > 0) { "不支持的音频声道或采样率" }
-            onProgress(100)
+            reportProgress(100)
             // 水位置完成前不能把播完或导出当成安全操作。
             return (output ?: error("音频没有 PCM 输出")).also { it.decodeDone = true }
         } catch (e: Exception) {

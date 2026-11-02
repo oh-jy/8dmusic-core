@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.PowerManager
+import android.util.Log
 import com.jiangyi.spatial8d.NativePreprocess
 import com.jiangyi.spatial8d.NativeSpatialExport
 import com.jiangyi.spatial8d.NativeSpatialPlayer
@@ -54,10 +55,14 @@ class SpatialPlayer(context: Context) {
         set(value) { if (field != value) { field = value; invalidate(position) } }
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onPcm: ((ByteArray, Int) -> Unit)? = null
 
     private val lock = Any()
+    // AudioTrack 的写、flush、play 和 release 必须互斥，代际标记本身不能保护 native 调用。
+    private val trackLock = Any()
     private val main = Handler(Looper.getMainLooper())
-    private val appContext = context.applicationContext
+    // Service 构造期间尚未 attach，直接保存传入 Context，不能提前读 applicationContext。
+    private val appContext = context
     private val wakeLock by lazy {
         appContext.getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "spatial8d:AudioTrack").apply {
@@ -96,6 +101,7 @@ class SpatialPlayer(context: Context) {
     val duration get() = decoded?.let {
         if (it.decodeDone) it.durationSec else maxOf(it.estimatedDurationSec, remoteDurationSec)
     } ?: 0.0
+    val isPrepared get() = prepared
     val isPlaying get() = prepared && !paused
     val isDecodeDone get() = decoded?.decodeDone == true
     val position: Double
@@ -110,6 +116,8 @@ class SpatialPlayer(context: Context) {
 
     fun prepare(source: PcmBuffer, knownDurationSec: Double = 0.0) {
         stop()
+        // 切歌保持同一个 AudioTrack，避免 PCM 尚未到达时 mixer 停轨/起轨爆音。
+        if (track != null && sampleRate != source.sampleRate) releaseTrack()
         decoded = source
         remoteDurationSec = knownDurationSec.coerceAtLeast(0.0)
         sampleRate = source.sampleRate
@@ -127,9 +135,9 @@ class SpatialPlayer(context: Context) {
         try {
             paused = false
             playedOnce = true
-            if (track == null) buildTrack()
-            applyPlaybackParams()
-            if (trackStarted) track?.play()
+            if (track == null) synchronized(trackLock) { buildTrack() }
+            synchronized(trackLock) { applyPlaybackParams() }
+            if (trackStarted) synchronized(trackLock) { track?.play() }
             startWorkers()
             syncWakeLock()
             true
@@ -143,16 +151,21 @@ class SpatialPlayer(context: Context) {
 
     fun pause() = synchronized(lock) {
         if (paused) return@synchronized
-        pausedHead = lastHeardFrame()
+        val heard = if (trackStarted) synchronized(trackLock) {
+            // 先取硬件播放头再 pause；pause 后部分 ROM 会立即把 head 清零。
+            headBase + (track?.playbackHeadPosition ?: 0)
+        } else playPos
+        if (heard > 0 || playPos <= 0) pausedHead = heard
         paused = true
-        try { track?.pause() } catch (_: Exception) {}
+        try { synchronized(trackLock) { track?.pause() } } catch (_: Exception) {}
         syncWakeLock()
     }
 
     fun toggle() = if (paused) play() else pause().let { true }
-    fun seek(seconds: Double) = invalidate(seconds)
-    fun replay(): Boolean {
-        val resume = playedOnce
+    fun seek(seconds: Double, userInitiated: Boolean = false) = invalidate(seconds, userInitiated)
+    fun replay(forcePlay: Boolean = false): Boolean {
+        // 自然播完会先清 playedOnce；自动续播必须显式要求重新起播。
+        val resume = playedOnce || forcePlay
         val source = decoded
         stop()
         if (source != null) prepare(source)
@@ -168,7 +181,12 @@ class SpatialPlayer(context: Context) {
             paused = true
             playedOnce = false
             closeCache()
-            releaseTrack()
+            synchronized(trackLock) {
+                track?.let {
+                    try { it.pause(); it.flush(); it.setVolume(1f) } catch (_: Exception) {}
+                }
+            }
+            trackStarted = false
             decoded = null
             playPos = 0
             headBase = 0
@@ -177,39 +195,57 @@ class SpatialPlayer(context: Context) {
         }
     }
 
+    /** 服务真正销毁时才释放输出轨道；普通切歌和 stop 保持轨道复用。 */
+    fun close() {
+        stop()
+        releaseTrack()
+    }
+
     private fun scheduleParams() {
         // 合并连续滑块事件，避免每个像素都重建 JNI 渲染器和缓存。
         main.removeCallbacks(params)
         main.postDelayed(params, 48)
     }
 
-    private fun invalidate(seconds: Double) {
+    private fun invalidate(seconds: Double, restartTrack: Boolean = false) {
         main.removeCallbacks(params)
         synchronized(lock) {
             if (!prepared) return
             val resume = !paused
-            playPos = (seconds.coerceIn(0.0, duration) * sampleRate).toInt().coerceIn(0, decoded?.frames ?: 0)
+            // 流式解码尚未到达目标时保留 seek 位置，等待 PCM 到位而不是跳回开头。
+            playPos = (seconds.coerceIn(0.0, duration) * sampleRate).toInt().coerceAtLeast(0)
             pausedHead = playPos
             headBase = playPos
             cacheStart.set(playPos.toLong())
             cacheEpoch.incrementAndGet()
-            generation++
+            val own = ++generation
             closeCache()
-            track?.let {
+            if (resume && restartTrack) {
+                // OPPO 的 seek flush 后需要一次真实的暂停/恢复切换；只建轨道并立即 play 不够。
+                // 短延迟可取消，连续 seek 只恢复最后一代，也不会覆盖随后发生的手动暂停。
+                paused = true
+                syncWakeLock()
+                releaseTrack()
+                buildTrack()
+                main.postDelayed({
+                    synchronized(lock) {
+                        if (own == generation && prepared && paused) play()
+                    }
+                }, SEEK_RESUME_DELAY_MS)
+            } else synchronized(trackLock) { track?.let {
                 try {
                     // flush 清掉旧参数/旧位置的缓冲，否则切换后还会残留旧声音。
                     it.pause(); it.flush()
-                    // 部分 ROM flush 后保持 STOPPED：先按正常预渲染恢复，不提前起播。
-                    trackStarted = it.playState != AudioTrack.PLAYSTATE_STOPPED
-                    applyPlaybackParams()
-                    if (resume && trackStarted) it.play()
+                    // 新缓存达到 START_FRAMES 后由输出线程统一起播，避免空轨欠载。
+                    trackStarted = false
                 } catch (_: Exception) {}
-            }
-            if (resume) startWorkers()
+            } }
+            if (resume && !restartTrack) startWorkers()
         }
     }
 
     private fun buildTrack() {
+        try { track?.setVolume(1f) } catch (_: Exception) {}
         val min = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
         check(min > 0) { "AudioTrack 不支持采样率 $sampleRate" }
         track = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder()
@@ -220,7 +256,7 @@ class SpatialPlayer(context: Context) {
             .setTransferMode(AudioTrack.MODE_STREAM).build()
         check(track?.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
         trackStarted = false
-        applyPlaybackParams()
+        synchronized(trackLock) { applyPlaybackParams() }
     }
 
     private fun applyPlaybackParams() {
@@ -233,14 +269,15 @@ class SpatialPlayer(context: Context) {
         catch (e: Exception) { report("播放参数设置失败: ${e.message}") }
     }
 
-    private fun startWorkers() {
+    private fun startWorkers() = synchronized(lock) {
+        if (!prepared || paused || outputThread?.isAlive == true) return
+        // 旧线程退出后只接管最新代，不能让两个线程同时写一个 AudioTrack。
         val own = generation
-        // 暂停恢复复用原输出线程，禁止两个线程同时向同一 AudioTrack 灌数据。
-        if (outputThread?.isAlive == true) return
-        outputThread = Thread({ renderLoop(own) }, "spatial-output").also { it.start() }
+        // 同代暂停恢复复用缓存和混响状态；seek/切参已先关闭缓存，仍会新建渲染器。
+        outputThread = Thread({ renderLoop(own, cache != null) }, "spatial-output").also { it.start() }
     }
 
-    private fun renderLoop(own: Int) {
+    private fun renderLoop(own: Int, resumeCache: Boolean) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         try {
             val output = ByteArray(OUTPUT_CHUNK * 4)
@@ -249,22 +286,16 @@ class SpatialPlayer(context: Context) {
                 // 倒放必须知道真实曲尾，流式解码阶段不能拿当前水位当最后一帧。
                 if (reverse && decoded?.decodeDone != true) { Thread.sleep(30); continue }
                 val epoch = cacheEpoch.get()
-                if (cache?.epoch != epoch) {
+                if (cache?.epoch != epoch && !resumeCache) {
                     closeCache()
                     cache = createCache(own, epoch) ?: run { Thread.sleep(6); continue }
-                    playPos = cache!!.startFrame
-                    headBase = playPos
+                    // 切换缓存只换数据源，不清空本代已经写入轨道的播放头。
                 }
                 val current = cache ?: break
                 val audio = track ?: break
-                if (!paused && trackStarted && audioIsStopped()) {
+                if (own == generation && track === audio && !paused && trackStarted && audioIsStopped()) {
                     // 缓存切换可能让 ROM 把轨道留在 STOPPED，write 不写错但也不出声。
-                    try {
-                        audio.flush()
-                        headBase = current.startFrame + current.consumed
-                        playPos = headBase
-                        audio.play()
-                    } catch (_: Exception) {}
+                    recoverStoppedTrack(own, audio, current)
                 }
                 val produced = current.produced.get()
                 if (produced <= current.consumed) {
@@ -276,11 +307,16 @@ class SpatialPlayer(context: Context) {
                 if (!current.read(output, count * 4)) { Thread.sleep(4); continue }
                 var written = 0
                 while (written < count * 4 && own == generation && !paused) {
-                    val n = audio.write(output, written, count * 4 - written)
+                    val n = synchronized(trackLock) {
+                        if (own != generation || track !== audio || paused) -1
+                        else audio.write(output, written, count * 4 - written)
+                    }
+                    if (n < 0 && (own != generation || track !== audio || paused)) break
                     if (n < 0) error("AudioTrack 写入失败: $n")
                     written += n
                 }
                 if (own != generation || paused) continue
+                onPcm?.invoke(output, count * 4)
                 // 在最终 8D PCM 写出后 tee 一份，录音与耳机听到的效果完全一致。
                 recorder?.write(output, 0, count * 4)
                 current.consumed += count
@@ -288,14 +324,50 @@ class SpatialPlayer(context: Context) {
                 // 先写入短预滚再 play，兼顾起播延迟和 AudioTrack 不欠载。
                 if (!trackStarted && current.consumed >= min(START_FRAMES, current.produced.get())) {
                     trackStarted = true
+                    // AudioTrack 从首次 play 才计数；此前预写帧已经进入轨道，不能漏算播放头。
+                    // 预写帧仍包含在 playbackHeadPosition 中，不能重复计入。
+                    headBase = current.startFrame
                     applyPlaybackParams()
-                    audio.play()
+                    synchronized(trackLock) {
+                        if (own == generation && track === audio && !paused) audio.play()
+                    }
                 }
                 if (current.done.get() && current.consumed >= current.produced.get() && drainAndFinish(own, current)) break
             }
         } catch (e: Exception) {
             if (own == generation) report("渲染播放失败: ${e.message}")
-        } finally { outputThread = null }
+        } finally {
+            // 旧线程退出时不能清掉已经启动的新一代输出线程。
+            val restart = synchronized(lock) {
+                if (outputThread === Thread.currentThread()) outputThread = null
+                shouldRestartOutput(own, generation, prepared, paused, outputThread?.isAlive == true)
+            }
+            // 连续切参时旧线程可能活着挡住 startWorkers；退出后必须接管最新代际。
+            if (restart) startWorkers()
+        }
+    }
+
+    private fun recoverStoppedTrack(own: Int, audio: AudioTrack, current: RenderCache) {
+        // STOPPED 后 playbackHeadPosition 已清零；先回到真实已听位置，再重建缓存。
+        // 已写但未听到的 PCM 必须丢弃，不能把写入进度冒充听到位置。
+        synchronized(lock) {
+            if (own != generation || track !== audio || paused) return
+            val heard = synchronized(trackLock) { headBase + audio.playbackHeadPosition }
+                .coerceIn(0, decoded?.frames ?: 0)
+            generation++
+            cacheEpoch.incrementAndGet()
+            playPos = heard
+            pausedHead = heard
+            headBase = heard
+            cacheStart.set(heard.toLong())
+            closeCache()
+            synchronized(trackLock) {
+                if (track !== audio) return
+                try { audio.pause(); audio.flush() } catch (_: Exception) {}
+            }
+            trackStarted = false
+            startWorkers()
+        }
     }
 
     private fun createCache(own: Int, epoch: Long): RenderCache? {
@@ -307,8 +379,7 @@ class SpatialPlayer(context: Context) {
             p.depth, p.phase, p.direction, p.width, p.room, p.rt60, p.wet, transform.denoiseLevel)
         if (native == 0L) return null
         val file = File.createTempFile("spatial-render-", ".pcm")
-        // 流式阶段必须共享同一个 PCM 数组，否则缓存只有创建时的前半首歌。
-        val result = RenderCache(epoch, start, file, native, source.toByteArray())
+        val result = RenderCache(epoch, start, file, native)
         Thread({ prerollLoop(own, result) }, "spatial-preroll").start()
         return result
     }
@@ -324,9 +395,11 @@ class SpatialPlayer(context: Context) {
                     continue
                 }
                 val count = min(CHUNK, source.frames - start)
+                val input = source.copyFrames(start, count)
                 val rendered = current.render {
-                    NativeSpatialPlayer.render(current.native, current.pcm, source.bytesPerFrame,
-                        source.channels, source.floatingPoint, start.toLong(), count, reverse,
+                    // 每块使用稳定快照：解码扩容后仍读取新 PCM，不持有旧数组。
+                    NativeSpatialPlayer.render(current.native, input,
+                        source.bytesPerFrame, source.channels, source.floatingPoint, 0, count, reverse,
                         source.frames.toLong(), current.startFrame.toLong(), current.produced.get())
                 }
                 current.output.write(rendered)
@@ -338,7 +411,9 @@ class SpatialPlayer(context: Context) {
             }
         } catch (e: Exception) {
             if (own == generation) report("后台渲染失败: ${e.message}")
-        } finally { current.writerFinished() }
+        } finally {
+            current.writerFinished()
+        }
     }
 
     private fun drainAndFinish(own: Int, current: RenderCache): Boolean {
@@ -354,7 +429,9 @@ class SpatialPlayer(context: Context) {
         return true
     }
 
-    private fun lastHeardFrame() = if (trackStarted) headBase + (track?.playbackHeadPosition ?: 0) else playPos
+    private fun lastHeardFrame() = if (trackStarted) synchronized(trackLock) {
+        headBase + (track?.playbackHeadPosition ?: 0)
+    } else playPos
 
     private fun audioIsStopped() = track?.playState == AudioTrack.PLAYSTATE_STOPPED
 
@@ -367,11 +444,22 @@ class SpatialPlayer(context: Context) {
     }
 
     private fun releaseTrack() {
-        val old = track ?: return
-        track = null
-        try { old.pause(); old.flush(); old.stop() } catch (_: Exception) {}
-        old.release()
-        trackStarted = false
+        synchronized(trackLock) {
+            val old = track ?: return
+            track = null
+            // 直接销毁仍在发声的轨道会把波形硬截断。先用短斜坡落到静音再停轨。
+            if (trackStarted && old.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                try {
+                    repeat(8) { step ->
+                        old.setVolume(1f - (step + 1) / 8f)
+                        Thread.sleep(2)
+                    }
+                } catch (_: Exception) {}
+            }
+            try { old.pause(); old.flush(); old.stop() } catch (_: Exception) {}
+            old.release()
+            trackStarted = false
+        }
     }
 
     private fun report(message: String) = main.post { onError?.invoke(message) }
@@ -460,7 +548,7 @@ class SpatialPlayer(context: Context) {
     }
 
     private class RenderCache(val epoch: Long, val startFrame: Int, val file: File,
-        val native: Long, val pcm: ByteArray) {
+        val native: Long) {
         // produced/consumed 均以帧计，磁盘布局固定为 16bit 立体声交错。
         private var input: FileInputStream? = null
         val output = FileOutputStream(file, true)
@@ -483,10 +571,13 @@ class SpatialPlayer(context: Context) {
         fun closeInput() = try { input?.close(); input = null } catch (_: Exception) {}
         @Synchronized fun discardWhenIdle() { discard = true; if (!writerActive) file.delete() }
         fun read(dst: ByteArray, bytes: Int): Boolean {
-            if (input == null) input = FileInputStream(file)
+            val stream = input ?: FileInputStream(file).also {
+                it.channel.position(consumed * 4L)
+                input = it
+            }
             var offset = 0
             while (offset < bytes) {
-                val n = input!!.read(dst, offset, bytes - offset)
+                val n = stream.read(dst, offset, bytes - offset)
                 if (n < 0) return false
                 offset += n
             }
@@ -502,9 +593,14 @@ class SpatialPlayer(context: Context) {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val CHUNK = 4096
         const val OUTPUT_CHUNK = 1024
-        const val START_FRAMES = 2048
+        const val SEEK_RESUME_DELAY_MS = 120L
+        // 与 UTS 一致：三个输出块约 70ms，避免首个缓冲未填满就起播造成欠载。
+        const val START_FRAMES = 3072
+        internal fun shouldRestartOutput(own: Int, currentGeneration: Int, prepared: Boolean,
+            paused: Boolean, hasLiveOutput: Boolean) =
+            own == currentGeneration && prepared && !paused && !hasLiveOutput
     }
 }

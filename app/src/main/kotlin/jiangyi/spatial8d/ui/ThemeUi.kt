@@ -35,6 +35,7 @@ object ThemeUi {
     const val ROLE_CONTROL = "role_control"
     const val ROLE_ACCENT_FILL = "role_accent_fill"
     const val ROLE_SURFACE_ALT = "role_surface_alt"
+    const val ROLE_SURFACE = "role_surface"
 
     data class Palette(
         val background: Int,
@@ -191,6 +192,7 @@ object ThemeUi {
         val bg = when (role) {
             ROLE_ACCENT_FILL -> p.accent
             ROLE_SURFACE_ALT -> p.surfaceAlt
+            ROLE_SURFACE -> p.surface
             ROLE_TEXT -> null
             else -> p.control
         }
@@ -386,7 +388,7 @@ object ThemeUi {
         val dark = p.darkInk == 0xff0b0c0e.toInt()
         bar.progressTintList = ColorStateList.valueOf(p.accent)
         bar.progressBackgroundTintList = ColorStateList.valueOf(if (playback) {
-            if (dark) 0xff3a3f47.toInt() else 0xffdfe3e9.toInt()
+            if (dark) 0xff4a505a.toInt() else 0xffd4dae3.toInt()
         } else {
             if (dark) p.control else 0xffe6e9ee.toInt()
         })

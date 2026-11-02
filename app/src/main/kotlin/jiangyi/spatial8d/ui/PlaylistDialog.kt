@@ -24,6 +24,8 @@ import androidx.core.content.ContextCompat
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import jiangyi.spatial8d.data.FAVORITES_INDEX
+import jiangyi.spatial8d.data.FAVORITES_NAME
 import jiangyi.spatial8d.data.MusicItem
 import jiangyi.spatial8d.data.MusicStore
 import kotlin.math.abs
@@ -54,7 +56,26 @@ class PlaylistDialog(
     private var dragView: View? = null
     private var dragOffsetY = 0f
     private var dragOriginTop = 0f
+    private var lastDragRawY = 0f
     private val rowTops = mutableListOf<Float>()
+    private val autoScroll = object : Runnable {
+        override fun run() {
+            if (dragging < 0 || !::listScroll.isInitialized) return
+            val localY = lastDragRawY - listLocationOnScreen()[1]
+            val edge = dp(48).toFloat()
+            val speed = dp(6)
+            val distance = when {
+                localY < edge -> -(speed * (1f - localY.coerceAtLeast(0f) / edge)).toInt()
+                localY > listScroll.height - edge -> (speed * (1f - (listScroll.height - localY).coerceAtLeast(0f) / edge)).toInt()
+                else -> 0
+            }
+            if (distance != 0) {
+                listScroll.scrollBy(0, distance)
+                moveDrag(lastDragRawY)
+            }
+            listScroll.postOnAnimation(this)
+        }
+    }
     private var saveOpen = false
     private var reorderMode = false
 
@@ -63,6 +84,10 @@ class PlaylistDialog(
     fun dismiss() {
         resetDrag()
         dialog?.dismiss()
+    }
+
+    fun refreshContent() {
+        refresh()
     }
 
     fun show() {
@@ -96,7 +121,7 @@ class PlaylistDialog(
         root.addView(ThemeUi.row(c).apply {
             addView(ThemeUi.text(c, "播放列表", 15f, p, bold = true))
             addView(count.apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) } })
-            addView(button("扫描歌曲") { (context as? PlaylistHost)?.scanMusic(); close() })
+            addView(button("扫描") { (context as? PlaylistHost)?.scanMusic(); close() })
             addView(ThemeUi.text(c, "关闭", 11f, p, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(dp(12), dp(8), dp(12), dp(8)); setOnClickListener { close() }
             })
@@ -108,7 +133,7 @@ class PlaylistDialog(
                 addView(tabs)
                 layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
             })
-            addView(button(if (saveOpen) "收起" else "另存列表") { toggleSave() })
+            addView(button(if (saveOpen) "收起" else "保存列表") { toggleSave() })
         })
         search = ThemeUi.input(c, p, "过滤：歌名 / 歌手 / 专辑").apply {
             setText(store.query)
@@ -165,7 +190,7 @@ class PlaylistDialog(
         if (dragging < 0 || dragTarget !in rowTops.indices) return
         val gap = when {
             dragTarget < dragging -> rowTops[dragTarget] - dp(3)
-            dragTarget > dragging -> rowTops[dragTarget] + dp(58)
+            dragTarget > dragging -> rowTops[dragTarget] + rowHeight()
             else -> return
         }
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = p.accent; strokeWidth = dp(2).toFloat() }
@@ -180,12 +205,14 @@ class PlaylistDialog(
         count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
         tabs.removeAllViews()
         tabs.addView(chip("全部", store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })
+        tabs.addView(chip("♥ $FAVORITES_NAME", store.playlistIndex == FAVORITES_INDEX) { store.playlistIndex = FAVORITES_INDEX; refresh() })
         if (store.hidden.isNotEmpty()) tabs.addView(ThemeUi.text(context, "恢复 ${store.hidden.size}", 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
             setPadding(dp(8), dp(10), dp(8), dp(10))
             setOnClickListener { store.restoreHidden(); refresh() }
         })
         store.playlists.forEachIndexed { index, playlist ->
             tabs.addView(chip(playlist.name, store.playlistIndex == index) { store.playlistIndex = index; refresh() }.apply {
+                // 内置收藏列表不在 playlists 集合内，只有用户自建列表可删除。
                 setOnLongClickListener {
                     AlertDialog.Builder(context, if (dark)
                         androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
@@ -204,7 +231,7 @@ class PlaylistDialog(
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
         sortRow.addView(ThemeUi.text(context, "排序", 11f, p, role = ThemeUi.ROLE_SUB))
-        listOf("name" to "文件名", "artist" to "歌手", "album" to "专辑", "manual" to "自定义").forEach { (key, label) ->
+        listOf("name" to "文件名", "artist" to "歌手", "album" to "专辑", "time" to "时间", "manual" to "自定义").forEach { (key, label) ->
             sortRow.addView(chip(label, store.sort == key) { store.setSort(key); refresh() })
         }
         // The trailing action pair remains fixed after Custom in the UTS order row.
@@ -220,7 +247,9 @@ class PlaylistDialog(
         val active = songs.indexOfFirst { it.id == currentId }
         // 等底部弹层完成布局后再滚动，提前 scrollTo 拿不到有效高度。
         if (active >= 0) scrollToCurrent(active)
-        if (songs.isEmpty() && hasAudioPermission()) list.addView(ThemeUi.text(context, if (source.isEmpty()) "请先添加或扫描音频" else "没有匹配的音频", 12f, p, role = ThemeUi.ROLE_SUB).apply {
+        if (songs.isEmpty() && hasAudioPermission()) list.addView(ThemeUi.text(context,
+            if (store.playlistIndex == FAVORITES_INDEX) "收藏为空，点播放控制处的空心爱心添加"
+            else if (source.isEmpty()) "请先添加或扫描音频" else "没有匹配的音频", 12f, p, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(40), dp(16), dp(40))
         })
         sortRow.addView(actions)
@@ -278,7 +307,8 @@ class PlaylistDialog(
                     .setMessage("从列表移除“${song.name}”？不会删除源文件。")
                     .setPositiveButton("移除") { _, _ ->
                         val playlist = store.playlistIndex
-                        if (playlist >= 0) store.removeFromPlaylist(playlist, song) else store.hide(song)
+                        if (playlist == FAVORITES_INDEX) store.toggleFavorite(song.id)
+                        else if (playlist >= 0) store.removeFromPlaylist(playlist, song) else store.hide(song)
                         status.text = "已移除，不删除源文件"; refresh()
                     }
                     .setNegativeButton("取消", null).show()
@@ -311,21 +341,31 @@ class PlaylistDialog(
         dragTarget = index
         dragView = row
         dragOriginTop = row.top.toFloat()
-        dragOffsetY = rawY - dragOriginTop
+        dragOffsetY = rawY - listLocationOnScreen()[1] + listScroll.scrollY - dragOriginTop
+        lastDragRawY = rawY
         rowTops.clear()
         for (i in 0 until list.childCount) rowTops.add(list.getChildAt(i).top.toFloat())
         row.elevation = dp(8).toFloat()
         row.alpha = 0.96f
         list.invalidate()
+        listScroll.postOnAnimation(autoScroll)
         status.text = "拖动中：亮线显示插入位置"
     }
 
     private fun moveDrag(rawY: Float) {
         val row = dragView ?: return
-        val desired = rawY - listScroll.top + listScroll.scrollY - dragOffsetY
+        lastDragRawY = rawY
+        val desired = rawY - listLocationOnScreen()[1] + listScroll.scrollY - dragOffsetY
         row.translationY = desired - dragOriginTop
         val center = desired + row.height / 2f
-        dragTarget = rowTops.indices.minByOrNull { abs(rowTops[it] + row.height / 2f - center) } ?: dragging
+        // 只越过相邻行中心才切换目标，消除按原始位置取最近值产生的反向死区。
+        val hysteresis = dp(4)
+        while (dragTarget < rowTops.lastIndex && center > rowTops[dragTarget + 1] + row.height / 2f + hysteresis) {
+            dragTarget++
+        }
+        while (dragTarget > 0 && center < rowTops[dragTarget - 1] + row.height / 2f - hysteresis) {
+            dragTarget--
+        }
         for (i in 0 until list.childCount) {
             val child = list.getChildAt(i)
             if (child === row) continue
@@ -336,10 +376,6 @@ class PlaylistDialog(
             }
             child.alpha = if (i == dragTarget) 0.72f else 1f
         }
-        // 长列表接近边缘时自动滚动，拖动不局限于当前屏幕。
-        val localY = rawY - listScroll.top
-        if (localY < dp(48)) listScroll.smoothScrollBy(0, -dp(24))
-        else if (localY > listScroll.height - dp(48)) listScroll.smoothScrollBy(0, dp(24))
         status.text = "插入第 ${dragTarget + 1} 位 · 松手保存"
         list.invalidate()
     }
@@ -357,12 +393,19 @@ class PlaylistDialog(
     }
 
     private fun resetDrag() {
+        if (::listScroll.isInitialized) listScroll.removeCallbacks(autoScroll)
         dragging = -1
         dragTarget = -1
         dragView = null
         rowTops.clear()
         reorderMode = false
     }
+
+    private fun listLocationOnScreen() = IntArray(2).also(listScroll::getLocationOnScreen)
+
+    private fun rowHeight(): Float = (dragView?.layoutParams as? LinearLayout.LayoutParams)?.let {
+        (dragView!!.height + it.bottomMargin).toFloat()
+    } ?: dp(58).toFloat()
 
     private class DropIndicatorList(context: android.content.Context, private val owner: PlaylistDialog) :
         LinearLayout(context) {

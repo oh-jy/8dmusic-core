@@ -18,6 +18,8 @@ import kotlin.math.abs
  * 用户拖动后暂停自动滚动三秒；点击当前行或松手三秒后继续跟随人声。
  */
 class LyricsView(context: Context) : ScrollView(context) {
+    var onSearch: ((String) -> Unit)? = null
+
     var dark = true
         set(value) { field = value; applyColors() }
 
@@ -47,6 +49,7 @@ class LyricsView(context: Context) : ScrollView(context) {
     /** null 表示暂无歌词；instrumental 和无时间轴文本不会伪造逐行高亮。 */
     fun setLyrics(value: LyricsResult?) {
         lyrics = value
+        if (positionMs < 0) positionMs = 0
         activeIndex = -2
         manualUntil = 0
         content.removeAllViews()
@@ -61,7 +64,7 @@ class LyricsView(context: Context) : ScrollView(context) {
                     textSize = 15f
                     gravity = Gravity.CENTER
                     maxLines = 3
-                    setPadding(dp(20f), dp(9f), dp(20f), dp(9f))
+                    setPadding(dp(20f), dp(4f), dp(20f), dp(4f))
                     layoutParams = LinearLayout.LayoutParams(-1, -2)
                     setOnClickListener {
                         manualUntil = 0
@@ -76,6 +79,10 @@ class LyricsView(context: Context) : ScrollView(context) {
         }
         updatePadding()
         setPosition(positionMs, true)
+        content.post {
+            updatePadding()
+            scrollToLine(activeIndex, false)
+        }
     }
 
     /** 外部播放器仍是唯一进度来源；force 仅用于切歌或用户返回当前行。 */
@@ -95,14 +102,46 @@ class LyricsView(context: Context) : ScrollView(context) {
 
     /** 清除旧曲目的歌词和进度，避免异步加载返回前显示上一首歌。 */
     fun clear() {
-        positionMs = 0
+        positionMs = -1
         setLyrics(null)
+        content.removeAllViews()
+        message("正在匹配在线歌词…")
+    }
+
+    fun showError(fileName: String) {
+        setLyrics(null)
+        content.removeAllViews()
+        val p = palette
+        val input = ThemeUi.input(context, p, "输入歌曲名").apply { setText(fileName) }
+        content.addView(input, LinearLayout.LayoutParams(-1, dp(36f)).apply {
+            leftMargin = dp(20f); rightMargin = dp(20f)
+        })
+        message("未找到匹配歌词，可修改歌曲名后重试")
+        content.addView(ThemeUi.button(context, p, "重新检索") {
+            val query = input.text.toString().trim()
+            if (query.isEmpty()) return@button
+            clear()
+            onSearch?.invoke(query)
+        }, LinearLayout.LayoutParams(-2, dp(36f)))
+        ThemeUi.applyTheme(content, p)
+        updatePadding()
+        content.setPadding(0, dp(8f), 0, dp(8f))
+    }
+
+    fun showProgress(stage: String) {
+        if (rows.isNotEmpty()) return
+        lyrics = null
+        content.removeAllViews()
+        message(stage)
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         updatePadding()
-        post { scrollToLine(activeIndex, false) }
+        post {
+            updatePadding()
+            scrollToLine(activeIndex, false)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -145,14 +184,17 @@ class LyricsView(context: Context) : ScrollView(context) {
     }
 
     private fun updatePadding() {
-        topPadding = (height * 0.40f).toInt().coerceAtLeast(dp(24f))
-        bottomPadding = (height * 0.48f).toInt().coerceAtLeast(dp(24f))
+        val compact = rows.isEmpty()
+        // 自动跟随时，第一行是已播放、第二行是当前行，而不是把当前行居中。
+        topPadding = if (compact) dp(8f) else rows.first().height + dp(6f)
+        bottomPadding = if (compact) dp(8f) else (height - rows.last().height * 2 - dp(12f)).coerceAtLeast(dp(24f))
         content.setPadding(0, topPadding, 0, bottomPadding)
     }
 
     private fun scrollToLine(index: Int, animated: Boolean = true) {
         val target = if (index < 0) 0 else rows.getOrNull(index)?.let {
-            (it.top + topPadding + it.height / 2 - height / 2).coerceAtLeast(0)
+            val previous = rows.getOrNull(index - 1)
+            (it.top + topPadding - (previous?.height ?: it.height) - dp(6f)).coerceAtLeast(0)
         } ?: 0
         if (abs(scrollY - target) < 2) return
         if (animated) smoothScrollTo(0, target) else scrollTo(0, target)

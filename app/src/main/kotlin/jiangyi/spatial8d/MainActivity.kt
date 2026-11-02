@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.provider.OpenableColumns
 import android.provider.MediaStore
 import android.view.Gravity
@@ -51,6 +52,8 @@ import jiangyi.spatial8d.audio.OnlineMusic
 import jiangyi.spatial8d.audio.OnlineTrack
 import jiangyi.spatial8d.audio.Lyrics
 import jiangyi.spatial8d.ui.LyricsView
+import jiangyi.spatial8d.ui.WaveformView
+import jiangyi.spatial8d.ui.VisualizerView
 import com.jiangyi.spatial8d.HttpMediaDataSource
 import com.jiangyi.spatial8d.TsAdtsMediaDataSource
 import com.jiangyi.spatial8d.MusicSourceApi
@@ -62,6 +65,7 @@ import jiangyi.spatial8d.core.SLIDERS
 import jiangyi.spatial8d.core.SPACE_PRESETS
 import jiangyi.spatial8d.core.SpacePreset
 import jiangyi.spatial8d.core.PARAM_INFO
+import jiangyi.spatial8d.core.PitchPreset
 import jiangyi.spatial8d.core.PITCH_PRESETS
 import jiangyi.spatial8d.core.TransformParams
 import jiangyi.spatial8d.core.clampSlider
@@ -118,7 +122,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private lateinit var visualization: SpatialVisualization
     private lateinit var curve: CurveView
     private lateinit var lyricsView: LyricsView
+    private lateinit var waveformView: WaveformView
+    private lateinit var visualizerView: VisualizerView
     private lateinit var curveLegend: LinearLayout
+    private lateinit var curveContent: LinearLayout
     private val lyrics by lazy { Lyrics(this) }
     private var lyricsGeneration = 0
     private lateinit var presetPicker: TextView
@@ -128,6 +135,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private var parameterOpen = false
     private var transformOpen = false
     private lateinit var transformBody: LinearLayout
+    private lateinit var favoriteButton: ImageButton
     private lateinit var presetNote: TextView
     private lateinit var speedSlider: SeekBar
     private lateinit var pitchSlider: SeekBar
@@ -147,6 +155,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private lateinit var durationHint: TextView
 private var infoDialog: Dialog? = null
 private var exportDialog: Dialog? = null
+private var visualizerDialog: Dialog? = null
+private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var infoExpanded = -1
     private lateinit var transportRow: LinearLayout
     private lateinit var playerBar: LinearLayout
@@ -234,8 +244,16 @@ private var exportDialog: Dialog? = null
                 override fun previous() { main.post { previous() } }
                 override fun next() { main.post { next() } }
             }
-            service?.player?.onEnd = { main.post { next(auto = true) } }
+            service?.player?.onEnd = {
+                Log.i("8DQueue", "track ended in service callback")
+                main.post { next(auto = true) }
+            }
             service?.player?.onError = { main.post { toast(it) } }
+            service?.player?.onPcm = { data, bytes ->
+                if (::waveformView.isInitialized && curvePanel == 1) waveformView.accept(data, bytes)
+                if (::visualizerView.isInitialized && curvePanel == 2) visualizerView.accept(data, bytes)
+                popupVisualizer?.accept(data, bytes)
+            }
             service?.radio?.onReady = { main.post {
                 playbackStatus = "电台播放中 · ${currentItem?.name ?: "自定义电台"}"
                 refreshPlayback()
@@ -243,6 +261,7 @@ private var exportDialog: Dialog? = null
             service?.radio?.onEnd = { main.post { playbackStatus = "电台已断开"; refreshPlayback() } }
             service?.radio?.onError = { main.post { playbackStatus = it; refreshPlayback() } }
             bound = true
+            adoptOrRestorePlayback()
             refreshAll()
         }
 
@@ -286,7 +305,7 @@ private var exportDialog: Dialog? = null
             override fun handleOnBackPressed() {
                 if (exitDialog?.isShowing == true) { exitDialog?.dismiss(); return }
                 var dismissed = false
-                listOf(sourceDialog, infoDialog, exportDialog).forEach { dialog ->
+                listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog).forEach { dialog ->
                     if (dialog?.isShowing == true) { dialog.dismiss(); dismissed = true }
                 }
                 if (playlistDialog?.isShowing() == true) { playlistDialog?.dismiss(); dismissed = true }
@@ -298,7 +317,7 @@ private var exportDialog: Dialog? = null
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
                 view.setPadding(0, bars.top, 0, ThemeUi.dp(this, 176f) + bars.bottom)
-                playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 10f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 18f) + bars.bottom)
+                playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 10f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 12f) + bars.bottom)
                 insets
             }
         }
@@ -312,11 +331,12 @@ private var exportDialog: Dialog? = null
         }, Context.RECEIVER_NOT_EXPORTED)
         bindService(Intent(this, PlaybackService::class.java), connection, Context.BIND_AUTO_CREATE)
         if (hasAudioPermission()) scanMusic()
-        restoreLast()
+        scheduleLyricsPrefetch()
         main.post(ticker)
     }
 
     override fun onDestroy() {
+        main.removeCallbacks(prefetchLyrics)
         service?.player?.stopRecording()
         service?.radio?.stopRecording()
         micRecorder?.stop()
@@ -356,9 +376,26 @@ private var exportDialog: Dialog? = null
         frame.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(nowPlayingBar())
         setContentView(frame)
+        // 首屏用实际测量值分配曲线剩余空间，避免按屏幕高度硬减常量留下空白。
+        curveContent.post { resizeCurveToRemainingSpace() }
+        frame.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top == oldBottom - oldTop) return@addOnLayoutChangeListener
+            frame.post { resizeCurveToRemainingSpace() }
+        }
         refreshPlayback()
         tint(root, palette.text)
         ThemeUi.applyTheme(playerBar, palette)
+    }
+
+    private fun resizeCurveToRemainingSpace() {
+        if (!::curveContent.isInitialized) return
+        val card = curveContent.parent as? View ?: return
+        val extra = (card.parent as? ViewGroup)?.paddingBottom ?: 0
+        val frame = card.parent?.parent as? View ?: return
+        val remaining = frame.height - playerBar.height - root.paddingTop - root.paddingBottom - extra
+        val height = (remaining - (root.height - curveContent.height)).coerceAtLeast(ThemeUi.dp(this, 140f))
+        if (height == curveContent.height) return
+        curveContent.layoutParams = curveContent.layoutParams.apply { this.height = height }
     }
 
     private fun refreshAll() {
@@ -458,14 +495,15 @@ private var exportDialog: Dialog? = null
 
     private fun refreshTheme() {
         palette = ThemeUi.palette(dark)
-        window.statusBarColor = palette.background
-        window.navigationBarColor = if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt()
         tint(root, palette.text)
         root.setBackgroundColor(palette.background)
         (root.parent?.parent as? FrameLayout)?.setBackgroundColor(palette.background)
         root.findViewWithTag<View>("navbar")?.setBackgroundColor(palette.background)
         visualization.dark = dark
         curve.dark = dark
+        waveformView.dark = dark
+        visualizerView.dark = dark
+        popupVisualizer?.dark = dark
         if (::lyricsView.isInitialized) lyricsView.dark = dark
         if (::playerBar.isInitialized) ThemeUi.bg(playerBar, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
         if (::disc.isInitialized) ThemeUi.bg(disc, palette.accent, 19f)
@@ -479,8 +517,6 @@ private var exportDialog: Dialog? = null
         }
         if (::playerBar.isInitialized) tintIcons(playerBar)
         if (::themeButton.isInitialized) themeButton.text = if (dark) "浅色" else "深色"
-        window.statusBarColor = palette.background
-        window.navigationBarColor = if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt()
         tint(root, palette.text)
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
@@ -490,7 +526,7 @@ private var exportDialog: Dialog? = null
         }
         refreshControls()
         refreshAll()
-        listOf(sourceDialog, infoDialog, exportDialog).forEach { dialog ->
+        listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog).forEach { dialog ->
             if (dialog?.isShowing == true) {
                 val content = dialog.findViewById<ViewGroup>(android.R.id.content)
                 if (content != null) ThemeUi.applyTheme(content, palette)
@@ -501,12 +537,27 @@ private var exportDialog: Dialog? = null
     }
 
     private fun tint(view: View, color: Int) {
+        window.statusBarColor = palette.background
+        window.navigationBarColor = if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt()
         ThemeUi.applyTheme(view, palette)
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.setSystemBarsAppearance(
                 if (dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
                 WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             )
+        } else {
+            @Suppress("DEPRECATION")
+            var flags = window.decorView.systemUiVisibility
+            if (Build.VERSION.SDK_INT >= 23) {
+                flags = if (dark) flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                else flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            }
+            if (Build.VERSION.SDK_INT >= 26) {
+                flags = if (dark) flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                else flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
         }
     }
 
@@ -525,7 +576,7 @@ private var exportDialog: Dialog? = null
         visualization.playing = playing
         curve.playing = playing
         if (::lyricsView.isInitialized) lyricsView.setPosition(((if (isLive) 0.0 else player?.position ?: 0.0) * 1000).toLong())
-        songTitle.text = currentItem?.name ?: "未选择歌曲"
+        songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: "未选择歌曲"
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
         durationTime.text = time(player?.duration ?: 0.0)
@@ -556,6 +607,16 @@ private var exportDialog: Dialog? = null
             exportButton.contentDescription = if (isLive) "录制电台最终输出" else "导出当前音频"
         }
         if (::radioRefreshButton.isInitialized) radioRefreshButton.visibility = if (isLive) View.VISIBLE else View.GONE
+        if (::favoriteButton.isInitialized) {
+            val item = currentItem
+            val local = !isLive && item != null && item.uri.isNotBlank() && !item.uri.startsWith("http")
+            favoriteButton.visibility = if (local) View.VISIBLE else View.GONE
+            if (local) {
+                val favorite = musicStore.isFavorite(item.id)
+                favoriteButton.setImageDrawable(jiangyi.spatial8d.ui.HeartDrawable(favorite))
+                favoriteButton.contentDescription = if (favorite) "取消收藏" else "收藏"
+            }
+        }
         if (!seeking) seek.progress = if (player?.duration ?: 0.0 > 0)
             (player!!.position / player.duration * 1000).toInt() else 0
         durationHint.text = if (player?.duration ?: 0.0 > 0) time(player!!.duration / transform.speed) else "--:--"
@@ -596,7 +657,8 @@ private var exportDialog: Dialog? = null
         playbackStatus = if (transform.active) "音频已更新（${formatSpeedShort(transform.speed)}× · ${transform.semi.toInt()}半音）"
             else "已恢复原始速度"
         savePlaybackState()
-        refreshPlayback()
+        // 所有滑块、快捷标签、下拉和实际 transform 共用同一次回写，避免只改引擎不改文字。
+        refreshAll()
     }
 
     private fun updateParameter(key: String, value: Double) {
@@ -619,7 +681,7 @@ private var exportDialog: Dialog? = null
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
         }
-        // 曲线/滑块修改后，同时同步中间下拉文本、全部展开控件与预设说明。
+        // 滑块或方向按钮修改后，同时同步中间下拉文本、全部展开控件与预设说明。
         service?.player?.preset = preset
         service?.radio?.preset = preset
         service?.radio?.denoise = transform.denoiseLevel
@@ -676,9 +738,18 @@ private var exportDialog: Dialog? = null
                 songs = result.toMutableList()
                 queue = musicStore.view(songs)
                 playbackStatus = "音乐库 ${songs.size} 首"
+                scheduleLyricsPrefetch()
                 refreshPlayback()
             }
         }.start()
+    }
+
+    private val prefetchLyrics = Runnable { lyrics.prefetch(songs.toList()) }
+
+    private fun scheduleLyricsPrefetch() {
+        main.removeCallbacks(prefetchLyrics)
+        // 冷启动先完成恢复与当前歌词请求，再串行补曲库缓存，避免争抢首屏网络。
+        main.postDelayed(prefetchLyrics, 8_000)
     }
 
     private fun load(item: MusicItem) {
@@ -699,7 +770,10 @@ private var exportDialog: Dialog? = null
         if (autoplay) autoplayRequests++ else autoplayRequests = 0
         val resumePosition = if (autoplay) 0.0 else restorePosition
         service?.player?.stop()
-        service?.player?.onEnd = { main.post { if (generation == loadGeneration) next(auto = true) } }
+        service?.player?.onEnd = {
+            Log.i("8DQueue", "track ended generation=$generation")
+            main.post { if (generation == loadGeneration) next(auto = true) }
+        }
         service?.player?.onError = { main.post { if (generation == loadGeneration) toast(it) } }
         currentItem = item
         loadLyrics(item)
@@ -707,8 +781,8 @@ private var exportDialog: Dialog? = null
         currentIndex = queue.indexOfFirst { it.id == item.id && it.uri == item.uri }
         currentQueue = queue
         currentUri = item.uri
-        songTitle.text = item.name
-        playbackStatus = "正在解码 ${item.name}…"
+        songTitle.text = Lyrics.displayTitle(item.name)
+        playbackStatus = "正在准备播放…"
         Thread {
             try {
                 val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
@@ -720,13 +794,13 @@ private var exportDialog: Dialog? = null
                 try {
                     if (stream != null) AudioDecoder(this).decode(stream, { percent ->
                         main.post { if (generation == loadGeneration && service?.player?.isPlaying != true) {
-                            playbackStatus = "加载 $percent% · ${item.name}"; refreshPlayback()
+                            playbackStatus = "正在准备播放…"; refreshPlayback()
                         } }
                     }, { generation == loadGeneration }, onHead = { head, _ ->
                         main.post { prepareLoaded(item, head, autoplay, resumePosition, generation) }
                     }) else AudioDecoder(this).decode(musicStore.readableUri(item), { percent ->
                     main.post { if (generation == loadGeneration && service?.player?.isPlaying != true) {
-                        playbackStatus = "解码 $percent% · ${item.name}"; refreshPlayback()
+                        playbackStatus = "正在准备播放…"; refreshPlayback()
                     } }
                 }, { generation == loadGeneration }, onHead = { head, _ ->
                     main.post { prepareLoaded(item, head, autoplay, resumePosition, generation) }
@@ -734,7 +808,7 @@ private var exportDialog: Dialog? = null
                 } finally { stream?.close() }
                 main.post {
                     if (generation == loadGeneration) {
-                        if (service?.player?.isPlaying != true) playbackStatus = "解码完成 · ${item.name}"
+                        if (service?.player?.isPlaying != true) playbackStatus = "已就绪，可播放"
                         refreshPlayback()
                     }
                 }
@@ -762,8 +836,9 @@ private var exportDialog: Dialog? = null
         service?.player?.preset = preset
         service?.player?.transform = transform
         service?.player?.reverse = reverse
-        service?.player?.seek(resumePosition)
-        playbackStatus = "已加载 ${item.name} · ${head.sampleRate} Hz"
+        // prepare 已把起点设为零；恢复位置时再定位一次，避免连续重建两代渲染缓存。
+        if (resumePosition > 0.0) service?.player?.seek(resumePosition)
+        playbackStatus = "已加载 · ${head.sampleRate} Hz"
         seekGuardUntil = SystemClock.elapsedRealtime() + 1500
         if (!item.uri.startsWith("http")) preferences.edit().putString("lastUri", item.uri).apply()
         if (autoplayRequests > 0) {
@@ -774,28 +849,42 @@ private var exportDialog: Dialog? = null
         savePlaybackState()
     }
 
-    private fun restoreLast() {
+    private fun adoptOrRestorePlayback() {
+        if (currentItem != null) return
         val uri = restoreUri ?: preferences.getString("lastUri", null) ?: return
+        val item = songs.firstOrNull { it.uri == uri }
+        if (item == null) {
+            currentUri = uri
+            return
+        }
         currentUri = uri
-        currentItem = songs.firstOrNull { it.uri == uri }
-        currentItem?.let { load(it, false) }
+        currentItem = item
+        currentQueue = queue
+        currentIndex = queue.indexOfFirst { it.id == item.id && it.uri == item.uri }
+        songTitle.text = Lyrics.displayTitle(item.name)
+        if (service?.player?.isPrepared == true) {
+            // Activity 重建时播放器仍在运行，直接接管真实播放头，不能再次 stop/load 清零进度。
+            restorePosition = 0.0
+            refreshPlayback()
+        } else {
+            // 进程被回收后服务为空，再从持久化位置恢复为暂停状态。
+            load(item, false)
+        }
     }
 
     private fun restorePlaybackState() {
         val text = preferences.getString("playbackState", null) ?: return
         try {
             val state = JSONObject(text)
-            preset = SpacePreset("标准绕头 · 默认", "", state.getDouble("period"),
-                state.getDouble("elev"), state.getDouble("depth"), state.getDouble("phase"),
-                state.getDouble("direction"), state.getDouble("width"), state.getDouble("room"),
-                state.getDouble("rt60"), state.getDouble("wet"), state.getBoolean("raw"))
-            val builtInName = matchPresetIn(SPACE_PRESETS, preset.period,
-                preset.elev, preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-                preset.direction, preset.width, preset.raw)
-            val name = if (builtInName != "自定义") builtInName else matchPresetIn(SPACE_PRESETS + customPresets, preset.period,
-                preset.elev, preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-                preset.direction, preset.width, preset.raw)
-            preset = preset.copy(name = name)
+            preset = try {
+                val restored = SpacePreset("标准绕头 · 默认", "", state.getDouble("period"),
+                    state.getDouble("elev"), state.getDouble("depth"), state.getDouble("phase"),
+                    state.getDouble("direction"), state.getDouble("width"), state.getDouble("room"),
+                    state.getDouble("rt60"), state.getDouble("wet"), state.getBoolean("raw"))
+                matchingPresetOrDefault(restored, SPACE_PRESETS + customPresets)
+            } catch (_: Exception) {
+                DEFAULT_SPACE_PRESET
+            }
             reverse = state.getBoolean("reverse")
             transform = TransformParams(state.getDouble("speed"), state.getDouble("semi"),
                 state.getBoolean("tape"), denoise = state.optInt("denoise", 65))
@@ -822,8 +911,10 @@ private var exportDialog: Dialog? = null
     override fun songs(): List<MusicItem> = songs
 
     override fun onPause() {
-        // 页面不可见时 ticker 直接返回，曲线和小球也停止请求动画帧。
+        // 取消而不是只 return，避免后台保留无意义的 UI 任务。
         pageActive = false
+        main.removeCallbacks(ticker)
+        main.removeCallbacks(prefetchLyrics)
         savePlaybackState()
         super.onPause()
     }
@@ -833,6 +924,10 @@ private var exportDialog: Dialog? = null
         pageActive = true
         tint(root, palette.text)
         refreshPlayback()
+        // onPause 已取消 ticker；每次回到前台都必须重新建立唯一刷新循环。
+        main.removeCallbacks(ticker)
+        main.post(ticker)
+        scheduleLyricsPrefetch()
     }
 
     override fun onStop() {
@@ -870,7 +965,7 @@ private var exportDialog: Dialog? = null
         if (!auto) autoplayRequests = 0
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (currentItem != null && items.indexOfFirst { it.uri == currentUri } < 0) {
-            if (auto) service?.player?.replay() else load(currentItem!!)
+            if (auto) service?.player?.replay(forcePlay = true) else load(currentItem!!)
             return
         }
         if (items.isEmpty()) {
@@ -880,7 +975,7 @@ private var exportDialog: Dialog? = null
             return
         }
         if (auto && currentMode() == PlayMode.LOOP_ONE) {
-            service?.player?.replay()
+            service?.player?.replay(forcePlay = true)
             return
         }
         val current = items.indexOfFirst { it.uri == currentUri }
@@ -889,6 +984,7 @@ private var exportDialog: Dialog? = null
             else -> (current + 1 + items.size) % items.size
         }
         currentQueue = items
+        Log.i("8DQueue", "next auto=$auto index=$nextIndex title=${items[nextIndex].name}")
         load(items[nextIndex])
     }
 
@@ -916,6 +1012,20 @@ private var exportDialog: Dialog? = null
 
     private fun togglePlaylist() {
         if (playlistDialog?.isShowing() == true) playlistDialog?.dismiss() else showPlaylist()
+    }
+
+    private fun showVisualizerSheet() {
+        if (visualizerDialog?.isShowing == true) return
+        val dialog = ThemeUi.showSheet(this, palette, "音频可视化", "实际输出 · 独立图表 · 全屏展示",
+            fullHeight = true, scrollable = false) {
+            popupVisualizer = jiangyi.spatial8d.ui.VisualizerView(this@MainActivity).apply {
+                dark = this@MainActivity.dark
+            }
+            addView(popupVisualizer, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        dialog.setOnDismissListener { popupVisualizer = null }
+        visualizerDialog = dialog
+        dialog.show()
     }
 
     override fun addAudio() = openAudio.launch(arrayOf("audio/*"))
@@ -1021,19 +1131,42 @@ private var exportDialog: Dialog? = null
         if ("media" == uri.authority) contentResolver.delete(uri, "${MediaStore.Audio.Media.IS_PENDING}=1", null)
     }
 
-    private fun pickOption(title: String, names: List<String>, selected: Int, action: (Int) -> Unit) {
+    private fun pickOption(title: String, names: List<String>, selected: Int, twoColumns: Boolean = false,
+        action: (Int) -> Unit) {
         lateinit var dialog: Dialog
         dialog = ThemeUi.showSheet(this, palette, title, compactPicker = true) {
-            names.forEachIndexed { index, name ->
-                addView(ThemeUi.text(this@MainActivity, name, 13f, palette,
+            fun option(index: Int) = ThemeUi.text(this@MainActivity, names[index],
+                if (twoColumns) 11f else 13f, palette,
                     bold = index == selected, role = if (index == selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(ThemeUi.dp(this@MainActivity, 14f), 0, ThemeUi.dp(this@MainActivity, 14f), 0)
-                    layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 38f))
+                    ThemeUi.hideOverflow(this)
+                    setPadding(ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 10f), 0)
                     background = ThemeUi.bgDrawable(this@MainActivity,
                         if (index == selected) palette.surfaceAlt else palette.surface, 8f)
                     setOnClickListener { dialog.dismiss(); action(index) }
-                })
+                }
+            if (twoColumns) {
+                names.indices.chunked(2).forEach { rowIndices ->
+                    addView(ThemeUi.row(this@MainActivity).apply {
+                        rowIndices.forEach { index ->
+                            addView(option(index), LinearLayout.LayoutParams(0,
+                                ThemeUi.dp(this@MainActivity, 38f), 1f).apply {
+                                if (index % 2 == 0) rightMargin = ThemeUi.dp(this@MainActivity, 4f)
+                                bottomMargin = ThemeUi.dp(this@MainActivity, 4f)
+                            })
+                        }
+                        // 奇数个选项时保留右侧空白，不让最后一项拉伸成整行。
+                        if (rowIndices.size == 1) addView(View(this@MainActivity),
+                            LinearLayout.LayoutParams(0, 1, 1f).apply {
+                                leftMargin = ThemeUi.dp(this@MainActivity, 4f)
+                            })
+                    })
+                }
+            } else {
+                names.forEachIndexed { index, _ ->
+                    addView(option(index), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                        ThemeUi.dp(this@MainActivity, 38f)))
+                }
             }
         }
         dialog.show()
@@ -1072,7 +1205,7 @@ private var exportDialog: Dialog? = null
                 curve.position = it.position
             }
             if (SystemClock.uptimeMillis() - lastStateSavedAt >= 5000) savePlaybackState()
-            main.postDelayed(this, 100)
+            main.postDelayed(this, 200)
         }
     }
     private fun navbar(): LinearLayout {
@@ -1145,8 +1278,13 @@ private var exportDialog: Dialog? = null
                 setPadding(ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 24f), 0)
                 layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 168f), ThemeUi.dp(this@MainActivity, 32f), Gravity.CENTER)
                 setOnClickListener {
-                    val all = SPACE_PRESETS + customPresets
-                    pickOption("选择空间风格", all.map { it.name }, all.indexOf(preset)) {
+                    // 快速选择只调整展示顺序，保持内置和自定义预设原值不变。
+                    val pinned = listOfNotNull(SPACE_PRESETS.firstOrNull { it.raw },
+                        SPACE_PRESETS.firstOrNull { !it.raw })
+                    val all = pinned + (SPACE_PRESETS + customPresets).filter { it !in pinned }
+                        .sortedWith(compareBy({ it.room }, { it.name }))
+                    pickOption("选择空间风格 · 房间由小到大", all.map { "${it.name} · ${it.room.toInt()} 米" },
+                        all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
                 }
@@ -1166,11 +1304,12 @@ private var exportDialog: Dialog? = null
             })
             addView(header)
             presetNote = ThemeUi.text(this@MainActivity, preset.note, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 5f), 0, ThemeUi.dp(this@MainActivity, 5f))
+                setPadding(0, ThemeUi.dp(this@MainActivity, 5f), 0, 0)
             }
-            addView(presetNote)
             parameterPanel = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
             addView(parameterPanel)
+            // 折叠时与音频变换共用相同的一行头部；说明跟随展开面板展示。
+            parameterPanel.addView(presetNote)
             parameterPanel.addView(ThemeUi.divider(this@MainActivity, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 1f)).apply {
                     topMargin = ThemeUi.dp(this@MainActivity, 9f); bottomMargin = ThemeUi.dp(this@MainActivity, 9f)
@@ -1289,8 +1428,10 @@ private var exportDialog: Dialog? = null
                 ThemeUi.hideOverflow(this)
                 layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 168f), ThemeUi.dp(this@MainActivity, 32f), Gravity.CENTER)
                 setOnClickListener {
-                    pickOption("选择变声风格", PITCH_PRESETS.map { formatPitchLabel(it.name, it.semi) }, PITCH_PRESETS.indexOfFirst { it.semi == transform.semi }) {
-                        transform = transform.copy(semi = PITCH_PRESETS[it].semi); applyTransform(); refreshAll()
+                    val options = interleavedPitchOptions(PITCH_PRESETS)
+                    pickOption("选择变声风格 · 从原声开始", options.map { formatPitchLabel(it.name, it.semi) },
+                        options.indexOfFirst { it.semi == transform.semi }, twoColumns = true) {
+                        transform = transform.copy(semi = options[it].semi); applyTransform(); refreshAll()
                     }
                 }
             }
@@ -1457,11 +1598,14 @@ private var exportDialog: Dialog? = null
 
     private fun curveCard(): LinearLayout {
         val card = card {
-            addView(tabRow(listOf("空间曲线", "同步歌词"), curvePanel) {
+            addView(tabRow(listOf("空间曲线", "音频图谱", "可视化", "同步歌词"), curvePanel, compact = true) {
                 curvePanel = it
                 curve.visibility = if (it == 0) View.VISIBLE else View.GONE
-                lyricsView.visibility = if (it == 1) View.VISIBLE else View.GONE
-                curveLegend.visibility = if (it == 0) View.VISIBLE else View.GONE
+                waveformView.visibility = if (it == 1) View.VISIBLE else View.GONE
+                visualizerView.visibility = if (it == 2) View.VISIBLE else View.GONE
+                lyricsView.visibility = if (it == 3) View.VISIBLE else View.GONE
+                // 三个图表面板保留同样的图例占位，切换时卡片高度不跳动。
+                curveLegend.visibility = if (it == 0) View.VISIBLE else View.INVISIBLE
             })
             curveLegend = ThemeUi.row(this@MainActivity).apply {
                 listOf(
@@ -1489,37 +1633,52 @@ private var exportDialog: Dialog? = null
                 }
             }
             addView(curveLegend)
-            val available = (resources.displayMetrics.heightPixels / resources.displayMetrics.density - 52 - 184 - 216).coerceAtLeast(200f)
-            curve = CurveView(this@MainActivity).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, available * 0.38f))
-                onSlide = { key, value -> updateParameter(key, value) }
+            curveContent = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 140f))
             }
-            addView(curve)
+            curve = CurveView(this@MainActivity)
+            curveContent.addView(curve, LinearLayout.LayoutParams(-1, -1))
             lyricsView = LyricsView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
-                layoutParams = curve.layoutParams
+                onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
                 visibility = View.GONE
             }
-            addView(lyricsView)
+            curveContent.addView(lyricsView, LinearLayout.LayoutParams(-1, -1))
+            waveformView = WaveformView(this@MainActivity).apply {
+                dark = this@MainActivity.dark
+                visibility = View.GONE
+            }
+            curveContent.addView(waveformView, LinearLayout.LayoutParams(-1, -1))
+            visualizerView = VisualizerView(this@MainActivity).apply {
+                dark = this@MainActivity.dark
+                visibility = View.GONE
+                onExpand = { showVisualizerSheet() }
+            }
+            curveContent.addView(visualizerView, LinearLayout.LayoutParams(-1, -1))
+            addView(curveContent)
         }
         return card
     }
 
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */
-    private fun loadLyrics(item: MusicItem) {
+    private fun loadLyrics(item: MusicItem, manualTitle: String? = null) {
         val generation = ++lyricsGeneration
         if (::lyricsView.isInitialized) lyricsView.clear()
-        val title = item.name.substringBeforeLast('.').substringBefore(" - ").substringBefore(" · ")
-        lyrics.load(title, item.artist, item.duration / 1000.0) { result ->
+        val title = manualTitle ?: Lyrics.searchTitle(item.name, item.artist)
+        lyrics.load(title, item.artist, item.duration / 1000.0, { result ->
             if (generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
-            lyricsView.setLyrics(result.getOrNull())
-        }
+            result.onSuccess { lyricsView.setLyrics(it) }
+                .onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
+        }, { progress ->
+            if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
+        })
     }
 
     private fun nowPlayingBar(): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 12f))
+            setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 8f))
             bg(this, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
             gravity = Gravity.BOTTOM
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
@@ -1604,6 +1763,7 @@ private var exportDialog: Dialog? = null
         timeline.addView(currentTime)
         seek = SeekBar(this).apply {
             max = 1000
+            contentDescription = "播放进度"
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                     if (fromUser) currentTime.text = time((service?.player?.duration ?: 0.0) * progress / 1000.0)
@@ -1613,7 +1773,8 @@ private var exportDialog: Dialog? = null
                     val target = (service?.player?.duration ?: 0.0) * seekBar.progress / 1000.0
                     // 加载回灌产生的伪拖动不能跳曲；真正手势低于 0.8 秒也直接忽略。
                     if (SystemClock.elapsedRealtime() >= seekGuardUntil &&
-                        kotlin.math.abs(target - (service?.player?.position ?: 0.0)) >= 0.8) service?.player?.seek(target)
+                        kotlin.math.abs(target - (service?.player?.position ?: 0.0)) >= 0.8)
+                        service?.player?.seek(target, userInitiated = true)
                     seeking = false
                     refreshPlayback()
                 }
@@ -1668,14 +1829,31 @@ private var exportDialog: Dialog? = null
         controls.addView(LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.RIGHT
-            addView(iconControl(jiangyi.spatial8d.R.drawable.ic_list) { togglePlaylist() })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.RIGHT
+                favoriteButton = iconControl(0) {
+                    val item = currentItem ?: return@iconControl
+                    if (isLive || item.uri.isBlank() || item.uri.startsWith("http")) return@iconControl
+                    musicStore.toggleFavorite(item.id)
+                    playbackStatus = if (musicStore.isFavorite(item.id)) "已加入收藏" else "已取消收藏"
+                    queue = musicStore.view(songs)
+                    if (musicStore.playlistIndex == jiangyi.spatial8d.data.FAVORITES_INDEX) currentQueue = queue
+                    refreshPlayback()
+                    if (playlistDialog?.isShowing() == true) playlistDialog?.refreshContent()
+                }
+                addView(favoriteButton)
+                addView(iconControl(jiangyi.spatial8d.R.drawable.ic_list) { togglePlaylist() }.apply {
+                    (layoutParams as LinearLayout.LayoutParams).leftMargin = ThemeUi.dp(this@MainActivity, 6f)
+                })
+            })
         })
         bar.addView(controls)
         return bar
     }
 
     private fun iconControl(icon: Int, big: Boolean = false, action: () -> Unit): ImageButton = ImageButton(this).apply {
-        setImageResource(icon)
+        if (icon != 0) setImageResource(icon)
         scaleType = ImageView.ScaleType.CENTER_INSIDE
         imageTintList = ColorStateList.valueOf(if (big) 0xffffffff.toInt() else palette.controlText)
         tag = if (big) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
@@ -1813,6 +1991,10 @@ private var exportDialog: Dialog? = null
                         val opening = infoExpanded != index
                         infoExpanded = if (opening) index else -1
                         desc.visibility = if (opening) View.VISIBLE else View.GONE
+                        if (opening) desc.post {
+                            // 展开靠近底部的参数时，把完整说明带进可视区，其余内容仍可手动滚动。
+                            (desc.parent?.parent as? android.widget.ScrollView)?.smoothScrollTo(0, desc.top)
+                        }
                     }
                 })
                 desc = ThemeUi.text(this@MainActivity, info.desc, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
@@ -1825,6 +2007,10 @@ private var exportDialog: Dialog? = null
             addView(ThemeUi.text(this@MainActivity, "曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", 12f, palette, role = ThemeUi.ROLE_SUB))
         }
         infoDialog?.show()
+        (infoDialog?.window?.decorView?.findViewWithTag<View>("sheetBody")?.parent as? android.widget.ScrollView)?.apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = true
+        }
     }
 
     private fun showExportSheet() {
@@ -1951,15 +2137,33 @@ private var exportDialog: Dialog? = null
     }
 
     /** 选择器保持单行横向滚动，长目录不会挤压播放列表的可视区域。 */
-    private fun tabRow(labels: List<String>, selected: Int, action: (Int) -> Unit): LinearLayout =
+    private fun tabRow(labels: List<String>, selected: Int, compact: Boolean = false,
+        action: (Int) -> Unit): LinearLayout =
         ThemeUi.row(this).apply {
-            setPadding(0, ThemeUi.dp(this@MainActivity, 5f), 0, ThemeUi.dp(this@MainActivity, 5f))
+            val padding = if (compact) 2f else 5f
+            setPadding(0, ThemeUi.dp(this@MainActivity, padding), 0, ThemeUi.dp(this@MainActivity, padding))
             background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 10f)
             labels.forEachIndexed { i, label ->
                 addView(ThemeUi.button(this@MainActivity, palette, label,
-                    if (i == selected) ThemeUi.ROLE_SURFACE_ALT else ThemeUi.ROLE_CONTROL) { action(i) }.apply {
-                    if (i == selected) setTextColor(palette.accent)
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 36f), 1f)
+                    if (i == selected) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT) {
+                        // 点击后同步整排按钮的角色与颜色，不能只切内容而保留首项高亮。
+                        for (index in 0 until childCount) {
+                            (getChildAt(index) as? Button)?.let { button ->
+                                button.tag = if (index == i) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
+                                button.setTextColor(if (index == i) palette.accent else palette.sub)
+                                ThemeUi.applyButton(button, palette)
+                            }
+                        }
+                        action(i)
+                    }.apply {
+                    if (i == selected) setTextColor(palette.accent) else setTextColor(palette.sub)
+                    if (compact) {
+                        minHeight = 0
+                        minimumHeight = 0
+                        setPadding(0, 0, 0, 0)
+                    }
+                    layoutParams = LinearLayout.LayoutParams(0,
+                        ThemeUi.dp(this@MainActivity, if (compact) 28f else 36f), 1f)
                 })
             }
         }
@@ -2362,5 +2566,27 @@ private var exportDialog: Dialog? = null
             if (uri != null) contentResolver.delete(uri, null, null)
             playbackStatus = "录音保存失败：${e.message}"
         } finally { file.delete(); refreshPlayback() }
+    }
+
+    companion object {
+        internal fun matchingPresetOrDefault(candidate: SpacePreset, presets: List<SpacePreset>): SpacePreset {
+            val name = matchPresetIn(presets, candidate.period, candidate.elev, candidate.depth,
+                candidate.room, candidate.wet, candidate.rt60, candidate.phase,
+                candidate.direction, candidate.width, candidate.raw)
+            return presets.firstOrNull { it.name == name } ?: DEFAULT_SPACE_PRESET
+        }
+
+        internal fun interleavedPitchOptions(presets: List<PitchPreset>): List<PitchPreset> {
+            val original = presets.first { it.semi == 0.0 }
+            val negative = presets.filter { it.semi < 0.0 }.sortedByDescending { it.semi }
+            val positive = presets.filter { it.semi > 0.0 }.sortedBy { it.semi }
+            return buildList {
+                add(original); add(original)
+                for (i in 0 until maxOf(negative.size, positive.size)) {
+                    if (i < negative.size) add(negative[i])
+                    if (i < positive.size) add(positive[i])
+                }
+            }
+        }
     }
 }

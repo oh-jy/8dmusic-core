@@ -83,15 +83,18 @@ Ctrl ctrl(double t,const Params&p,double makeup){double th=azimuth(t,p),s=std::s
     return {.5*.63/1000*p.sr*(1+s)*w,.5*.63/1000*p.sr*(1-s)*w,sl*w,sr*w,std::clamp(-cs,0.0,1.0),std::clamp(p.sr/f0,3.0,16.0),.12+.42*ap,
         std::pow(10,-18*d*far/20),std::pow(10,-14*d*std::pow(far,1.15)/20),1-.18*w*(.5-.5*s),1-.18*w*(.5+.5*s),std::pow(10,-7*sl*w/20),std::pow(10,-7*sr*w/20)};
 }
-struct Noise {double hc,ea,er,ga,gr,floor,xl=0,xr=0,yl=0,yr=0,e=0,g=1;Noise(double sr,int level):hc(std::exp(-2*PI*30/sr)),ea(std::exp(-1/(.005*sr))),er(std::exp(-1/(.08*sr))),ga(std::exp(-1/(.008*sr))),gr(std::exp(-1/(.12*sr))),floor(1-std::clamp(level,0,100)/100.0*.58){}
-void run(double&l,double&r){double l0=hc*(yl+l-xl),r0=hc*(yr+r-xr);xl=l;xr=r;yl=l0;yr=r0;double v=std::max(std::abs(l0),std::abs(r0));e=e*(v>e?ea:er)+v*(1-(v>e?ea:er));double want=e<.008?floor+(1-floor)*std::pow(e/.008,2):1;g=g*(want<g?ga:gr)+want*(1-(want<g?ga:gr));l=l0*g;r=r0*g;}};
+// 保守软门限：只压底噪，尽可能保留人声尾音、空间混响和弱背景。
+struct Noise {double hc,ea,er,ga,gr,floor,xl=0,xr=0,yl=0,yr=0,e=0,g=1;Noise(double sr,int level):hc(std::exp(-2*PI*30/sr)),ea(std::exp(-1/(.005*sr))),er(std::exp(-1/(.08*sr))),ga(std::exp(-1/(.012*sr))),gr(std::exp(-1/(.25*sr))),floor(1-std::clamp(level,0,100)/100.0*.10){}
+void run(double&l,double&r){double l0=hc*(yl+l-xl),r0=hc*(yr+r-xr);xl=l;xr=r;yl=l0;yr=r0;double v=std::max(std::abs(l0),std::abs(r0));e=e*(v>e?ea:er)+v*(1-(v>e?ea:er));double want=e<.004?floor+(1-floor)*std::pow(e/.004,2):1;g=g*(want<g?ga:gr)+want*(1-(want<g?ga:gr));l=l0*g;r=r0*g;}};
 struct Renderer {
     Params p;Ring in{96};Channel l,r;Reverb rev;Noise noise;double makeup,lim=1,peak=0,lr,olim=1,opeak=0,olr;
     bool hasStreamPos=false;long streamPos=0;
-    Renderer(const Params&p):p(p),rev(p),noise(p.sr,p.denoise),makeup(std::clamp(1/(std::pow(10,-18*(p.depth/100)/2/20)*.47),.9,4.0)),lr(std::exp(-1/(.08*p.sr))),olr(std::exp(-1/(.12*p.sr))){}
-    void block(const std::vector<float>&pcm,long start,int n,std::vector<int16_t>&out,long inputOffset=0){
-        for(int base=0;base<n;base+=64){int m=std::min(64,n-base);Ctrl a=ctrl((start+base)/p.sr,p,makeup),b=ctrl((start+base+m)/p.sr,p,makeup);
-            for(int k=0;k<m;k++){double u=double(k+1)/m;auto v=[&](double Ctrl::*q){return a.*q+(b.*q-a.*q)*u;};double x=pcm[start+base+k-inputOffset];in.write(x);
+    // Reverb 保存引用，必须绑定已复制成员；构造形参在构造结束后即失效。
+    Renderer(const Params&p):p(p),rev(this->p),noise(p.sr,p.denoise),makeup(std::clamp(1/(std::pow(10,-18*(p.depth/100)/2/20)*.47),.9,4.0)),lr(std::exp(-1/(.08*p.sr))),olr(std::exp(-1/(.12*p.sr))){}
+    void block(const std::vector<float>&pcm,long start,int n,std::vector<int16_t>&out,long inputOffset=0,int fadeFrames=0,long timelineOffset=0){
+        const long timelineStart=start+timelineOffset;
+        for(int base=0;base<n;base+=64){int m=std::min(64,n-base);Ctrl a=ctrl((timelineStart+base)/p.sr,p,makeup),b=ctrl((timelineStart+base+m)/p.sr,p,makeup);
+            for(int k=0;k<m;k++){long pos=start+base+k;double u=double(k+1)/m;auto v=[&](double Ctrl::*q){return a.*q+(b.*q-a.*q)*u;};double x=pcm[start+base+k-inputOffset];in.write(x);
                 double ll=in.read(v(&Ctrl::dl)),rr=in.read(v(&Ctrl::dr));
                 double hl=l.shadow.x1-l.shadow.run(ll);ll=ll-.55*v(&Ctrl::sl)*hl;ll=ll*(1-.12*v(&Ctrl::sl))+l.tilt.run(ll)*(.12*v(&Ctrl::sl));ll*=v(&Ctrl::gl);
                 double hr=r.shadow.x1-r.shadow.run(rr);rr=rr-.55*v(&Ctrl::sr)*hr;rr=rr*(1-.12*v(&Ctrl::sr))+r.tilt.run(rr)*(.12*v(&Ctrl::sr));rr*=v(&Ctrl::gr);
@@ -99,10 +102,16 @@ struct Renderer {
                 l.notch.write(ll);ll-=v(&Ctrl::ng)*l.notch.read(v(&Ctrl::dn));r.notch.write(rr);rr-=v(&Ctrl::ng)*r.notch.read(v(&Ctrl::dn));ll*=v(&Ctrl::gd);rr*=v(&Ctrl::gd);
                 l.h4=l.h3;l.h3=l.h2;l.h2=l.h1;l.h1=ll;double lo=l.a3.run(l.a2.run(l.a1.run(ll)));ll=lo+(l.h4-lo)*v(&Ctrl::gh);
                 r.h4=r.h3;r.h3=r.h2;r.h2=r.h1;r.h1=rr;lo=r.a3.run(r.a2.run(r.a1.run(rr)));rr=lo+(r.h4-lo)*v(&Ctrl::gh);
-                ll=ll*v(&Ctrl::pl)*makeup;rr=rr*v(&Ctrl::pr)*makeup;double pk=std::max(std::abs(ll),std::abs(rr));peak=pk>peak?pk:peak*lr;double want=peak>1e-9?std::min(1.0,.89/peak):1;lim=want<lim?want:lim*lr+want*(1-lr);ll*=lim;rr*=lim;
-                rev.gh=v(&Ctrl::gh);double wl,wr;rev.run(x,wl,wr);double far=.5*(1+std::sin(2*PI/std::clamp(1.5*p.period,8.0,16.0)*(start+base+k)/p.sr)),d=p.depth/100;
+                ll=ll*v(&Ctrl::pl)*makeup;rr=rr*v(&Ctrl::pr)*makeup;double pk=std::max(std::abs(ll),std::abs(rr));
+                peak=pk>peak?pk:peak*lr;double want=peak>1e-9?std::min(1.0,.89/peak):1;lim=want<lim?want:lim*lr+want*(1-lr);ll*=lim;rr*=lim;
+                rev.gh=v(&Ctrl::gh);double wl,wr;rev.run(x,wl,wr);double far=.5*(1+std::sin(2*PI/std::clamp(1.5*p.period,8.0,16.0)*(timelineStart+base+k)/p.sr)),d=p.depth/100;
                 double gd=1-.45*d*far,gw=1+1.8*d*far;ll=ll*gd+wl*gw;rr=rr*gd+wr*gw;if(p.denoise>0)noise.run(ll,rr);
-                long pos=start+base+k;double gain=pos<p.sr*2?std::pow(pos/(p.sr*2),2)*(3-2*pos/(p.sr*2)):1;ll*=gain;rr*=gain;pk=std::max(std::abs(ll),std::abs(rr));opeak=pk>opeak?pk:opeak*olr;want=opeak>1e-9?std::min(1.0,.94/opeak):1;olim=want<olim?want:olim*olr+want*(1-olr);if(olim<1e-6)olim=0;ll*=olim;rr*=olim;
+                long fade=std::max(1L,pos<inputOffset?inputOffset-pos:pos-inputOffset);double gain=fadeFrames>0&&fade<fadeFrames?std::pow(double(fade)/fadeFrames,2)*(3-2*double(fade)/fadeFrames):1;ll*=gain;rr*=gain;pk=std::max(std::abs(ll),std::abs(rr));
+                // 包络峰值不能跟随淡入斜坡下降：它只应衡量原始信号强度。
+                // 否则首块虽从静音起播，限幅器却把随后正常波形也压到近零。
+                double envPk=fadeFrames>0&&fade<fadeFrames?pk/std::max(1e-6,gain):pk;
+                opeak=envPk>opeak?envPk:opeak*olr;want=opeak>1e-9?std::min(1.0,.94/opeak):1;olim=want<olim?want:olim*olr+want*(1-olr);
+                ll*=olim;rr*=olim;
                 out[(pos-start)*2]=std::lround(std::clamp(ll,-1.0,1.0)*32767);out[(pos-start)*2+1]=std::lround(std::clamp(rr,-1.0,1.0)*32767);
             }
         }
@@ -134,7 +143,7 @@ void render(const int16_t*bytes,long frames,const Params&p,int bpf,int ch,bool f
     std::vector<int16_t>out(frames*2);int nw=std::min(4,std::max(1,int(std::ceil(frames/(p.sr*10)))));std::atomic<int>bad{0};std::vector<std::thread>ts;
     for(int j=0;j<nw;j++){ts.emplace_back([&,j]{long a=frames*j/nw,b=frames*(j+1)/nw,warm=std::max(p.sr*2,p.sr*p.rt60*1.5),begin=std::max(0L,a-long(warm));
         if(p.raw){for(long i=a;i<b;i++){long f=p.reverse?frames-1-i:i;const unsigned char*s=reinterpret_cast<const unsigned char*>(bytes)+f*bpf;double l,r;if(flt){float x,y;std::memcpy(&x,s,4);std::memcpy(&y,s+(ch>1?4:0),4);l=x;r=y;}else{l=reinterpret_cast<const int16_t*>(s)[0]/32768.0;r=reinterpret_cast<const int16_t*>(s)[ch>1?1:0]/32768.0;}out[i*2]=std::lround(std::clamp(l,-1.0,1.0)*32767);out[i*2+1]=std::lround(std::clamp(r,-1.0,1.0)*32767);}return;}
-        Renderer renderer(p);for(long at=begin;at<b;at+=4096){int n=std::min(4096L,b-at);std::vector<int16_t>tmp(n*2);renderer.block(pcm,at,n,tmp);if(at+n>a){long skip=std::max(0L,a-at);std::copy(tmp.begin()+skip*2,tmp.end(),out.begin()+(std::max(at,a))*2);}}
+        Renderer renderer(p);for(long at=begin;at<b;at+=4096){int n=std::min(4096L,b-at);std::vector<int16_t>tmp(n*2);renderer.block(pcm,at,n,tmp,0,std::lround(p.sr*2));if(at+n>a){long skip=std::max(0L,a-at);std::copy(tmp.begin()+skip*2,tmp.end(),out.begin()+(std::max(at,a))*2);}}
     });}for(auto&t:ts)t.join();if(bad)return;
     std::vector<unsigned char>h(44);std::memcpy(h.data(),"RIFF",4);put32(h,4,frames*4+36);std::memcpy(h.data()+8,"WAVEfmt ",8);put32(h,16,16);put16(h,20,1);put16(h,22,2);put32(h,24,p.sr);put32(h,28,p.sr*4);put16(h,32,4);put16(h,34,16);std::memcpy(h.data()+36,"data",4);put32(h,40,frames*4);
     FILE*f=std::fopen(path,"wb");if(!f)throw std::string("无法创建 WAV 文件");bool ok=std::fwrite(h.data(),1,44,f)==44&&std::fwrite(out.data(),4,frames,f)==size_t(frames)&&std::fclose(f)==0;if(!ok)throw std::string("WAV 写入失败");

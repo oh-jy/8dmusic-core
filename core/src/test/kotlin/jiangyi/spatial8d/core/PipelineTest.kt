@@ -86,3 +86,14 @@ class PipelineTest {
             preset.room, preset.wet, preset.rt60, preset.phase, preset.direction, preset.width, preset.raw))
     }
 }
+
+    @Test
+    fun `playback snapshot follows pcm buffer after growth`() {
+        val pcm = PcmBuffer(44100, 2, false, 1_000_000)
+        val first = ByteArray(44100 * 4) { (it % 251).toByte() }
+        val second = ByteArray(4096 * 4) { (it % 239).toByte() }
+        pcm.append(first)
+        pcm.append(second)
+
+        assertContentEquals(second, pcm.copyFrames(44100, 4096))
+    }

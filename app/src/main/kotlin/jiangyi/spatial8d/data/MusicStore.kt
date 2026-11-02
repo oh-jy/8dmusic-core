@@ -21,10 +21,16 @@ class MusicStore(private val context: Context) {
     var manualOrder = jsonLongs(preferences.getString("manual", "[]")).toMutableList()
         private set
     val playlists = jsonPlaylists(preferences.getString("playlists", "[]")).toMutableList()
+    private val favorites = jsonLongs(preferences.getString("favorites", "[]")).toMutableSet()
+
+    fun isFavorite(id: Long) = id in favorites
 
     fun scan(): List<MusicItem> {
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf("_id", "_display_name", "_size", "duration", "artist", "album")
+        val projection = arrayOf(
+            "_id", "_display_name", "_size", "duration", "artist", "album",
+            MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.DATE_MODIFIED
+        )
         val result = mutableListOf<MusicItem>()
         context.contentResolver.query(
             collection, projection,
@@ -40,7 +46,9 @@ class MusicStore(private val context: Context) {
                     ContentUris.withAppendedId(collection, id).toString(),
                     cursor.getLong(2), duration,
                     cursor.getString(4)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知歌手",
-                    cursor.getString(5)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知专辑"
+                    cursor.getString(5)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知专辑",
+                    cursor.getLong(6) * 1000L,
+                    cursor.getLong(7) * 1000L
                 ))
             }
         }
@@ -48,7 +56,13 @@ class MusicStore(private val context: Context) {
     }
 
     fun remember(item: MusicItem) {
-        val items = loadAdded().filterNot { it.uri == item.uri } + item
+        val now = System.currentTimeMillis()
+        val old = loadAdded().firstOrNull { it.uri == item.uri }
+        val enriched = item.copy(
+            addedAt = old?.addedAt ?: now,
+            modifiedAt = now
+        )
+        val items = loadAdded().filterNot { it.uri == item.uri } + enriched
         saveAdded(items)
     }
 
@@ -61,6 +75,9 @@ class MusicStore(private val context: Context) {
      * 按歌曲 id 缓存到应用私有目录，解码器后续只读这份稳定副本，绝不改源文件。
      */
     fun readableUri(item: MusicItem): Uri {
+        // MediaStore 本地音频可被 MediaExtractor 直接随机读取，切歌不再复制整首文件。
+        // 手动 SAF 文件仍使用私有副本，保证授权 Uri 重复打开时的稳定性。
+        if (item.uri.startsWith("content://media/")) return Uri.parse(item.uri)
         val dir = File(context.filesDir, "picked").apply { mkdirs() }
         val extension = item.name.substringAfterLast('.', "mp3").lowercase()
         val target = File(dir, "music_${item.id}.$extension")
@@ -86,22 +103,30 @@ class MusicStore(private val context: Context) {
 
     fun view(songs: List<MusicItem>): List<MusicItem> {
         val playlist = playlists.getOrNull(playlistIndex)
+        val favoritesView = playlistIndex == FAVORITES_INDEX
         val q = sanitizeQuery(query).trim().lowercase()
         val filtered = songs.filter { song ->
             song.duration <= 30 * 60 * 1000 && song.id !in hidden &&
-                (playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
+                (if (favoritesView) song.id in favorites
+                    else playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
                 (q.isEmpty() || matches(song, q))
         }
         if (sort != "manual") {
-            // ICU Collator 让中文按拼音排序，与 UTS 的 Locale.CHINA 行为一致。
-            val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
-            return filtered.sortedWith(compareBy(collator) {
-                when (sort) {
-                    "artist" -> "${it.artist} ${it.name}"
-                    "album" -> "${it.album} ${it.name}"
-                    else -> it.name
-                }
-            }).let { if (ascending) it else it.reversed() }
+            val sorted = if (sort == "time") {
+                // 主按加入媒体库时间，相同时再按文件修改时间；时间缺失的排最后。
+                filtered.sortedWith(compareBy({ it.addedAt }, { it.modifiedAt }))
+            } else {
+                // ICU Collator 让中文按拼音排序，与 UTS 的 Locale.CHINA 行为一致。
+                val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
+                filtered.sortedWith(compareBy(collator) {
+                    when (sort) {
+                        "artist" -> "${it.artist} ${it.name}"
+                        "album" -> "${it.album} ${it.name}"
+                        else -> it.name
+                    }
+                })
+            }
+            return if (ascending) sorted else sorted.reversed()
         }
         val order = manualOrder.withIndex().associate { it.value to it.index }
         return filtered.sortedBy { order[it.id] ?: Int.MAX_VALUE }
@@ -178,6 +203,14 @@ class MusicStore(private val context: Context) {
         savePlaylists()
     }
 
+    fun toggleFavorite(id: Long) {
+        val next = if (id in favorites) favorites - id else favorites + id
+        favorites.clear()
+        favorites.addAll(next)
+        save("favorites", JSONArray(next.toList()).toString())
+    }
+
+
     private fun matches(song: MusicItem, query: String) = "${song.name} ${song.artist} ${song.album}".lowercase().contains(sanitizeQuery(query))
     private fun sanitizeQuery(value: String) = value.filterNot {
         // 清理输入法可能提交的零宽/控制字符，避免不可见过滤词让列表永远为空。
@@ -202,7 +235,10 @@ class MusicStore(private val context: Context) {
                 val item = array.getJSONObject(index)
                 MusicItem(
                     item.optLong("id"), item.getString("name"),
-                    item.getString("uri"), item.optLong("size")
+                    item.getString("uri"), item.optLong("size"),
+                    item.optLong("duration"), item.optString("artist", "未知歌手"),
+                    item.optString("album", "未知专辑"), item.optLong("addedAt"),
+                    item.optLong("modifiedAt")
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -218,12 +254,14 @@ class MusicStore(private val context: Context) {
         fun songJson(song: MusicItem) = JSONObject().apply {
             put("id", song.id); put("name", song.name); put("uri", song.uri); put("size", song.size)
             put("duration", song.duration); put("artist", song.artist); put("album", song.album)
+            put("addedAt", song.addedAt); put("modifiedAt", song.modifiedAt)
         }
         fun jsonSongs(text: String?): List<MusicItem> = try {
             val array = JSONArray(text ?: "[]")
             (0 until array.length()).map { array.getJSONObject(it) }.filter { it.optLong("id") != 0L && it.optString("uri").isNotBlank() }.map {
                 MusicItem(it.getLong("id"), it.getString("name"), it.getString("uri"), it.optLong("size"),
-                    it.optLong("duration"), it.optString("artist", "未知歌手"), it.optString("album", "未知专辑"))
+                    it.optLong("duration"), it.optString("artist", "未知歌手"), it.optString("album", "未知专辑"),
+                    it.optLong("addedAt"), it.optLong("modifiedAt"))
             }
         } catch (_: Exception) { emptyList() }
         private fun jsonPlaylists(text: String?): List<Playlist> = try {

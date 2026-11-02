@@ -10,12 +10,13 @@ import android.graphics.Path
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
+import android.graphics.Rect
 import android.os.SystemClock
+import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
 import jiangyi.spatial8d.core.SpaceFrame
 import jiangyi.spatial8d.core.SpacePreset
-import jiangyi.spatial8d.core.clampSlider
 import jiangyi.spatial8d.core.earGains
 import jiangyi.spatial8d.core.earRange
 import jiangyi.spatial8d.core.frameAt
@@ -29,6 +30,56 @@ import kotlin.math.sqrt
 
 private const val SIN_T = 0.4067f
 private const val COS_T = 0.9135f
+private const val FRAME_DELAY_MS = 33L
+
+abstract class AnimatedCanvasView internal constructor(context: Context) : View(context) {
+    private var animationScheduled = false
+    private val visibleBounds = Rect()
+    private val frameCallback = Choreographer.FrameCallback {
+        animationScheduled = false
+        if (canAnimate()) {
+            invalidate()
+            scheduleAnimation()
+        }
+    }
+
+    abstract var playing: Boolean
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        updateAnimation()
+    }
+
+    override fun onDetachedFromWindow() {
+        stopAnimation()
+        super.onDetachedFromWindow()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        updateAnimation()
+    }
+
+    protected fun updateAnimation() {
+        if (canAnimate()) scheduleAnimation() else stopAnimation()
+    }
+
+    // isShown 不会排除 ScrollView 已滚出屏幕的子 View，离屏曲线不能继续耗帧。
+    private fun canAnimate() = playing && isAttachedToWindow && isShown &&
+        getGlobalVisibleRect(visibleBounds) && !visibleBounds.isEmpty
+
+    private fun scheduleAnimation() {
+        if (animationScheduled) return
+        animationScheduled = true
+        Choreographer.getInstance().postFrameCallbackDelayed(frameCallback, FRAME_DELAY_MS)
+    }
+
+    private fun stopAnimation() {
+        if (!animationScheduled) return
+        Choreographer.getInstance().removeFrameCallback(frameCallback)
+        animationScheduled = false
+    }
+}
 
 private class Clock {
     var playing = false
@@ -43,13 +94,16 @@ private class Clock {
 }
 
 /** 原生 Canvas 版空间舞台，轨迹直接复用 core 的 frameAt，不另写一套运动公式。 */
-class SpatialVisualization(context: Context) : View(context) {
+class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     var preset: SpacePreset? = null
         set(value) { field = value; clock.sync(clock.seconds); invalidate() }
     var position: Double = 0.0
-        set(value) { field = value; clock.sync(value); invalidate() }
-    var playing: Boolean = false
-        set(value) { field = value; clock.playing = value; clock.sync(position); invalidate() }
+        set(value) { field = value; clock.sync(value); if (playing) updateAnimation() else invalidate() }
+    override var playing: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value; clock.playing = value; clock.sync(position); invalidate(); updateAnimation()
+        }
     var dark = true
         set(value) { field = value; invalidate() }
     private val clock = Clock()
@@ -99,8 +153,6 @@ class SpatialVisualization(context: Context) : View(context) {
             drawAvatar(canvas, cx, cy, now, light)
         }
         canvas.restore()
-        // 暂停/后台时不排队重绘，音频线程不再和动画竞争主线程。
-        if (playing && isShown) postInvalidateOnAnimation()
     }
 
     private fun project(f: SpaceFrame, r: Float, cx: Float, cy: Float): FloatArray {
@@ -187,10 +239,11 @@ class SpatialVisualization(context: Context) : View(context) {
         }
         paint.style = Paint.Style.STROKE
         paint.alpha = 242
-        for (s in 0 until 24) {
-            val rw = max(1f, pr / 24)
+        // 保留原来的同心渐变；完整 360° 均匀分配到 42 个色环，不截断紫色段。
+        for (s in 0 until 42) {
+            val rw = max(1f, pr / 42)
             paint.strokeWidth = rw + 0.18f
-            paint.color = hue(s * 15.0 - now * 96.0)
+            paint.color = hue(s * (360.0 / 42.0) - now * 96.0)
             val rr = pr - (s + 0.5f) * rw
             if (rr > 0) c.drawCircle(pt[0], pt[1], rr, paint)
         }
@@ -200,53 +253,21 @@ class SpatialVisualization(context: Context) : View(context) {
     private fun hue(value: Double): Int = Color.HSVToColor(floatArrayOf(((value % 360 + 360) % 360).toFloat(), 1f, 1f))
 }
 
-class CurveView(context: Context) : View(context) {
-    var onSlide: ((String, Double) -> Unit)? = null
+class CurveView(context: Context) : AnimatedCanvasView(context) {
     var preset: SpacePreset? = null
         set(value) { field = value; clock.sync(clock.seconds); invalidate() }
     var position: Double = 0.0
-        set(value) { field = value; clock.sync(value); invalidate() }
-    var playing: Boolean = false
-        set(value) { field = value; clock.playing = value; clock.sync(position); invalidate() }
+        set(value) { field = value; clock.sync(value); if (playing) updateAnimation() else invalidate() }
+    override var playing: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value; clock.playing = value; clock.sync(position); invalidate(); updateAnimation()
+        }
     var dark = true
         set(value) { field = value; invalidate() }
     private val clock = Clock()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val d = resources.displayMetrics.density
-    private var kind = ""
-    private var x0 = 0f
-    private var y0 = 0f
-    private var phase0 = 0.0
-    private var elev0 = 0.0
-    private var depth0 = 0.0
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        val p = preset ?: return false
-        val x = event.x / d
-        val y = event.y / d
-        val usable = width / d - 6f
-        return when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                kind = pick(x, y)
-                if (kind.isEmpty()) return false
-                parent.requestDisallowInterceptTouchEvent(true)
-                x0 = x; y0 = y; phase0 = p.phase; elev0 = p.elev; depth0 = p.depth
-                true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                // 横向映射相位，纵向按命中的曲线调整仰角或远近，统一走参数夹紧。
-                if (kind.isEmpty()) return false
-                val phase = (phase0 - p.direction * (x - x0) / max(1f, usable) * 720.0 + 3600.0) % 360.0
-                onSlide?.invoke("phase", clampSlider("phase", Math.round(phase).toDouble()))
-                val change = (y0 - y) / (0.85f * max(60f, height / d))
-                if (kind == "elev") onSlide?.invoke("elev", clampSlider("elev", elev0 + change * 40.0))
-                if (kind == "depth") onSlide?.invoke("depth", clampSlider("depth", depth0 + change * 100.0))
-                true
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { kind = ""; true }
-            else -> true
-        }
-    }
 
     private fun ys(t: Double, p: SpacePreset, h: Float): FloatArray {
         val range = earRange()
@@ -262,21 +283,6 @@ class CurveView(context: Context) : View(context) {
             mid - p.elev.toFloat() * cos(angle).toFloat() / 40f * (h - 26f) * 0.34f,
             mid - (f.far.toFloat() - 0.5f) * 2f * (p.depth.toFloat() / 100f) * (h - 26f) * 0.30f
         )
-    }
-
-    private fun pick(x: Float, y: Float): String {
-        val p = preset ?: return ""
-        val usable = width / d - 6f
-        val span = max(2.0, p.period) * 2.0
-        var best = 14f
-        var result = ""
-        listOf(-7f, -3f, 0f, 3f, 7f).forEach { offset ->
-            val yy = ys(x.plus(offset).coerceIn(0f, usable) / max(1f, usable) * span, p, height / d)
-            listOf("lr" to min(abs(y - yy[0]), abs(y - yy[1])), "depth" to abs(y - yy[3]), "elev" to abs(y - yy[2])).forEach { (key, dist) ->
-                if (dist < best) { best = dist; result = key }
-            }
-        }
-        return result
     }
 
     override fun onDraw(raw: Canvas) {
@@ -317,15 +323,14 @@ class CurveView(context: Context) : View(context) {
         val t = clock.now() % span
         val x = usable * (t / span).toFloat()
         paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 1f
-        paint.color = if (dark) 0x7aebf0f8.toInt() else 0x80374150.toInt()
-        paint.pathEffect = DashPathEffect(floatArrayOf(2f, 4f), 0f)
+        paint.strokeWidth = 1.5f
+        paint.color = if (dark) 0xccebf0f8.toInt() else 0xcc374150.toInt()
+        paint.pathEffect = null
         raw.drawLine(x, 4f, x, h - 14f, paint)
         paint.pathEffect = null
         paint.style = Paint.Style.FILL
         val yy = ys(t, p, h)
         for (i in 0 until 3) { paint.color = colors[i]; raw.drawCircle(x, yy[i], 3f, paint) }
         raw.restore()
-        if (playing && isShown) postInvalidateOnAnimation()
     }
 }

@@ -1,5 +1,6 @@
 package jiangyi.spatial8d.audio
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -12,6 +13,9 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.os.SystemClock
+import kotlin.math.abs
 
 /** 音频链路的唯一持有者，同时把真实播放状态同步给锁屏与通知栏。 */
 class PlaybackService : Service() {
@@ -36,6 +40,13 @@ class PlaybackService : Service() {
     private var playing = false
     private var positionMs = 0L
     private var durationMs = 0L
+    private var mediaInitialized = false
+    private var lastPlaybackStateUpdateMs = 0L
+    private val playbackWakeLock by lazy {
+        getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "spatial8d:PlaybackService")
+            .apply { setReferenceCounted(false) }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -49,7 +60,7 @@ class PlaybackService : Service() {
                 override fun onPause() = controls?.pause() ?: Unit
                 override fun onSkipToPrevious() = controls?.previous() ?: Unit
                 override fun onSkipToNext() = controls?.next() ?: Unit
-                override fun onSeekTo(position: Long) { player.seek(position / 1000.0) }
+                override fun onSeekTo(position: Long) { player.seek(position / 1000.0, userInitiated = true) }
             })
             isActive = true
         }
@@ -57,30 +68,56 @@ class PlaybackService : Service() {
 
     /** 每次页面刷新都复用此方法，确保电台与本地歌曲使用同一套系统控制。 */
     fun updateMedia(title: String, subtitle: String, playing: Boolean, position: Double = 0.0, duration: Double = 0.0) {
-        this.title = title.ifBlank { "8D 空间音频" }
+        val newTitle = title.ifBlank { "8D 空间音频" }
+        val newPositionMs = (position * 1000).toLong().coerceAtLeast(0)
+        val newDurationMs = (duration * 1000).toLong().coerceAtLeast(0)
+        val mediaChanged = !mediaInitialized || newTitle != this.title || subtitle != this.subtitle ||
+            playing != this.playing || newDurationMs != durationMs
+        val now = SystemClock.elapsedRealtime()
+        val positionChanged = newDurationMs > 0 && now - lastPlaybackStateUpdateMs >= 1000 &&
+            abs(newPositionMs - positionMs) >= 500
+        if (!mediaChanged && !positionChanged) return
+
+        val wasPlaying = this.playing
+        this.title = newTitle
         this.subtitle = subtitle
         this.playing = playing
-        positionMs = (position * 1000).toLong().coerceAtLeast(0)
-        durationMs = (duration * 1000).toLong().coerceAtLeast(0)
-        session.setMetadata(MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, this.title)
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
-            .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs).build())
+        syncPlaybackWakeLock()
+        positionMs = newPositionMs
+        durationMs = newDurationMs
+        mediaInitialized = true
+        if (mediaChanged) {
+            session.setMetadata(MediaMetadata.Builder()
+                .putString(MediaMetadata.METADATA_KEY_TITLE, this.title)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
+                .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs).build())
+        }
         val state = if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
         session.setPlaybackState(PlaybackState.Builder().setActions(
             PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
                 PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_SKIP_TO_NEXT or PlaybackState.ACTION_SEEK_TO
         ).setState(state, if (durationMs > 0) positionMs else PlaybackState.PLAYBACK_POSITION_UNKNOWN,
             if (playing) 1f else 0f).build())
-        val notification = buildNotification()
-        if (playing) {
-            if (Build.VERSION.SDK_INT >= 29) {
-                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-            } else startForeground(NOTIFICATION_ID, notification)
-        } else {
-            stopForeground(false)
-            getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification)
+        lastPlaybackStateUpdateMs = now
+        if (mediaChanged) {
+            val notification = buildNotification()
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            if (playing && !wasPlaying) {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                } else startForeground(NOTIFICATION_ID, notification)
+            } else {
+                if (!playing && wasPlaying) stopForeground(false)
+                notificationManager.notify(NOTIFICATION_ID, notification)
+            }
         }
+    }
+
+    @SuppressLint("WakelockTimeout")
+    private fun syncPlaybackWakeLock() {
+        // 曲目结束到下一首解码完成之间也要保持 CPU 可运行；页面在后台时没有 ticker 兜底。
+        if (playing && !playbackWakeLock.isHeld) playbackWakeLock.acquire()
+        else if (!playing && playbackWakeLock.isHeld) playbackWakeLock.release()
     }
 
     private fun buildNotification(): Notification {
@@ -139,9 +176,10 @@ class PlaybackService : Service() {
 
     override fun onDestroy() {
         stopForeground(true)
+        if (playbackWakeLock.isHeld) playbackWakeLock.release()
         session.isActive = false
         session.release()
-        player.stop()
+        player.close()
         radio.stop()
         radio.stopRecording()
         super.onDestroy()
