@@ -511,24 +511,25 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val nx = -dy / length * size
                 val ny = dx / length * size
                 val group = (depth * 3.99f).toInt().coerceIn(0, 3)
-                // 多段连续收窄：头部之后多次变细，最终收束到一点。
+                // 非单调包络：宽头后先收成细腰、再小幅鼓起、再收细，避免看起来只是一个锥形。
                 val tail = Path()
+                val widthProfile = floatArrayOf(0.92f, 0.42f, 0.70f, 0.28f, 0.34f, 0f)
                 tail.moveTo(x + nx, y + ny)
-                for (segment in 1..5) {
-                    val fraction = segment / 5f
+                for (segment in 1..widthProfile.lastIndex) {
+                    val fraction = segment.toFloat() / widthProfile.lastIndex
                     val segmentDepth = depth + (tailDepth - depth) * fraction
                     val segmentX = cx + rayX * segmentDepth
                     val segmentY = cy + rayY * segmentDepth
-                    val half = size * (1f - fraction)
+                    val half = size * widthProfile[segment]
                     tail.lineTo(segmentX - dy / length * half, segmentY + dx / length * half)
                 }
                 tail.lineTo(tailX, tailY)
-                for (segment in 4 downTo 0) {
-                    val fraction = segment / 5f
+                for (segment in widthProfile.lastIndex - 1 downTo 0) {
+                    val fraction = segment.toFloat() / widthProfile.lastIndex
                     val segmentDepth = depth + (tailDepth - depth) * fraction
                     val segmentX = cx + rayX * segmentDepth
                     val segmentY = cy + rayY * segmentDepth
-                    val half = size * (1f - fraction)
+                    val half = size * widthProfile[segment]
                     tail.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
                 }
                 tail.close()

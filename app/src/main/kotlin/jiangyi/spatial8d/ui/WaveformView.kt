@@ -66,10 +66,13 @@ class WaveformView(context: Context) : View(context) {
         val horizontalPadding = 6f * density
         paint.color = if (dark) 0xff91b9e8.toInt() else 0xff315f91.toInt()
         paint.strokeWidth = 1f
-        val middle = h * 0.42f
+        val contentTop = 50f * density
+        val contentBottom = h - 52f * density
+        val contentHeight = (contentBottom - contentTop).coerceAtLeast(24f * density)
+        val middle = contentTop + contentHeight * 0.5f
         for (x in 0 until width) {
             val index = (snapshotCount - visible + x * visible / width) % snapshotSamples.size
-            val y = middle - snapshotSamples[index] / 32768f * h * 0.30f
+            val y = middle - snapshotSamples[index] / 32768f * contentHeight * 0.42f
             canvas.drawLine(x.toFloat(), middle, x.toFloat(), y, paint)
         }
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
