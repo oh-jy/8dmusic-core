@@ -62,7 +62,10 @@ class WaveformView(context: Context) : View(context) {
         val visible = minOf(snapshotCount, snapshotSamples.size)
         paint.textSize = 11f * resources.displayMetrics.density
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
-        canvas.drawText("AudioTrack PCM", 16f, paint.textSize + 8f, paint)
+        val density = resources.displayMetrics.density
+        val horizontalPadding = 6f * density
+        canvas.drawText("AudioTrack PCM", horizontalPadding + 4f * density,
+            30f * density + paint.textSize, paint)
         paint.color = if (dark) 0xff91b9e8.toInt() else 0xff315f91.toInt()
         paint.strokeWidth = 1f
         val middle = h * 0.42f
@@ -80,21 +83,14 @@ class WaveformView(context: Context) : View(context) {
             "采样窗 ${visible / 2} 帧"
         )
         // 四段均分，按列中心对齐绘制；超长时按列宽截断，避免相邻段相互挤占。
-        val padding = 16f
+        val padding = horizontalPadding
         val columnWidth = (w - padding * 2) / labels.size
         val oldAlign = paint.textAlign
         paint.textAlign = Paint.Align.CENTER
         labels.forEachIndexed { index, label ->
             val centerX = padding + index * columnWidth + columnWidth / 2
-            var text = label
-            // 文本超过列宽时逐字截断并加省略号，保证不侵入下一列。
-            if (paint.measureText(text) > columnWidth - 8) {
-                while (text.isNotEmpty() && paint.measureText("$text…") > columnWidth - 8) {
-                    text = text.dropLast(1)
-                }
-                text = "$text…"
-            }
-            canvas.drawText(text, centerX, h - 8f, paint)
+            // 四列本身已有足够空间，不主动截断文本。
+            canvas.drawText(label, centerX, h - 8f * density, paint)
         }
         paint.textAlign = oldAlign
     }

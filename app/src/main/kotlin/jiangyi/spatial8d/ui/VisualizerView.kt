@@ -46,9 +46,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         val stage = FrameLayout(context)
         addView(stage, LayoutParams(-1, 0, 1f))
         stage.addView(canvas, FrameLayout.LayoutParams(-1, -1))
-        stage.addView(graphView, FrameLayout.LayoutParams(-1, -1).apply {
-            topMargin = dp(30f); bottomMargin = dp(38f)
-        })
+        stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
         stage.addView(layerRow, FrameLayout.LayoutParams(-1, dp(28f)).apply {
             leftMargin = dp(4f); rightMargin = dp(4f); topMargin = dp(2f)
         })
