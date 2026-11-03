@@ -22,32 +22,44 @@ class WaveformView(context: Context) : View(context) {
 
     fun accept(data: ByteArray, bytes: Int) {
         val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        val nextSamples = samples.clone()
+        var nextCount = count
+        var nextPeak = peak
         while (input.hasRemaining()) {
             val value = input.get()
-            samples[count % samples.size] = value
-            count++
-            peak = maxOf(peak, abs(value.toInt()))
+            nextSamples[nextCount % nextSamples.size] = value
+            nextCount++
+            nextPeak = maxOf(nextPeak, abs(value.toInt()))
         }
         var energy = 0.0
         var largest = 0
-        val visible = minOf(count, samples.size)
+        val visible = minOf(nextCount, nextSamples.size)
         for (i in 1 until visible) {
-            val at = (count - visible + i) % samples.size
-            val before = (at + samples.size - 1) % samples.size
-            val value = samples[at].toInt()
+            val at = (nextCount - visible + i) % nextSamples.size
+            val before = (at + nextSamples.size - 1) % nextSamples.size
+            val value = nextSamples[at].toInt()
             energy += value.toDouble() * value
-            largest = maxOf(largest, abs(value - samples[before]))
+            largest = maxOf(largest, abs(value - nextSamples[before]))
         }
-        jump = largest
-        rms = if (visible > 0) sqrt(energy / visible) else 0.0
+        synchronized(lock) {
+            System.arraycopy(nextSamples, 0, samples, 0, samples.size)
+            count = nextCount
+            peak = nextPeak
+            jump = largest
+            rms = if (visible > 0) sqrt(energy / visible) else 0.0
+        }
         postInvalidateOnAnimation()
     }
+    private val lock = Any()
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val (snapshotSamples, snapshotCount, snapshotPeak, snapshotJump, snapshotRms) = synchronized(lock) {
+            Snapshot(samples.clone(), count, peak, jump, rms)
+        }
         val w = width.toFloat()
         val h = height.toFloat()
-        val visible = minOf(count, samples.size)
+        val visible = minOf(snapshotCount, snapshotSamples.size)
         paint.textSize = 11f * resources.displayMetrics.density
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
         canvas.drawText("AudioTrack PCM", 16f, paint.textSize + 8f, paint)
@@ -55,16 +67,16 @@ class WaveformView(context: Context) : View(context) {
         paint.strokeWidth = 1f
         val middle = h * 0.42f
         for (x in 0 until width) {
-            val index = (count - visible + x * visible / width) % samples.size
-            val y = middle - samples[index] / 32768f * h * 0.30f
+            val index = (snapshotCount - visible + x * visible / width) % snapshotSamples.size
+            val y = middle - snapshotSamples[index] / 32768f * h * 0.30f
             canvas.drawLine(x.toFloat(), middle, x.toFloat(), y, paint)
         }
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
         // 各段固定起点，避免数字位数变化推动后续文本左右抖动。
         val labels = listOf(
-            "峰值 $peak",
-            "最大突变 $jump",
-            "RMS ${rms.toInt()}",
+            "峰值 $snapshotPeak",
+            "最大突变 $snapshotJump",
+            "RMS ${snapshotRms.toInt()}",
             "采样窗 ${visible / 2} 帧"
         )
         // 四段均分，按列中心对齐绘制；超长时按列宽截断，避免相邻段相互挤占。
@@ -86,4 +98,5 @@ class WaveformView(context: Context) : View(context) {
         }
         paint.textAlign = oldAlign
     }
+    private data class Snapshot(val samples: ShortArray, val count: Int, val peak: Int, val jump: Int, val rms: Double)
 }

@@ -140,10 +140,11 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         canvas.drawText("左", 7f, cy + 4f, paint)
         canvas.drawText("右", w - 7f, cy + 4f, paint)
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
-        // 彩虹球及初始外圈再次缩小三分之一，人头像保持原尺寸。
-        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.45f
+        // 球体、拖尾和扩散外圈统一缩小；绕行轨道独立放大以避开人头像。
+        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.68f
+        val planetScale = 0.45f
         // 远近最靠近时也要与人头像保留距离，避免球体进入头部轮廓。
-        val minScale = (28f / sourceR).coerceAtMost(1f)
+        val minScale = (42f / sourceR).coerceAtMost(1f)
         fun clearOfHead(f: SpaceFrame): SpaceFrame {
             val radius = f.radius.coerceAtLeast(minScale.toDouble())
             return if (radius == f.radius) f else f.copy(radius = radius,
@@ -155,9 +156,9 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         // 前后景遮挡与 UTS 一致，位于前方的小球先画，人头像最后覆盖。
         if (clearOfHead(f).y < 0) {
             drawAvatar(canvas, cx, cy, now, light)
-            drawPlanet(canvas, t, sourceR, cx, cy, now, p, ::clearOfHead)
+            drawPlanet(canvas, t, sourceR, cx, cy, now, p, planetScale, ::clearOfHead)
         } else {
-            drawPlanet(canvas, t, sourceR, cx, cy, now, p, ::clearOfHead)
+            drawPlanet(canvas, t, sourceR, cx, cy, now, p, planetScale, ::clearOfHead)
             drawAvatar(canvas, cx, cy, now, light)
         }
         canvas.restore()
@@ -214,10 +215,12 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         for (s in 0 until 6) { paint.color = hue(phase + s * 60.0); c.drawCircle(x, y, 6f - s - 0.5f, paint) }
     }
 
-    private fun drawPlanet(c: Canvas, t: Double, r: Float, cx: Float, cy: Float, now: Double, p: SpacePreset,
+    private fun drawPlanet(c: Canvas, t: Double, r: Float, cx: Float, cy: Float, now: Double, p: SpacePreset, scale: Float,
         clearOfHead: (SpaceFrame) -> SpaceFrame) {
-        val span = min(2.6, max(0.6, p.period * 0.55))
+        val span = min(2.6, max(0.6, p.period * 0.55)) * 1.35f
         paint.style = Paint.Style.FILL
+        var tailX = cx
+        var tailY = cy
         for (k in 42 downTo 1) {
             val u = k / 42.0
             val age = u * (0.35 + 0.65 * u)
@@ -230,12 +233,17 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             val wobble = sin(u * 9.0 + now * 1.7).toFloat() * 2.2f * u.toFloat()
             paint.color = planetHue(f.azimuth * 180.0 / Math.PI)
             paint.alpha = (173f * taper).toInt()
-            c.drawCircle(pt[0] - dy / len * wobble, pt[1] + dx / len * wobble, max(0.9f, 12f * pt[2] * (0.18f + 0.82f * taper)), paint)
+            tailX = pt[0] - dy / len * wobble
+            tailY = pt[1] + dx / len * wobble
+            c.drawCircle(tailX, tailY, max(0.45f, 12f * scale * pt[2] * (0.18f + 0.82f * taper)), paint)
         }
+        // 末端保留一颗随尾迹运动的小球影子，避免长尾突然断掉。
+        paint.alpha = 42
+        c.drawCircle(tailX + 2f * scale, tailY + 3f * scale, 2.2f * scale, paint)
         paint.alpha = 255
         val f = clearOfHead(frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0))
         val pt = project(f, r, cx, cy)
-        val pr = 5.36f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
+        val pr = 8f * scale * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
         if (playing) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f
@@ -243,7 +251,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
                 val ph = ((now / 1.4 + k * 0.5) % 1.0).toFloat()
                 paint.color = hue(40.0 + k * 160.0)
                 paint.alpha = ((1 - ph) * 107).toInt()
-                c.drawCircle(pt[0], pt[1], pr + ph * 22, paint)
+                c.drawCircle(pt[0], pt[1], pr + ph * 22 * scale, paint)
             }
         }
         paint.style = Paint.Style.STROKE

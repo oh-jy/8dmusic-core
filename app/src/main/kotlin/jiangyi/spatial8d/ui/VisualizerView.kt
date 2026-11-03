@@ -71,15 +71,20 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
 
     fun accept(data: ByteArray, bytes: Int) {
-        // AudioTrack 输出线程只负责投递；绘制状态与 View 均在主线程更新。
+        // 输出线程只生成不可变 PCM 快照；主线程永远只消费最新一包，不排队积压。
         val chunk = data.copyOf(bytes)
-        if (!isAttachedToWindow) return
+        pendingPcm.set(chunk)
+        if (!isAttachedToWindow || renderPosted.getAndSet(true)) return
         post {
+            renderPosted.set(false)
+            val latest = pendingPcm.getAndSet(null) ?: return@post
             if (!isAttachedToWindow) return@post
-            canvas.accept(chunk, chunk.size)
-            graphView.accept(chunk, chunk.size)
+            canvas.accept(latest, latest.size)
+            graphView.accept(latest, latest.size)
         }
     }
+    private val pendingPcm = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
+    private val renderPosted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** 当前歌曲歌词与播放位置，用于在穿梭模式中叠加逐行歌词字幕。 */
     fun setLyrics(result: LyricsResult?) = canvas.setLyrics(result)
@@ -158,6 +163,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var lyricPositionMs = 0L
         private var activeLyricIndex = -1
         private var lyricLineStartedAtNs = 0L
+        private val analysisLock = Any()
 
         fun setLyrics(result: LyricsResult?) {
             lyricLines = result?.lines ?: emptyList()
@@ -170,16 +176,18 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         fun accept(data: ByteArray, bytes: Int) {
-            val chunk = data.copyOf(bytes)
-            visualQueue.addLast(chunk)
-            val targetFrames = 44100 * 80 / 1000
-            while (visualQueue.size > 1 &&
-                visualQueue.sumOf { it.size / 4 } - visualQueue.first().size / 4 > targetFrames) {
-                visualQueue.removeFirst()
-                delayedSamplesRead = false
+            synchronized(analysisLock) {
+                val chunk = data.copyOf(bytes)
+                visualQueue.addLast(chunk)
+                val targetFrames = 44100 * 80 / 1000
+                while (visualQueue.size > 1 &&
+                    visualQueue.sumOf { it.size / 4 } - visualQueue.first().size / 4 > targetFrames) {
+                    visualQueue.removeFirst()
+                    delayedSamplesRead = false
+                }
+                consumeDelayedSamples()
+                analyzeImmediate(data, bytes)
             }
-            consumeDelayedSamples()
-            analyzeImmediate(data, bytes)
         }
 
         private fun consumeDelayedSamples() {
@@ -293,17 +301,19 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
-            consumeDelayedSamples()
-            // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
-            val surface = ThemeUi.palette(dark).surface
-            c.drawColor(surface)
-            paint.textSize = dp(9f)
-            paint.color = ThemeUi.palette(dark).sub
-            when (mode) {
-                1 -> drawSpectrogram(c)
-                2 -> drawParticles(c)
-                3 -> drawTravel(c)
-                else -> drawCombined(c)
+            synchronized(analysisLock) {
+                consumeDelayedSamples()
+                // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
+                val surface = ThemeUi.palette(dark).surface
+                c.drawColor(surface)
+                paint.textSize = dp(9f)
+                paint.color = ThemeUi.palette(dark).sub
+                when (mode) {
+                    1 -> drawSpectrogram(c)
+                    2 -> drawParticles(c)
+                    3 -> drawTravel(c)
+                    else -> drawCombined(c)
+                }
             }
         }
 
@@ -470,18 +480,35 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val nx = -dy / length * size
                 val ny = dx / length * size
                 val group = (depth * 3.99f).toInt().coerceIn(0, 3)
-                // 单个三角形从头部直接收窄到零，不出现中间再次变宽的折点。
-                travelPaths[group].moveTo(x + nx, y + ny)
-                travelPaths[group].lineTo(tailX, tailY)
-                travelPaths[group].lineTo(x - nx, y - ny)
-                travelPaths[group].close()
+                // 多段连续收窄：头部之后多次变细，最终收束到一点。
+                val left = Path()
+                val right = Path()
+                left.moveTo(x + nx, y + ny)
+                right.moveTo(x - nx, y - ny)
+                for (segment in 1..5) {
+                    val fraction = segment / 5f
+                    val segmentDepth = depth + (tailDepth - depth) * fraction
+                    val segmentX = cx + rayX * segmentDepth
+                    val segmentY = cy + rayY * segmentDepth
+                    val half = size * (1f - fraction)
+                    left.lineTo(segmentX - dy / length * half, segmentY + dx / length * half)
+                    right.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
+                }
+                left.lineTo(tailX, tailY)
+                right.lineTo(tailX, tailY)
+                left.close()
+                right.close()
+                travelPaths[group].addPath(left)
+                travelPaths[group].addPath(right)
                 travelHeads[group].addCircle(x, y, size, Path.Direction.CW)
             }
             travelPaths.indices.forEach { group ->
-                // 频段能量驱动蓝→青→橙渐变；深度只负责层次，不再固定每组颜色。
-                val energy = delayedSpectrum[group * 64].toFloat()
-                val hue = 210f - energy * 180f
-                paint.color = Color.HSVToColor(floatArrayOf(hue % 360f, .68f, .95f))
+                // 在原有蓝绿黄基础上补充橙、淡紫、淡红和淡青，保持柔和不发白。
+                val colors = listOf(205f to .68f, 145f to .58f, 48f to .62f,
+                    27f to .68f, 270f to .38f, 350f to .42f, 178f to .48f)
+                val colorIndex = (group + (phase * .35f).toInt() % colors.size + colors.size) % colors.size
+                val (hue, saturation) = colors[colorIndex]
+                paint.color = Color.HSVToColor(floatArrayOf(hue, saturation, .95f))
                 paint.alpha = (10 + group * 8 + (drive * 40).toInt()).coerceIn(0, 255)
                 c.drawPath(travelPaths[group], paint)
                 paint.alpha = (60 + group * 25 + (drive * 150).toInt()).coerceIn(0, 255)
