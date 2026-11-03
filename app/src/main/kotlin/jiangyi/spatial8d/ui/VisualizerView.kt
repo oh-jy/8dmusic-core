@@ -14,6 +14,8 @@ import android.widget.FrameLayout
 import android.graphics.drawable.ColorDrawable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import jiangyi.spatial8d.audio.LyricsResult
+import jiangyi.spatial8d.audio.LyricLine
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -64,6 +66,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
 
     fun accept(data: ByteArray, bytes: Int) = canvas.accept(data, bytes)
+
+    /** 当前歌曲歌词与播放位置，用于在穿梭模式中叠加逐行歌词字幕。 */
+    fun setLyrics(result: LyricsResult?) = canvas.setLyrics(result)
+    fun setPosition(positionMs: Long) = canvas.setPosition(positionMs)
 
     private fun updateMode() {
         canvas.mode = if (!exclusive) 0 else visualMode
@@ -120,6 +126,25 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
+        // 平滑响度（RMS 滑动平均）和基于真实时间的帧推进，避免动画被解码 buffer 节奏拉扯。
+        private var smoothRms = 0f
+        private var smoothPeak = 0f
+        private var lastDrawNs = 0L
+        // 歌词字幕状态：当前行索引、键入开始时间（纳秒），用于逐字键入 + 淡出动画。
+        private var lyricLines: List<LyricLine> = emptyList()
+        private var lyricPositionMs = 0L
+        private var activeLyricIndex = -1
+        private var lyricLineStartedAtNs = 0L
+
+        fun setLyrics(result: LyricsResult?) {
+            lyricLines = result?.lines ?: emptyList()
+            activeLyricIndex = -1
+            lyricLineStartedAtNs = 0L
+        }
+
+        fun setPosition(positionMs: Long) {
+            lyricPositionMs = positionMs.coerceAtLeast(0)
+        }
 
         fun accept(data: ByteArray, bytes: Int) {
             val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
@@ -148,9 +173,21 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 rms = sqrt(energy / count)
                 peak = loudest
                 correlation = (lr / sqrt(max(1e-12, ll * rr))).coerceIn(-1.0, 1.0)
+                // 单次 PCM 包约几十毫秒，用一次一阶低通平滑，保留节奏但去掉爆点。
+                val alpha = 0.18f
+                smoothRms = smoothRms * (1 - alpha) + rms.toFloat() * alpha
+                smoothPeak = maxOf(smoothPeak * 0.90f, peak.toFloat())
             }
             analyze()
             postInvalidateOnAnimation()
+        }
+
+        /** 计算自上次绘制以来的真实秒数（首次或长时间挂起时给一帧保守值）。 */
+        private fun frameDeltaSeconds(): Float {
+            val now = System.nanoTime()
+            val dt = if (lastDrawNs == 0L) 1f / 60f else ((now - lastDrawNs) / 1_000_000_000.0).toFloat()
+            lastDrawNs = now
+            return dt.coerceIn(1f / 240f, 1f / 15f)
         }
 
         /** Goertzel 对数频点足够驱动图表，避免为显示引入整套 FFT 库。 */
@@ -170,9 +207,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     s2 = s1
                     s1 = s0
                 }
-                val power = max(1e-12, s1 * s1 + s2 * s2 - coefficient * s1 * s2)
-                val db = (10 * ln(power) / ln(10.0)).coerceIn(-90.0, 0.0)
-                spectrum[band] = ((db + 90) / 90).coerceIn(0.0, 1.0)
+                // 除以窗长平方做能量归一，否则低频/高频在固定采样数下量级差距悬殊。
+                val norm = available.toDouble() * available
+                val power = max(1e-18, (s1 * s1 + s2 * s2 - coefficient * s1 * s2) / norm)
+                val db = (10 * ln(power) / ln(10.0)).coerceIn(-100.0, 0.0)
+                // 用更窄动态范围 + sqrt 拉伸，把低频细节抬起来，避免左侧柱子"看起来没变化"。
+                val normalized = ((db + 70) / 70).coerceIn(0.0, 1.0)
+                spectrum[band] = sqrt(normalized)
             }
             val row = spectrogramRow * 128
             for (x in 0 until 128) {
@@ -184,10 +225,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
-            c.drawColor(if (dark) 0xff111820.toInt() else 0xfff6f8fb.toInt())
+            // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
+            val surface = ThemeUi.palette(dark).surface
+            c.drawColor(surface)
             paint.textSize = dp(9f)
-            paint.color = if (dark) 0xffa9bbce.toInt() else 0xff52677d.toInt()
-            if (mode >= 2) c.drawColor(if (dark) 0xff080d16.toInt() else 0xff101827.toInt())
+            paint.color = ThemeUi.palette(dark).sub
             when (mode) {
                 1 -> drawSpectrogram(c)
                 2 -> drawParticles(c)
@@ -219,8 +261,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         private fun label(c: Canvas, text: String, bottom: Float) {
             val oldAlign = paint.textAlign
-            paint.textAlign = Paint.Align.RIGHT
-            c.drawText(text, width - dp(6f), bottom - dp(4f), paint)
+            paint.textAlign = Paint.Align.LEFT
+            c.drawText(text, dp(6f), bottom - dp(4f), paint)
             paint.textAlign = oldAlign
         }
 
@@ -230,7 +272,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             if (available == 0) return
             // 底部保留说明文字行，波形振幅不侵入标签区域。
             val center = top + (bottom - top - dp(14f)) / 2
-            val amplitude = (bottom - top - dp(18f)) * .40f
+            val amplitude = (bottom - top - dp(18f)) * .48f
+            // 用近期 peak 做归一化，让弱信号也能撑满波形区；用最小值兜底避免静音时除零。
+            val gain = 1f / max(0.15f, smoothPeak * 1.05f)
             for (channel in 0..1) {
                 val path = Path()
                 paint.color = if (channel == 0) 0xff54a8ff.toInt() else 0xffff916d.toInt()
@@ -239,7 +283,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 for (x in 0 until width) {
                     val frame = (total - available * 2 + x.toLong() * available * 2 / width + channel).toInt()
                     val value = history[(frame % history.size + history.size) % history.size] / 32768f
-                    val y = center - value * amplitude
+                    val boosted = (value * gain).coerceIn(-1f, 1f)
+                    val y = center - boosted * amplitude
                     if (x == 0) path.moveTo(x.toFloat(), y) else path.lineTo(x.toFloat(), y)
                 }
                 c.drawPath(path, paint)
@@ -294,7 +339,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawParticles(c: Canvas) {
-            phase += .009f + rms.toFloat() * .075f
+            // 整体强度由响度驱动：安静时几乎静止，起伏时粒子立刻反应。
+            val drive = (smoothRms * 9f + smoothPeak * 1.5f).coerceIn(0f, 1f)
+            phase += frameDeltaSeconds() * (.12f + drive * .9f)
             val cx = width / 2f
             val cy = height / 2f
             val radiusUnit = min(width, height) / 220f
@@ -303,17 +350,18 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val angle = i * 2.399963f + phase
                 val band = sqrt(spectrum[i % spectrum.size].toFloat())
                 val baseRadius = (12 + i % 100) * radiusUnit
-                val radius = baseRadius * (.72f + band * 1.05f)
+                // 半径随频带能量扩张，叠加整体响度驱动；静默时收缩到内核。
+                val radius = baseRadius * (.35f + drive * .45f + band * (0.6f + drive * 1.3f))
                 val x = cx + cos(angle) * radius
-                val jump = sin(phase * (2.2f + i % 5 * .12f) + i * .71f) * radiusUnit * (5f + band * 20f)
+                val jump = sin(phase * (2.2f + i % 5 * .12f) + i * .71f) * radiusUnit * (1f + band * (8f + drive * 36f))
                 val y = cy + sin(angle) * radius * .65f + jump
                 val group = i % particlePaths.size
-                val size = dp(.35f + band * 1.5f)
+                val size = dp(.2f + band * (1f + drive * 2.5f))
                 particlePaths[group].addCircle(x, y, size, Path.Direction.CW)
             }
             particlePaths.indices.forEach { group ->
                 paint.color = Color.HSVToColor(floatArrayOf((group * 70f + phase * 25f) % 360, .72f, .95f))
-                paint.alpha = 255
+                paint.alpha = (60 + (drive * 195).toInt()).coerceIn(60, 255)
                 paint.style = Paint.Style.FILL
                 c.drawPath(particlePaths[group], paint)
             }
@@ -321,7 +369,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         /** 始终由远及近穿梭，亮度沿尾迹渐变，不再随相位相关突然反向。 */
         private fun drawTravel(c: Canvas) {
-            phase += .012f + rms.toFloat() * .09f
+            // 前进速度由响度驱动：高潮时飞驰，平缓时近乎悬停。
+            // 用 RMS 滑动平均 + 真实帧间隔，节奏感保留但速度上限被钳制，避免"爆点一来就加速"的卡顿感。
+            val drive = (smoothRms * 9f + smoothPeak * 1.5f).coerceIn(0f, 1f)
+            phase += frameDeltaSeconds() * (.10f + drive * .65f)
             val cx = width / 2f
             val cy = height * .46f
             travelPaths.forEach(Path::rewind)
@@ -335,10 +386,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val rayY = cos(i * 8.73f) * height * .55f
                 val x = cx + rayX * depth
                 val y = cy + rayY * depth
-                val tailDepth = (depth - (.025f + depth * .16f)).coerceAtLeast(.015f)
+                // 频带能量越大尾迹越长、粒子越大，直接反映音频起伏。
+                val tailStretch = .02f + depth * (.08f + energy * .5f + drive * .18f)
+                val tailDepth = (depth - tailStretch).coerceAtLeast(.015f)
                 val tailX = cx + rayX * tailDepth
                 val tailY = cy + rayY * tailDepth
-                val size = dp(.4f + depth * (1f + energy.toFloat() * 2.5f))
+                val size = dp(.2f + depth * (.5f + energy * (1.5f + drive * 4f)))
                 val dx = x - tailX
                 val dy = y - tailY
                 val length = max(dp(.01f), sqrt(dx * dx + dy * dy))
@@ -355,12 +408,54 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             travelPaths.indices.forEach { group ->
                 // 与界面一致的蓝青主题，不再混入紫色。
                 paint.color = Color.HSVToColor(floatArrayOf(198f + group * 5f, .65f, .95f))
-                paint.alpha = 18 + group * 10
+                paint.alpha = (10 + group * 8 + (drive * 40).toInt()).coerceIn(0, 255)
                 c.drawPath(travelPaths[group], paint)
-                paint.alpha = 140 + group * 35
+                paint.alpha = (60 + group * 25 + (drive * 150).toInt()).coerceIn(0, 255)
                 c.drawPath(travelHeads[group], paint)
             }
             paint.alpha = 255
+            // 穿梭模式叠加逐行歌词：键入 → 停驻 → 淡出，随播放位置切换。
+            drawLyricLine(c)
+        }
+
+        /** 逐字键入 + 停驻 + 淡出的歌词字幕，叠加在穿梭视图下半区。 */
+        private fun drawLyricLine(c: Canvas) {
+            if (lyricLines.isEmpty()) return
+            val index = lyricLines.indexOfLast { it.timeMs <= lyricPositionMs }
+            if (index < 0) return
+            if (index != activeLyricIndex) {
+                activeLyricIndex = index
+                lyricLineStartedAtNs = System.nanoTime()
+            }
+            val line = lyricLines[index]
+            val elapsedMs = (System.nanoTime() - lyricLineStartedAtNs) / 1_000_000
+            val typeDuration = 900L
+            val fadeDuration = 500L
+            // 当前行剩余时长（到下一行的时间），末尾段触发淡出。
+            val remainingMs = lyricLines.getOrNull(index + 1)?.let { it.timeMs - lyricPositionMs } ?: Long.MAX_VALUE
+            val fadeProgress = if (remainingMs < fadeDuration) 1f - remainingMs.toFloat() / fadeDuration else 0f
+            val visibleChars = if (elapsedMs >= typeDuration) line.text.length
+            else (line.text.length * (elapsedMs.toFloat() / typeDuration)).toInt().coerceAtLeast(0)
+            val text = line.text.take(visibleChars)
+            if (text.isEmpty()) return
+            val oldSize = paint.textSize
+            val oldAlign = paint.textAlign
+            val oldAlpha = paint.alpha
+            paint.textSize = dp(16f)
+            paint.textAlign = Paint.Align.CENTER
+            paint.alpha = ((1f - fadeProgress) * 255).toInt().coerceIn(0, 255)
+            paint.color = if (dark) 0xffe8f4ff.toInt() else 0xff102a43.toInt()
+            paint.style = Paint.Style.FILL
+            val y = height - dp(28f)
+            c.drawText(text, width / 2f, y, paint)
+            // 键入光标：仅在键入阶段显示在末尾。
+            if (visibleChars < line.text.length && (System.nanoTime() / 300_000_000) % 2 == 0L) {
+                val cursorX = width / 2f + paint.measureText(text) / 2 + dp(2f)
+                c.drawRect(cursorX, y - dp(14f), cursorX + dp(2f), y, paint)
+            }
+            paint.textSize = oldSize
+            paint.textAlign = oldAlign
+            paint.alpha = oldAlpha
         }
 
         private fun dp(value: Float) = value * resources.displayMetrics.density

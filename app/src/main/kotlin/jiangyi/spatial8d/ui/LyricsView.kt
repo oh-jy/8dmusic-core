@@ -117,16 +117,10 @@ class LyricsView(context: Context) : ScrollView(context) {
         setLyrics(null)
         content.removeAllViews()
         val p = palette
-        val input = ThemeUi.input(context, p, "输入歌曲名").apply { setText(fileName) }
-        content.addView(input, LinearLayout.LayoutParams(-1, dp(36f)).apply {
-            leftMargin = dp(20f); rightMargin = dp(20f)
-        })
-        message("未找到匹配歌词，可修改歌曲名后重试")
-        content.addView(ThemeUi.button(context, p, "重新检索") {
-            val query = input.text.toString().trim()
-            if (query.isEmpty()) return@button
-            clear()
-            onSearch?.invoke(query)
+        // 与"长按歌词 → 修正"走同一套候选/预览流程，避免另一套单输入框的简陋 UI。
+        message("未找到匹配歌词：$fileName")
+        content.addView(ThemeUi.button(context, p, "手动修正歌词") {
+            onManual?.invoke()
         }, LinearLayout.LayoutParams(-2, dp(36f)))
         ThemeUi.applyTheme(content, p)
         updatePadding()

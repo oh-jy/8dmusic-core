@@ -106,6 +106,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private var pageActive = true
     private var exporting = false
     private var dark = true
+    /** 0=深色 1=浅色 2=跟随系统。dark 字段始终是"当前生效"的结果，由 themeMode 派生。 */
+    private var themeMode = 0
     private var playbackStatus = "就绪"
     private var transform = TransformParams()
     private var reverse = false
@@ -124,9 +126,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private lateinit var waveformView: WaveformView
     private lateinit var visualizerView: VisualizerView
     private lateinit var curveLegend: LinearLayout
-    private lateinit var curveContent: LinearLayout
+    private lateinit var curveContent: FrameLayout
     private val lyrics by lazy { Lyrics(this) }
     private var lyricsGeneration = 0
+    private var currentLyrics: LyricsResult? = null
     private lateinit var presetPicker: TextView
     private lateinit var playButton: View
     private lateinit var parameterPanel: LinearLayout
@@ -264,7 +267,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         // 首屏只读缓存；MediaStore 查询统一走后台，避免冷启动阻塞所有点击。
         songs = musicStore.cached().toMutableList()
         queue = musicStore.view(songs)
-        dark = preferences.getBoolean("dark", true)
+        // 主题三态：0 深色 / 1 浅色 / 2 跟随系统。首次启动沿用旧 dark 偏好迁移。
+        themeMode = if (preferences.contains("themeMode")) preferences.getInt("themeMode", 0)
+        else if (preferences.getBoolean("dark", true)) 0 else 1
+        dark = resolveDark()
         playbackStatus = "就绪"
         restorePlaybackState()
         palette = ThemeUi.palette(dark)
@@ -285,7 +291,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
                 view.setPadding(0, bars.top, 0, ThemeUi.dp(this, 176f) + bars.bottom)
-                playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 10f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 12f) + bars.bottom)
+                playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f) + bars.bottom)
                 insets
             }
         }
@@ -474,7 +480,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         popupVisualizer?.dark = dark
         if (::lyricsView.isInitialized) lyricsView.dark = dark
         if (::playerBar.isInitialized) ThemeUi.bg(playerBar, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
-        if (::disc.isInitialized) ThemeUi.bg(disc, palette.accent, 19f)
+        // 应用图标保持原色，不叠加主题色背景。
+        if (::disc.isInitialized) disc.imageTintList = android.content.res.ColorStateList.valueOf(palette.accent)
         tint(root, palette.text)
         if (::playerBar.isInitialized) ThemeUi.applyTheme(playerBar, palette)
         // PNG 图标不经过 Button 主题回刷；播放键白色，普通控制键随主题切换。
@@ -484,7 +491,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
         if (::playerBar.isInitialized) tintIcons(playerBar)
-        if (::themeButton.isInitialized) themeButton.text = if (dark) "浅色" else "深色"
+        if (::themeButton.isInitialized) themeButton.text = when (themeMode) { 0 -> "深色"; 1 -> "浅色"; else -> "跟随" }
         tint(root, palette.text)
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
@@ -501,7 +508,24 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             }
         }
         // 状态栏/导航栏图标随背景切换，浅色的时间、电量必须保持深色可读。
-        preferences.edit().putBoolean("dark", dark).apply()
+        preferences.edit().putInt("themeMode", themeMode).putBoolean("dark", dark).apply()
+    }
+
+    /** 解析当前应生效的深色状态；跟随系统时读 Configuration.uiMode。 */
+    private fun resolveDark(): Boolean = when (themeMode) {
+        0 -> true
+        1 -> false
+        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+    }
+
+    /** 系统深浅色切换时，跟随模式自动刷新。 */
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (themeMode == 2) {
+            val newDark = resolveDark()
+            if (newDark != dark) { dark = newDark; refreshTheme() }
+        }
     }
 
     private fun tint(view: View, color: Int) {
@@ -543,7 +567,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
         visualization.playing = playing
         curve.playing = playing
-        if (::lyricsView.isInitialized) lyricsView.setPosition(((if (isLive) 0.0 else player?.position ?: 0.0) * 1000).toLong())
+        val lyricPositionMs = ((if (isLive) 0.0 else player?.position ?: 0.0) * 1000).toLong()
+        if (::lyricsView.isInitialized) lyricsView.setPosition(lyricPositionMs)
+        if (::visualizerView.isInitialized) visualizerView.setPosition(lyricPositionMs)
+        popupVisualizer?.setPosition(lyricPositionMs)
         songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: "未选择歌曲"
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
@@ -555,7 +582,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }.orEmpty()
         modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
         status.text = playbackStatus
-        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text = playbackStatus
+        // 播放条下方状态栏：未切到"同步歌词"tab 时优先显示当前行歌词；在歌词 tab 则还原为播放状态。
+        val statusLine = if (curvePanel != 3) {
+            val lines = currentLyrics?.lines
+            val currentLine = lines?.let { ls ->
+                val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
+                if (idx >= 0) ls[idx].text else null
+            }
+            currentLine?.takeIf { it.isNotBlank() } ?: playbackStatus
+        } else playbackStatus
+        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text = statusLine
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
         recordingLabel.setTextColor(0xffff5d5d.toInt())
@@ -596,7 +632,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         service?.updateMedia(currentItem?.name ?: "8D 空间音频",
             if (isLive) "电台直播 · 8D 实时处理" else currentItem?.artist ?: playbackStatus,
             playing, if (isLive) 0.0 else player?.position ?: 0.0, if (isLive) 0.0 else player?.duration ?: 0.0)
-        disc.rotation = if (playing) (SystemClock.uptimeMillis() / 12f) % 360f else disc.rotation
+        // 应用图标旋转（约 30 秒一圈），跟随播放状态。
+        if (playing) disc.rotation = (SystemClock.uptimeMillis() / 83f) % 360f
         (transportRow.getChildAt(0) as? LinearLayout)?.let {
             val icon = (it.getChildAt(0) as? ImageButton) ?: return@let
             icon.setImageResource(when (currentMode()) {
@@ -911,6 +948,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     override fun onPause() {
         // 取消而不是只 return，避免后台保留无意义的 UI 任务。
         pageActive = false
+        service?.appInForeground = false
+        // 后台播放时立刻补一条通知，保持服务存活。
+        service?.let { s ->
+            val playing = s.player.isPlaying || s.radio.isPlaying
+            if (playing) s.updateMedia(s.currentTrack?.name ?: "8D 空间音频", s.currentTrack?.artist ?: "", true,
+                s.player.position, s.player.duration)
+        }
         main.removeCallbacks(ticker)
         main.removeCallbacks(prefetchLyrics)
         savePlaybackState()
@@ -920,6 +964,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     override fun onResume() {
         super.onResume()
         pageActive = true
+        service?.appInForeground = true
+        // 回到前台立即撤掉播放通知，不打扰使用。
+        service?.let { s ->
+            val playing = s.player.isPlaying || s.radio.isPlaying
+            s.updateMedia(s.currentTrack?.name ?: "8D 空间音频", s.currentTrack?.artist ?: "", playing,
+                s.player.position, s.player.duration)
+        }
         tint(root, palette.text)
         refreshPlayback()
         // onPause 已取消 ticker；每次回到前台都必须重新建立唯一刷新循环。
@@ -1241,7 +1292,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
         bar.addView(sourceButton)
-        themeButton = navButton(if (dark) "浅色" else "深色") { dark = !dark; refreshTheme() }
+        themeButton = navButton(when (themeMode) { 0 -> "深色"; 1 -> "浅色"; else -> "跟随" }) {
+            // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
+            themeMode = (themeMode + 1) % 3
+            dark = resolveDark()
+            refreshTheme()
+        }
         themeButton.apply {
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
@@ -1602,8 +1658,19 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 waveformView.visibility = if (it == 1) View.VISIBLE else View.GONE
                 visualizerView.visibility = if (it == 2) View.VISIBLE else View.GONE
                 lyricsView.visibility = if (it == 3) View.VISIBLE else View.GONE
-                // 三个图表面板保留同样的图例占位，切换时卡片高度不跳动。
-                curveLegend.visibility = if (it == 0) View.VISIBLE else View.INVISIBLE
+                // 非"空间曲线" tab 隐藏图例并把它的高度转移给 curveContent，
+                // 避免图例行占位造成波形/频谱顶部一片空白。
+                val legendHeight = curveLegend.height.takeIf { h -> h > 0 }
+                    ?: ThemeUi.dp(this@MainActivity, 22f)
+                val showLegend = it == 0
+                val wasVisible = curveLegend.visibility == View.VISIBLE
+                curveLegend.visibility = if (showLegend) View.VISIBLE else View.GONE
+                if (::curveContent.isInitialized && wasVisible != showLegend) {
+                    val current = curveContent.layoutParams.height
+                    val next = if (showLegend) (current - legendHeight).coerceAtLeast(ThemeUi.dp(this@MainActivity, 80f))
+                    else current + legendHeight
+                    curveContent.layoutParams = curveContent.layoutParams.apply { height = next }
+                }
             })
             curveLegend = ThemeUi.row(this@MainActivity).apply {
                 listOf(
@@ -1631,30 +1698,31 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             }
             addView(curveLegend)
-            curveContent = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
+            // 用 FrameLayout 叠放四个面板，同一时间只有一个 VISIBLE，MATCH_PARENT 才能占满整个高度。
+            // 之前 LinearLayout 中多个 height=-1 的子 view 会被平分/压缩，造成音频图谱/可视化上下留白。
+            curveContent = FrameLayout(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 140f))
             }
             curve = CurveView(this@MainActivity)
-            curveContent.addView(curve, LinearLayout.LayoutParams(-1, -1))
+            curveContent.addView(curve, FrameLayout.LayoutParams(-1, -1))
             lyricsView = LyricsView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
                 onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
                 onManual = { currentItem?.let { showLyricsCandidates(it) } }
                 visibility = View.GONE
             }
-            curveContent.addView(lyricsView, LinearLayout.LayoutParams(-1, -1))
+            curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
             waveformView = WaveformView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
                 visibility = View.GONE
             }
-            curveContent.addView(waveformView, LinearLayout.LayoutParams(-1, -1))
+            curveContent.addView(waveformView, FrameLayout.LayoutParams(-1, -1))
             visualizerView = VisualizerView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
                 visibility = View.GONE
                 onExpand = { showVisualizerSheet() }
             }
-            curveContent.addView(visualizerView, LinearLayout.LayoutParams(-1, -1))
+            curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
             addView(curveContent)
         }
         return card
@@ -1663,15 +1731,26 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */
     private fun loadLyrics(item: MusicItem, manualTitle: String? = null) {
         val generation = ++lyricsGeneration
+        currentLyrics = null
+        pushLyricsToVisualizer()
         if (::lyricsView.isInitialized) lyricsView.clear()
         val title = manualTitle ?: Lyrics.searchTitle(item.name, item.artist)
         lyrics.load(title, item.artist, item.duration / 1000.0, { result ->
             if (generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
-            result.onSuccess { lyricsView.setLyrics(it) }
-                .onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
+            result.onSuccess {
+                currentLyrics = it
+                lyricsView.setLyrics(it)
+                pushLyricsToVisualizer()
+            }.onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
         }, { progress ->
             if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
         })
+    }
+
+    /** 把当前歌词推给音频可视化视图（含弹窗副本），用于穿梭模式叠加字幕。 */
+    private fun pushLyricsToVisualizer() {
+        if (::visualizerView.isInitialized) visualizerView.setLyrics(currentLyrics)
+        popupVisualizer?.setLyrics(currentLyrics)
     }
 
     /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
@@ -1681,36 +1760,86 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val artist = item.artist
         val duration = item.duration / 1000.0
         val sheet = ThemeUi.showSheet(this, palette, "修正歌词", "选择正确歌词或重新搜索", fullHeight = true) {
-            val input = ThemeUi.input(this@MainActivity, palette, "输入更精确的歌名 / 歌手").apply {
-                setText(title)
-                setOnEditorActionListener { _, actionId, _ ->
-                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
-                        loadLyrics(item, text.toString().trim().ifEmpty { title })
-                        lyricsDialog?.dismiss()
-                        true
-                    } else false
-                }
+            val titleInput = ThemeUi.input(this@MainActivity, palette, "歌名").apply { setText(title) }
+            val artistInput = ThemeUi.input(this@MainActivity, palette, "歌手（可选）").apply {
+                setText(artist.takeUnless { it.equals("未知歌手", ignoreCase = true) } ?: "")
             }
-            addView(input)
-            addView(ThemeUi.button(this@MainActivity, palette, "重新检索", ThemeUi.ROLE_ACCENT) {
-                loadLyrics(item, input.text.toString().trim().ifEmpty { title })
-                lyricsDialog?.dismiss()
-            })
+            addView(titleInput)
+            addView(artistInput)
             addView(ThemeUi.text(this@MainActivity, "或从以下候选中选择：", 12f, palette, role = ThemeUi.ROLE_SUB))
+
+            // 候选按来源分组，可切换 tab 只看某一源。LRCLIB 自带完整 LRC，通常最可靠。
+            val sourceOrder = listOf("LRCLIB", "QQ", "酷狗")
+            var bySource: Map<String, List<LyricsCandidate>> = emptyMap()
+            var activeSource = "LRCLIB"
             val list = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
-            addView(list)
             val status = ThemeUi.text(this@MainActivity, "正在检索候选…", 12f, palette, role = ThemeUi.ROLE_SUB)
+            val tabRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            addView(tabRow)
+            addView(list)
             addView(status)
-            lyrics.candidates(title, artist, duration, { result ->
-                status.text = if (result.isSuccess) "共 ${result.getOrThrow().size} 个候选" else result.exceptionOrNull()?.message
+
+            fun renderList() {
                 list.removeAllViews()
-                result.getOrNull()?.take(20)?.forEach { candidate -> list.addView(LyricsCandidateRow(candidate) {
-                    applyLyricsCandidate(item, candidate)
-                }) }
-            }, { stage -> status.text = stage })
+                val items = bySource[activeSource].orEmpty()
+                if (items.isEmpty()) {
+                    if (bySource.isNotEmpty()) status.text = "该源暂无候选"
+                    return
+                }
+                status.text = "$activeSource · ${items.size} 个候选"
+                items.take(20).forEach { candidate ->
+                    list.addView(LyricsCandidateRow(candidate, duration) { applyLyricsCandidate(item, candidate) })
+                }
+            }
+
+            fun renderTabs() {
+                tabRow.removeAllViews()
+                sourceOrder.forEach { source ->
+                    val count = bySource[source]?.size ?: 0
+                    val label = if (count > 0) "$source ($count)" else source
+                    val selected = source == activeSource
+                    val tab = ThemeUi.text(this@MainActivity, label, 12f, palette,
+                        role = if (selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_SUB).apply {
+                        setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 6f),
+                            ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 6f))
+                        background = if (selected) ThemeUi.bgDrawable(this@MainActivity, palette.control, 8f) else null
+                        setOnClickListener { activeSource = source; renderTabs(); renderList() }
+                    }
+                    tabRow.addView(tab)
+                }
+            }
+
+            fun runSearch() {
+                val q = titleInput.text.toString().trim().ifEmpty { title }
+                val a = artistInput.text.toString().trim()
+                bySource = emptyMap()
+                list.removeAllViews()
+                status.text = "正在检索候选…"
+                renderTabs()
+                lyrics.candidates(q, a, duration, { result ->
+                    result.onSuccess { all ->
+                        bySource = all.groupBy { it.source }
+                        // 默认落在第一个有结果的源，避免打开就是空列表。
+                        activeSource = sourceOrder.firstOrNull { !bySource[it].isNullOrEmpty() } ?: "LRCLIB"
+                        renderTabs()
+                        renderList()
+                    }.onFailure { status.text = it.message ?: "检索失败" }
+                }, { stage -> status.text = stage })
+            }
+            addView(ThemeUi.button(this@MainActivity, palette, "搜索候选", ThemeUi.ROLE_ACCENT) { runSearch() })
+            titleInput.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { runSearch(); true } else false
+            }
+            artistInput.setOnEditorActionListener { _, actionId, _ ->
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { runSearch(); true } else false
+            }
+            runSearch()
         }
         lyricsDialog = sheet
         sheet.show()
@@ -1722,6 +1851,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val artist = item.artist
         val duration = item.duration / 1000.0
         var previewView: TextView? = null
+        var subtitleView: TextView? = null
         val preview = Dialog(this).apply {
             val body = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.VERTICAL
@@ -1729,8 +1859,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     ThemeUi.dp(this@MainActivity, 18f), ThemeUi.dp(this@MainActivity, 10f))
                 background = ThemeUi.bgDrawable(this@MainActivity, palette.surface, 14f)
                 addView(ThemeUi.text(this@MainActivity, "预览歌词", 16f, palette, bold = true))
-                addView(ThemeUi.text(this@MainActivity,
-                    "${candidate.trackName} · ${candidate.artistName}", 12f, palette, role = ThemeUi.ROLE_SUB))
+                val subtitle = ThemeUi.text(this@MainActivity,
+                    "${candidate.trackName} · ${candidate.artistName}", 12f, palette, role = ThemeUi.ROLE_SUB)
+                subtitleView = subtitle
+                addView(subtitle)
                 val previewLines = TextView(this@MainActivity).apply {
                     textSize = 13f
                     setTextColor(palette.text)
@@ -1754,7 +1886,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                             lyricsDialog?.dismiss()
                             lyrics.applyCandidate(title, artist, duration, candidate, { result ->
                                 if (currentItem?.uri != item.uri) return@applyCandidate
-                                result.onSuccess { lyricsView.setLyrics(it) }
+                                result.onSuccess {
+                                    currentLyrics = it
+                                    lyricsView.setLyrics(it)
+                                    pushLyricsToVisualizer()
+                                }
                                     .onFailure { toast(it.message ?: "歌词获取失败") }
                             })
                         }
@@ -1774,6 +1910,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 previewView?.text = if (previewResult.lines.isNotEmpty())
                     previewResult.lines.take(12).joinToString("\n") { it.text }
                 else previewResult.plainLyrics.ifBlank { "暂无歌词内容" }
+                // 预览阶段拿到了真实 LRC，补上时长对比，帮助用户判断是否对得上原曲。
+                val lrcDuration = previewResult.lines.lastOrNull()?.let { it.timeMs / 1000.0 } ?: 0.0
+                val parts = mutableListOf("${candidate.trackName} · ${candidate.artistName}")
+                if (duration > 0) parts += "当前 ${time(duration)}"
+                if (lrcDuration > 0) parts += "LRC ${time(lrcDuration)}"
+                subtitleView?.text = parts.joinToString("  ·  ")
             }.onFailure {
                 previewView?.text = "预览失败：${it.message}"
             }
@@ -1782,13 +1924,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private inner class LyricsCandidateRow(
         private val candidate: LyricsCandidate,
+        private val trackDurationSeconds: Double,
         private val onClick: () -> Unit
-    ) : TextView(this@MainActivity) {
+    ) : LinearLayout(this@MainActivity) {
         init {
-            text = "${candidate.trackName}  ·  ${candidate.artistName}  ·  ${candidate.source}" +
-                (if (candidate.durationSeconds > 0) "  ·  ${time(candidate.durationSeconds)}" else "")
-            textSize = 13f
-            setTextColor(palette.text)
+            orientation = LinearLayout.VERTICAL
             setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f),
                 ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f))
             background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 8f)
@@ -1797,13 +1937,27 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             }
             isClickable = true
             setOnClickListener { onClick() }
+
+            // 主行：歌名 / 歌手 / 来源。
+            addView(ThemeUi.text(this@MainActivity,
+                "${candidate.trackName}  ·  ${candidate.artistName}  ·  ${candidate.source}",
+                13f, palette, bold = true))
+
+            // 副行：同步标记 + 当前曲目时长 vs 歌词/LRC 时长。
+            val parts = mutableListOf<String>()
+            parts += if (candidate.synced) "同步歌词" else "纯文本"
+            if (trackDurationSeconds > 0) parts += "当前 ${time(trackDurationSeconds)}"
+            if (candidate.lrcDurationSeconds > 0) parts += "LRC ${time(candidate.lrcDurationSeconds)}"
+            else if (candidate.durationSeconds > 0) parts += "时长 ${time(candidate.durationSeconds)}"
+            addView(ThemeUi.text(this@MainActivity, parts.joinToString("  ·  "),
+                11f, palette, role = ThemeUi.ROLE_SUB))
         }
     }
 
     private fun nowPlayingBar(): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 8f))
+            setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 6f), ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 4f))
             bg(this, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
             gravity = Gravity.BOTTOM
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
@@ -1811,10 +1965,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         playerBar = bar
         val meta = ThemeUi.row(this)
         disc = ImageView(this).apply {
+            // 透明 PNG 音符 + 主题色 tint，无背景，仅纯色旋转图标。
             setImageResource(jiangyi.spatial8d.R.drawable.ic_note)
+            imageTintList = android.content.res.ColorStateList.valueOf(palette.accent)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 8f))
-            bg(this, palette.accent, 19f)
+            setPadding(0, 0, 0, 0)
+            background = null
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 38f), ThemeUi.dp(this@MainActivity, 38f))
         }
         disc.setOnClickListener { showPlaylist() }
@@ -1831,24 +1987,23 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             setTextColor(0xffff5d5d.toInt()); visibility = View.GONE
             setPadding(ThemeUi.dp(this@MainActivity, 6f), 0, 0, 0)
         }
-        val statusTxt = ThemeUi.text(this, status.text.toString(), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
-            tag = "playerStatus"
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-                leftMargin = ThemeUi.dp(this@MainActivity, 8f)
-            }
-            ThemeUi.hideOverflow(this)
-        }
         sub.addView(position)
         sub.addView(modeTextView.apply {
             setPadding(ThemeUi.dp(this@MainActivity, 8f), 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 56f), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         sub.addView(recordingLabel)
-        sub.addView(statusTxt)
+        // 状态栏（含当前行歌词）独立成行，跟歌曲名左缘对齐，不再被时间/模式字段挤到右边。
+        val statusTxt = ThemeUi.text(this, status.text.toString(), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
+            tag = "playerStatus"
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            ThemeUi.hideOverflow(this)
+        }
         meta.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(songTitle)
             addView(sub)
+            addView(statusTxt)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
                 leftMargin = ThemeUi.dp(this@MainActivity, 10f)
             }

@@ -10,7 +10,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.PowerManager
-import android.util.Log
 import com.jiangyi.spatial8d.NativePreprocess
 import com.jiangyi.spatial8d.NativeSpatialExport
 import com.jiangyi.spatial8d.NativeSpatialPlayer
@@ -83,6 +82,7 @@ class SpatialPlayer(context: Context) {
     private var trackStarted = false
     @Volatile private var outputThread: Thread? = null
     private var playedOnce = false
+    private var endMarkerArmed = false
     private var recorder: PcmWavRecorder? = null
     // 每次 seek/切歌/缓存失效递增代号，旧线程和旧回调立即作废。
     @Volatile private var generation = 0
@@ -123,6 +123,7 @@ class SpatialPlayer(context: Context) {
         sampleRate = source.sampleRate
         cacheStart.set(0)
         trackStarted = false
+        endMarkerArmed = false
         prepared = true
         playedOnce = false
         syncWakeLock()
@@ -158,6 +159,7 @@ class SpatialPlayer(context: Context) {
         if (heard > 0 || playPos <= 0) pausedHead = heard
         paused = true
         try { synchronized(trackLock) { track?.pause() } } catch (_: Exception) {}
+        endMarkerArmed = false
         syncWakeLock()
     }
 
@@ -187,6 +189,7 @@ class SpatialPlayer(context: Context) {
                 }
             }
             trackStarted = false
+            endMarkerArmed = false
             decoded = null
             playPos = 0
             headBase = 0
@@ -238,6 +241,7 @@ class SpatialPlayer(context: Context) {
                     it.pause(); it.flush()
                     // 新缓存达到 START_FRAMES 后由输出线程统一起播，避免空轨欠载。
                     trackStarted = false
+                    endMarkerArmed = false
                 } catch (_: Exception) {}
             } }
             if (resume && !restartTrack) startWorkers()
@@ -256,6 +260,7 @@ class SpatialPlayer(context: Context) {
             .setTransferMode(AudioTrack.MODE_STREAM).build()
         check(track?.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
         trackStarted = false
+        endMarkerArmed = false
         synchronized(trackLock) { applyPlaybackParams() }
     }
 
@@ -366,6 +371,7 @@ class SpatialPlayer(context: Context) {
                 try { audio.pause(); audio.flush() } catch (_: Exception) {}
             }
             trackStarted = false
+            endMarkerArmed = false
             startWorkers()
         }
     }
@@ -419,14 +425,28 @@ class SpatialPlayer(context: Context) {
     private fun drainAndFinish(own: Int, current: RenderCache): Boolean {
         val source = decoded ?: return false
         if (!source.decodeDone || current.startFrame + current.produced.get() < source.frames) return false
-        // 文件读完后仍要等播放头排干，不能提前数百毫秒自动切下一首。
-        if (trackStarted && lastHeardFrame() + OUTPUT_CHUNK < playPos) return false
         if (own != generation) return true
+        if (!trackStarted || endMarkerArmed) return false
+        // 系统按实际输出帧通知排干，不能用已写入帧数或可能停走的播放头猜曲尾。
+        val marker = playPos
+        if (marker <= 0) return false
+        val audio = track ?: return false
+        endMarkerArmed = true
+        audio.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+            override fun onMarkerReached(track: AudioTrack) = finishTrack(own)
+            override fun onPeriodicNotification(track: AudioTrack) = Unit
+        }, main)
+        audio.notificationMarkerPosition = marker
+        return false
+    }
+
+    private fun finishTrack(own: Int) {
+        if (own != generation || !prepared || paused) return
         paused = true
         playedOnce = false
+        endMarkerArmed = false
         syncWakeLock()
         main.post { if (own == generation) onEnd?.invoke() }
-        return true
     }
 
     private fun lastHeardFrame() = if (trackStarted) synchronized(trackLock) {
@@ -459,6 +479,7 @@ class SpatialPlayer(context: Context) {
             try { old.pause(); old.flush(); old.stop() } catch (_: Exception) {}
             old.release()
             trackStarted = false
+            endMarkerArmed = false
         }
     }
 

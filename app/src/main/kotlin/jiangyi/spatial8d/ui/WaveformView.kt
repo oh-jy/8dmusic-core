@@ -60,7 +60,30 @@ class WaveformView(context: Context) : View(context) {
             canvas.drawLine(x.toFloat(), middle, x.toFloat(), y, paint)
         }
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
-        canvas.drawText("峰值 $peak  最大突变 $jump  RMS ${rms.toInt()}  采样窗 ${visible / 2} 帧",
-            16f, h - 8f, paint)
+        // 各段固定起点，避免数字位数变化推动后续文本左右抖动。
+        val labels = listOf(
+            "峰值 $peak",
+            "最大突变 $jump",
+            "RMS ${rms.toInt()}",
+            "采样窗 ${visible / 2} 帧"
+        )
+        // 四段均分，按列中心对齐绘制；超长时按列宽截断，避免相邻段相互挤占。
+        val padding = 16f
+        val columnWidth = (w - padding * 2) / labels.size
+        val oldAlign = paint.textAlign
+        paint.textAlign = Paint.Align.CENTER
+        labels.forEachIndexed { index, label ->
+            val centerX = padding + index * columnWidth + columnWidth / 2
+            var text = label
+            // 文本超过列宽时逐字截断并加省略号，保证不侵入下一列。
+            if (paint.measureText(text) > columnWidth - 8) {
+                while (text.isNotEmpty() && paint.measureText("$text…") > columnWidth - 8) {
+                    text = text.dropLast(1)
+                }
+                text = "$text…"
+            }
+            canvas.drawText(text, centerX, h - 8f, paint)
+        }
+        paint.textAlign = oldAlign
     }
 }

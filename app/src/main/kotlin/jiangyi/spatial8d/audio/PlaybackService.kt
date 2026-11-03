@@ -60,6 +60,9 @@ class PlaybackService : Service() {
     @Volatile private var currentItem: MusicItem? = null
     private var loadGeneration = 0
     private var foreground = false
+    private var lastAppInForeground = true
+    /** Activity 是否在前台。前台播放时不发通知，后台播放才显示以保持服务存活。 */
+    @Volatile var appInForeground = true
     private var transitioning = false
     private var autoplayFailures = 0
     private var pausedByHeadset = false
@@ -285,7 +288,8 @@ class PlaybackService : Service() {
         val newPositionMs = (position * 1000).toLong().coerceAtLeast(0)
         val newDurationMs = (duration * 1000).toLong().coerceAtLeast(0)
         val mediaChanged = !mediaInitialized || newTitle != this.title || subtitle != this.subtitle ||
-            playing != this.playing || newDurationMs != durationMs
+            playing != this.playing || newDurationMs != durationMs || appInForeground != lastAppInForeground
+        lastAppInForeground = appInForeground
         val now = SystemClock.elapsedRealtime()
         val positionChanged = newDurationMs > 0 && now - lastPlaybackStateUpdateMs >= 1000 &&
             abs(newPositionMs - positionMs) >= 500
@@ -315,14 +319,18 @@ class PlaybackService : Service() {
             val notification = buildNotification()
             val notificationManager = getSystemService(NotificationManager::class.java)
             if (playing) {
-                if (Build.VERSION.SDK_INT >= 29) {
-                    startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
-                } else startForeground(NOTIFICATION_ID, notification)
-                foreground = true
+                if (!appInForeground) {
+                    // 只在后台播放时进入前台服务并展示通知，避免前台时打扰。
+                    if (Build.VERSION.SDK_INT >= 29) {
+                        startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+                    } else startForeground(NOTIFICATION_ID, notification)
+                    foreground = true
+                }
             } else {
-                if (foreground) stopForeground(false)
+                if (foreground) stopForeground(true)
                 foreground = false
-                notificationManager.notify(NOTIFICATION_ID, notification)
+                // 前台暂停也不弹通知；后台暂停保留现有通知以便用户回到播放。
+                if (!appInForeground) notificationManager.notify(NOTIFICATION_ID, notification)
             }
         }
         if (playing) {

@@ -295,7 +295,9 @@ class PlaylistDialog(
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, dp(54), 1f)
-            addView(ThemeUi.text(c, (if (active) "▶ " else "") + song.name, 13f, p, bold = active, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply { ThemeUi.hideOverflow(this) })
+            // 列表中去掉 .mp3 / .flac 等扩展名，保持标题干净；原始 song.name 仍用于播放与检索。
+            val displayName = song.name.replace(Regex("\\.[A-Za-z0-9]{1,8}$"), "")
+            addView(ThemeUi.text(c, (if (active) "▶ " else "") + displayName, 13f, p, bold = active, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply { ThemeUi.hideOverflow(this) })
             addView(ThemeUi.text(c, "${song.artist} · ${song.album} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) })
         })
         row.addView(ThemeUi.text(c, "移除", 11f, p, role = ThemeUi.ROLE_FAINT).apply {

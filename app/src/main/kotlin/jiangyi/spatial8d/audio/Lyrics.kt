@@ -40,7 +40,9 @@ data class LyricsCandidate(
     val artistName: String,
     val durationSeconds: Double = 0.0,
     val source: String,
-    val query: String
+    val query: String,
+    val synced: Boolean = false,
+    val lrcDurationSeconds: Double = 0.0
 )
 
 /**
@@ -206,28 +208,30 @@ class Lyrics(context: Context) {
     }
 
     private fun searchCandidates(title: String, artist: String, duration: Double): List<LyricsCandidate> {
-        val rows = try {
-            JSONArray(request("https://lrclib.net/api/search?track_name=${encode(title)}") ?: "[]")
-        } catch (_: Exception) {
-            JSONArray()
-        }
-        val lrclib = (0 until rows.length()).mapNotNull { row ->
-            rowToCandidate(rows.getJSONObject(row), "LRCLIB")
-        }
-        // QQ 作为第二路候选，手动选择可覆盖自动打分选错的问题。
-        val qq = try {
-            fetchQqCandidates(title, artist, duration)
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val merged = LinkedHashMap<LyricsCandidate, Unit>()
-        lrclib.forEach { merged[it] = Unit }
-        // 自动回退视图同样可用，酷狗候选保留在末尾。
+        // 三路并行检索，各自独立容错；任一源失败不影响其它源候选。
+        val executor = Executors.newFixedThreadPool(3)
         try {
-            fetchKugouCandidates(title, artist, duration).forEach { merged[it] = Unit }
-        } catch (_: Exception) {}
-        if (merged.isEmpty()) throw NoSuchElementException("未找到可选的歌词候选")
-        return merged.keys.sortedBy { -scoreCandidate(it) }
+            val lrclibFuture = executor.submit<List<LyricsCandidate>> {
+                try {
+                    val rows = JSONArray(request("https://lrclib.net/api/search?track_name=${encode(title)}") ?: "[]")
+                    (0 until rows.length()).mapNotNull { rowToCandidate(rows.getJSONObject(it), "LRCLIB") }
+                } catch (_: Exception) { emptyList() }
+            }
+            val qqFuture = executor.submit<List<LyricsCandidate>> {
+                try { fetchQqCandidates(title, artist, duration) } catch (_: Exception) { emptyList() }
+            }
+            val kugouFuture = executor.submit<List<LyricsCandidate>> {
+                try { fetchKugouCandidates(title, artist, duration) } catch (_: Exception) { emptyList() }
+            }
+            val merged = LinkedHashSet<LyricsCandidate>()
+            merged += lrclibFuture.get(12, TimeUnit.SECONDS)
+            merged += qqFuture.get(12, TimeUnit.SECONDS)
+            merged += kugouFuture.get(12, TimeUnit.SECONDS)
+            if (merged.isEmpty()) throw NoSuchElementException("未找到可选的歌词候选")
+            return merged.sortedByDescending { scoreCandidate(it, title, artist, duration) }
+        } finally {
+            executor.shutdown()
+        }
     }
 
     private fun fetchQqCandidates(title: String, artist: String, duration: Double): List<LyricsCandidate> {
@@ -247,7 +251,8 @@ class Lyrics(context: Context) {
                 artistName = singer,
                 durationSeconds = row.optDouble("interval", 0.0),
                 source = "QQ",
-                query = Lyrics.encode(row.optString("songmid"))
+                query = Lyrics.encode(row.optString("songmid")),
+                synced = true
             )
         }
     }
@@ -264,7 +269,8 @@ class Lyrics(context: Context) {
                 artistName = row.optString("singer"),
                 durationSeconds = row.optDouble("duration", 0.0) / 1000.0,
                 source = "酷狗",
-                query = Lyrics.encode(row.optString("id") + "|" + row.optString("accesskey"))
+                query = Lyrics.encode(row.optString("id") + "|" + row.optString("accesskey")),
+                synced = true
             )
         }
     }
@@ -396,23 +402,58 @@ class Lyrics(context: Context) {
     private fun rowToCandidate(row: JSONObject, source: String): LyricsCandidate? {
         val trackName = row.optString("trackName", row.optString("name"))
         val artistName = row.optString("artistName")
-        val hasLyrics = row.optString("syncedLyrics").isNotBlank() ||
+        val syncedLyrics = row.optString("syncedLyrics")
+        val hasLyrics = syncedLyrics.isNotBlank() ||
             row.optString("plainLyrics").isNotBlank() || row.optBoolean("instrumental")
         if (trackName.isBlank() || !hasLyrics) return null
+        // LRC 实际覆盖时长取最后一行时间戳；纯文本无时间轴则为 0。
+        val lrcDuration = if (syncedLyrics.isNotBlank()) {
+            parseLrc(syncedLyrics).lastOrNull()?.let { it.timeMs / 1000.0 } ?: 0.0
+        } else 0.0
         return LyricsCandidate(
             trackName = trackName,
             artistName = artistName,
             durationSeconds = row.optDouble("duration", 0.0),
             source = source,
-            query = row.toString()
+            query = row.toString(),
+            synced = syncedLyrics.isNotBlank(),
+            lrcDurationSeconds = lrcDuration
         )
     }
 
-    private fun scoreCandidate(candidate: LyricsCandidate): Int {
-        var score = if (candidate.source == "LRCLIB") 100 else 0
-        if (candidate.trackName.isNotBlank()) score += 5
-        if (candidate.artistName.isNotBlank()) score += 2
-        if (candidate.durationSeconds > 0) score += 3
+    /**
+     * 手动候选排序：歌名完全一致 > 歌名包含 > 其它；歌手一致加权；时长接近加权；有同步歌词加权。
+     * 用户最关心"歌名 + 歌手都对 + 时长贴得上"，对应分数最高。
+     */
+    private fun scoreCandidate(candidate: LyricsCandidate, title: String, artist: String, duration: Double): Int {
+        val wantedTitle = normalizeTitle(title)
+        val actualTitle = normalizeTitle(candidate.trackName)
+        var score = when {
+            wantedTitle.isEmpty() || actualTitle.isEmpty() -> 0
+            actualTitle == wantedTitle -> 200
+            actualTitle.contains(wantedTitle) || wantedTitle.contains(actualTitle) -> 80
+            else -> 0
+        }
+        val wantedArtist = normalize(knownArtist(artist))
+        val actualArtist = normalize(candidate.artistName)
+        score += when {
+            wantedArtist.isEmpty() -> 10
+            actualArtist == wantedArtist -> 120
+            actualArtist.contains(wantedArtist) || wantedArtist.contains(actualArtist) -> 50
+            else -> 0
+        }
+        if (duration > 0 && candidate.durationSeconds > 0) {
+            val diff = abs(duration - candidate.durationSeconds)
+            score += when {
+                diff <= 1.0 -> 60
+                diff <= 3.0 -> 30
+                diff <= 5.0 -> 10
+                else -> 0
+            }
+        }
+        if (candidate.synced) score += 40
+        // 来源权重：LRCLIB 候选自带完整 LRC，无需二次抓取，排序略优先。
+        if (candidate.source == "LRCLIB") score += 5
         return score
     }
 
