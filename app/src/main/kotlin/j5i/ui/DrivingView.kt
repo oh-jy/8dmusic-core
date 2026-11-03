@@ -74,7 +74,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
             ThemeUi.ROLE_ACCENT_FILL, minHeightDp = 48f).apply {
             setOnClickListener { onClose?.invoke() }
         }, LayoutParams(-2, dp(48), Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(18); rightMargin = dp(18)
+            topMargin = dp(34); rightMargin = dp(72)
         })
     }
 
@@ -99,13 +99,17 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
 
     private fun renderLyrics(position: Long) {
         val result = lyrics
-        val current = result?.lines?.indexOfLast { it.timeMs <= position } ?: -1
+        val plainLines = result?.plainLyrics?.lineSequence()?.map { it.trim() }?.filter { it.isNotEmpty() }?.toList().orEmpty()
+        val current = if (result?.lines?.isNotEmpty() == true) result.lines.indexOfLast { it.timeMs <= position }
+        else if (plainLines.isNotEmpty()) ((position / 4000L).toInt() % plainLines.size) else -1
         if (current != lastLoggedIndex) {
             lastLoggedIndex = current
-            Log.i("8DDriveLyrics", "index=$current positionMs=$position lines=${result?.lines?.size ?: 0}")
+            Log.i("8DDriveLyrics", "index=$current positionMs=$position lines=${result?.lines?.size ?: plainLines.size}")
         }
         lines.forEachIndexed { index, view ->
-            view.text = result?.lines?.getOrNull(current - 1 + index)?.text.orEmpty()
+            view.text = if (result?.lines?.isNotEmpty() == true)
+                result.lines.getOrNull(current - 1 + index)?.text.orEmpty()
+            else plainLines.getOrNull(current - 1 + index).orEmpty()
         }
     }
 

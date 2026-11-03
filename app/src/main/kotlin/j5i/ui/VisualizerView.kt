@@ -10,6 +10,8 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.FrameLayout
@@ -34,6 +36,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     var dark = true
         set(value) { field = value; canvas.dark = value; restyle() }
     private val canvas = AudioCanvas(context)
+    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            onExpand?.invoke()
+            return true
+        }
+    })
     private val graphView = WaveformView(context)
     private val lyricOverlay = LyricOverlay(context)
     private var exclusive = false
@@ -56,6 +64,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         val stage = FrameLayout(context)
         addView(stage, LayoutParams(-1, 0, 1f))
         stage.addView(canvas, FrameLayout.LayoutParams(-1, -1))
+        canvas.setOnTouchListener { _, event -> gestures.onTouchEvent(event); true }
+        graphView.setOnTouchListener { _, event -> gestures.onTouchEvent(event); true }
         stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
         stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, -1))
         stage.addView(layerRow, FrameLayout.LayoutParams(-1, dp(28f)).apply {

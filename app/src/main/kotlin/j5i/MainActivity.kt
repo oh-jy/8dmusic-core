@@ -165,6 +165,8 @@ private var exportDialog: Dialog? = null
 private var visualizerDialog: Dialog? = null
 private var drivingDialog: Dialog? = null
 private var drivingView: DrivingView? = null
+private var drivingAutoDismissed = false
+private var lastCarMode = false
 private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private lateinit var transportRow: LinearLayout
     private lateinit var playerBar: LinearLayout
@@ -536,6 +538,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     /** 系统深浅色切换时，跟随模式自动刷新。 */
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        val carMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK ==
+            android.content.res.Configuration.UI_MODE_TYPE_CAR
+        if (carMode && !lastCarMode && !drivingAutoDismissed) showDrivingMode()
+        lastCarMode = carMode
         if (themeMode == 2) {
             val newDark = resolveDark()
             if (newDark != dark) { dark = newDark; refreshTheme() }
@@ -1369,7 +1375,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         drivingView = view
         drivingDialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
             setContentView(view)
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             setOnDismissListener {
+                drivingAutoDismissed = true
                 (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
                 curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
                 visualizerView.showLayerOptions = false
@@ -1379,6 +1387,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
             show()
         }
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         updateDriving()
     }
 
