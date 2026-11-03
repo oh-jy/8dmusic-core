@@ -159,7 +159,6 @@ private var infoDialog: Dialog? = null
 private var exportDialog: Dialog? = null
 private var visualizerDialog: Dialog? = null
 private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
-    private var infoExpanded = -1
     private lateinit var transportRow: LinearLayout
     private lateinit var playerBar: LinearLayout
     private lateinit var themeButton: Button
@@ -175,7 +174,6 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var radioSources = listOf<jiangyi.spatial8d.core.RadioSource>()
     private var radioSourceIndex = -1
     private var radioGeneration = 0
-    private var sourceTab = 0
     private var sourceRegion = "全部"
     private var sourceCity = "全部"
     private var sourceType = "全部"
@@ -192,12 +190,15 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var recordingPath = ""
     private var recordingStartedAt = 0L
     private var sourceDialog: Dialog? = null
-    private var sourceUnlocked = false
+    private var onlineSourceDialog = false
+    private var fmUnlocked = false
+    private var onlineUnlocked = false
     private var sourceTapCount = 0
     private var sourceTapAt = 0L
     private var exitDialog: Dialog? = null
     private var lyricsDialog: Dialog? = null
-    private lateinit var sourceButton: Button
+    private lateinit var fmButton: Button
+    private lateinit var onlineButton: Button
     private lateinit var radioRefreshButton: Button
     private var sourceStatusView: TextView? = null
     private var playlistDialog: PlaylistDialog? = null
@@ -1287,11 +1288,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             textSize = 11f
             setOnClickListener { action() }
         }
-        sourceButton = navButton("音源") { showSourceSheet() }.apply {
-            visibility = if (sourceUnlocked) View.VISIBLE else View.GONE
+        fmButton = navButton("FM") { showSourceSheet(false) }.apply {
+            visibility = if (fmUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
-        bar.addView(sourceButton)
+        bar.addView(fmButton)
+        onlineButton = navButton("曲库") { showSourceSheet(true) }.apply {
+            visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
+        }
+        bar.addView(onlineButton)
         themeButton = navButton(when (themeMode) { 0 -> "深色"; 1 -> "浅色"; else -> "跟随" }) {
             // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
             themeMode = (themeMode + 1) % 3
@@ -1305,23 +1311,21 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         return bar
     }
 
-    /** 音源是页面级隐藏入口：1.2 秒内三击解锁 FM，五击解锁在线曲库；不写入持久化。 */
+    /** 三击开放 FM，五击开放曲库；两个入口及弹窗各自独立，不写入持久化。 */
     private fun unlockSource() {
         val now = SystemClock.elapsedRealtime()
         sourceTapCount = if (now - sourceTapAt <= 1200) sourceTapCount + 1 else 1
         sourceTapAt = now
         if (sourceTapCount >= 3) {
-            if (!sourceUnlocked) {
-                sourceUnlocked = true
-                sourceButton.visibility = View.VISIBLE
-            }
             if (sourceTapCount >= 5) {
-                sourceTab = 1
+                onlineUnlocked = true
+                onlineButton.visibility = View.VISIBLE
                 sourceTapCount = 0
-                showSourceSheet()
+                showSourceSheet(true)
             } else if (sourceTapCount == 3) {
-                sourceTab = 0
-                showSourceSheet()
+                fmUnlocked = true
+                fmButton.visibility = View.VISIBLE
+                showSourceSheet(false)
             }
         }
     }
@@ -2290,44 +2294,41 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun showInfoSheet() {
         if (infoDialog?.isShowing == true) return
+        val expandedSections = mutableSetOf("快速入门")
+        fun LinearLayout.section(title: String, content: String) {
+            lateinit var desc: TextView
+            addView(ThemeUi.text(this@MainActivity, title, 13f, palette, bold = true).apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, 0)
+                setOnClickListener {
+                    val opening = !expandedSections.remove(title)
+                    if (opening) expandedSections += title
+                    desc.visibility = if (opening) View.VISIBLE else View.GONE
+                }
+            })
+            desc = ThemeUi.text(this@MainActivity, content, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 6f))
+                visibility = if (title in expandedSections) View.VISIBLE else View.GONE
+            }
+            addView(desc)
+            addView(ThemeUi.divider(this@MainActivity, palette))
+        }
         infoDialog = ThemeUi.showSheet(this, palette, "应用说明", fullHeight = true) {
+            addView(ThemeUi.text(this@MainActivity, "应用说明", 14f, palette, bold = true))
             listOf(
                 "快速入门" to "1. 选择本地歌曲、FM 电台或在线曲库；\n2. 在空间风格里选一个预设；\n3. 点击播放后可通过音频图谱和可视化观察效果；\n4. 需要修正歌词时，在「同步歌词」长按歌词即可。",
-                "隐藏入口" to "1.2 秒内连续点击标题 3 次打开 FM；连续点击 5 次直接打开在线曲库。",
                 "歌词" to "同步歌词自动滚动；点击任意行可跳转；长按当前歌词进入搜索、候选与预览。",
                 "可视化" to "波形 / 频谱 / 响度 / 相位可组合显示；声谱、粒子、穿梭为独占模式；穿梭模式会叠加当前歌词。",
                 "导出与录音" to "本地歌曲可导出 WAV / MP3；FM 电台可录制最终 8D 输出。"
-            ).forEach { (label, desc) ->
-                addView(ThemeUi.text(this@MainActivity, label, 13f, palette, bold = true).apply {
-                    setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, 0)
-                })
-                addView(ThemeUi.text(this@MainActivity, desc, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                    setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 6f))
-                })
-                addView(ThemeUi.divider(this@MainActivity, palette))
+            ).forEach { (title, content) -> section(title, content) }
+            addView(ThemeUi.text(this@MainActivity, "参数说明", 14f, palette, bold = true).apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 12f), 0, 0)
+            })
+            PARAM_INFO.forEach { info ->
+                section(info.label, info.desc)
             }
-            PARAM_INFO.forEachIndexed { index, info ->
-                lateinit var desc: TextView
-                addView(ThemeUi.text(this@MainActivity, info.label, 13f, palette, bold = true).apply {
-                    setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, 0)
-                    setOnClickListener {
-                        val opening = infoExpanded != index
-                        infoExpanded = if (opening) index else -1
-                        desc.visibility = if (opening) View.VISIBLE else View.GONE
-                        if (opening) desc.post {
-                            // 展开靠近底部的参数时，把完整说明带进可视区，其余内容仍可手动滚动。
-                            (desc.parent?.parent as? android.widget.ScrollView)?.smoothScrollTo(0, desc.top)
-                        }
-                    }
-                })
-                desc = ThemeUi.text(this@MainActivity, info.desc, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                    setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 6f))
-                    visibility = if (infoExpanded == index) View.VISIBLE else View.GONE
-                }
-                addView(desc)
-                addView(ThemeUi.divider(this@MainActivity, palette))
-            }
-            addView(ThemeUi.text(this@MainActivity, "曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", 12f, palette, role = ThemeUi.ROLE_SUB))
+            addView(ThemeUi.text(this@MainActivity, "曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 24f))
+            })
         }
         infoDialog?.show()
         (infoDialog?.window?.decorView?.findViewWithTag<View>("sheetBody")?.parent as? android.widget.ScrollView)?.apply {
@@ -2388,21 +2389,25 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun isPlaying(): Boolean =
         if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
 
-    private fun showSourceSheet() {
-        if (!sourceUnlocked) return
+    private fun showSourceSheet(online: Boolean) {
+        if (if (online) !onlineUnlocked else !fmUnlocked) return
         if (sourceDialog?.isShowing == true) {
-            sourceDialog?.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody")
-                ?.let(::populateSourceSheet)
-            return
+            if (onlineSourceDialog != online) sourceDialog?.dismiss()
+            else {
+                sourceDialog?.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody")
+                    ?.let { populateSourceSheet(it, online) }
+                sourceDialog?.show()
+                return
+            }
         }
-        sourceTab = sourceTab.coerceIn(0, 1)
+        onlineSourceDialog = online
         sourceStatusView = null
-        val sheet = ThemeUi.showSheet(this, palette, "音源", "多源聚合 · 自动回退 · 8D 实时处理",
+        val sheet = ThemeUi.showSheet(this, palette, if (online) "在线曲库" else "FM 电台", "多源聚合 · 自动回退 · 8D 实时处理",
             cancelLabel = "关闭", fullHeight = true, scrollable = false) {
-            populateSourceSheet(this)
+            populateSourceSheet(this, online)
         }
         sourceDialog = sheet
-        sourceStatusView = ThemeUi.text(this, "选择 FM 电台或免费音乐，或粘贴自己的直播流地址", 11f, palette,
+        sourceStatusView = ThemeUi.text(this, if (online) "检索各平台公开曲目，按当前账号权限播放" else "选择 FM 电台，或粘贴自己的直播流地址", 11f, palette,
             role = ThemeUi.ROLE_SUB)
         sheet.findViewById<ViewGroup>(android.R.id.content)?.let { content ->
             (content.getChildAt(0) as? LinearLayout)?.addView(sourceStatusView)
@@ -2411,27 +2416,20 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     }
 
     private fun showSourceSheetRecreate() {
-        showSourceSheet()
+        showSourceSheet(onlineSourceDialog)
     }
 
-    /** 页签和筛选只替换弹窗内容，不销毁 Dialog，避免整窗闪动。 */
-    private fun populateSourceSheet(body: LinearLayout) {
+    /** 筛选只替换当前独立弹窗内容，不销毁 Dialog，避免整窗闪动。 */
+    private fun populateSourceSheet(body: LinearLayout, online: Boolean) {
         body.removeAllViews()
-        body.addView(tabRow(listOf("FM 电台", "在线曲库"), sourceTab) {
-            sourceTab = it
-            sourceRegion = "全部"
-            sourceCity = "全部"
-            sourceType = "全部"
-            showSourceSheetRecreate()
-        })
-        if (sourceTab == 0) {
+        if (!online) {
             val filters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             filters.addView(filterScroll("地区", RadioCatalog.regions, sourceRegion) {
                 sourceRegion = it
                 sourceCity = "全部"
                 showSourceSheetRecreate()
             })
-            if (sourceTab == 0 && sourceRegion != "全部" && sourceRegion != "全国") {
+            if (sourceRegion != "全部" && sourceRegion != "全国") {
                     val cities = listOf("全部") + RadioCatalog.filter(false, sourceRegion)
                     .map { it.city }.distinct()
                 if (cities.size > 1) filters.addView(filterScroll("城市", cities, sourceCity) {

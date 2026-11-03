@@ -60,9 +60,8 @@ class OnlineMusic(private val activity: Activity) {
     }
 
     private fun aggregate(query: String, page: Int): List<OnlineTrack> {
-        val pool = Executors.newFixedThreadPool(4)
-        // 酷狗未登录不能可靠播放，不再把不可播放的检索结果混入聚合列表。
-        val providers = intArrayOf(1, 2, 4, 5)
+        val pool = Executors.newFixedThreadPool(5)
+        val providers = intArrayOf(2, 4, 3, 1, 5)
         val calls = providers.map { provider -> pool.submit<List<OnlineTrack>> { searchOne(provider, query, page) } }
         return try {
             val failures = mutableListOf<String>()

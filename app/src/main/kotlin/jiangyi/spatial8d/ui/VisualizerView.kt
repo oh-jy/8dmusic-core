@@ -451,14 +451,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val nx = -dy / length * size
                 val ny = dx / length * size
                 val group = (depth * 3.99f).toInt().coerceIn(0, 3)
-                // 彗尾分三段：靠近头部最宽、末端最窄，视觉上形成连续衰减。
-                val midDepth = (depth + tailDepth) * .5f
-                val midX = cx + rayX * midDepth
-                val midY = cy + rayY * midDepth
+                // 单个三角形从头部直接收窄到零，不出现中间再次变宽的折点。
                 travelPaths[group].moveTo(x + nx, y + ny)
-                travelPaths[group].lineTo(midX - nx * .55f, midY - ny * .55f)
                 travelPaths[group].lineTo(tailX, tailY)
-                travelPaths[group].lineTo(midX + nx * .55f, midY + ny * .55f)
                 travelPaths[group].lineTo(x - nx, y - ny)
                 travelPaths[group].close()
                 travelHeads[group].addCircle(x, y, size, Path.Direction.CW)

@@ -140,8 +140,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         canvas.drawText("左", 7f, cy + 4f, paint)
         canvas.drawText("右", w - 7f, cy + 4f, paint)
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
-        // 用户反馈球体偏大：整体半径缩小约三分之一。
-        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.67f
+        // 彩虹球及初始外圈再次缩小三分之一，人头像保持原尺寸。
+        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.45f
         val light = project(f, sourceR, cx, cy)
         paint.color = if (dark) 0x4d4ea1ff.toInt() else 0x3d2e7fe6.toInt()
         canvas.drawCircle(cx + f.x.toFloat() * sourceR, cy - f.y.toFloat() * SIN_T * sourceR, 3.2f, paint)
@@ -227,7 +227,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.alpha = 255
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
         val pt = project(f, r, cx, cy)
-        val pr = 8f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
+        val pr = 5.36f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
         if (playing) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f
