@@ -123,7 +123,6 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private lateinit var visualization: SpatialVisualization
     private lateinit var curve: CurveView
     private lateinit var lyricsView: LyricsView
-    private lateinit var waveformView: WaveformView
     private lateinit var visualizerView: VisualizerView
     private lateinit var curveLegend: LinearLayout
     private lateinit var curveContent: FrameLayout
@@ -189,8 +188,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var recordingKind = ""
     private var recordingPath = ""
     private var recordingStartedAt = 0L
-    private var sourceDialog: Dialog? = null
-    private var onlineSourceDialog = false
+    private var fmDialog: Dialog? = null
+    private var onlineDialog: Dialog? = null
     private var fmUnlocked = false
     private var onlineUnlocked = false
     private var sourceTapCount = 0
@@ -222,8 +221,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             service?.onPlaybackChanged = { main.post { refreshPlayback() } }
             service?.onTrackChanged = { item -> main.post { adoptServiceTrack(item) } }
             service?.player?.onPcm = { data, bytes ->
-                if (::waveformView.isInitialized && curvePanel == 1) waveformView.accept(data, bytes)
-                if (::visualizerView.isInitialized && curvePanel == 2) visualizerView.accept(data, bytes)
+                if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
                 popupVisualizer?.accept(data, bytes)
             }
             service?.radio?.onReady = { main.post {
@@ -280,7 +278,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             override fun handleOnBackPressed() {
                 if (exitDialog?.isShowing == true) { exitDialog?.dismiss(); return }
                 var dismissed = false
-                listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog, lyricsDialog).forEach { dialog ->
+                listOf(fmDialog, onlineDialog, infoDialog, exportDialog, visualizerDialog, lyricsDialog).forEach { dialog ->
                     if (dialog?.isShowing == true) { dialog.dismiss(); dismissed = true }
                 }
                 if (playlistDialog?.isShowing() == true) { playlistDialog?.dismiss(); dismissed = true }
@@ -476,7 +474,6 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         root.findViewWithTag<View>("navbar")?.setBackgroundColor(palette.background)
         visualization.dark = dark
         curve.dark = dark
-        waveformView.dark = dark
         visualizerView.dark = dark
         popupVisualizer?.dark = dark
         if (::lyricsView.isInitialized) lyricsView.dark = dark
@@ -502,7 +499,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
         refreshControls()
         refreshAll()
-        listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog).forEach { dialog ->
+        listOf(fmDialog, onlineDialog, infoDialog, exportDialog, visualizerDialog).forEach { dialog ->
             if (dialog?.isShowing == true) {
                 val content = dialog.findViewById<ViewGroup>(android.R.id.content)
                 if (content != null) ThemeUi.applyTheme(content, palette)
@@ -583,8 +580,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }.orEmpty()
         modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
         status.text = playbackStatus
-        // 播放条下方状态栏：未切到"同步歌词"tab 时优先显示当前行歌词；在歌词 tab 则还原为播放状态。
-        val statusLine = if (curvePanel != 3) {
+        // 歌词只允许出现在一个位置：同步歌词，或可视化的图谱/粒子/穿梭及其弹窗。
+        val visualLyrics = curvePanel == 1 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
+        val statusLine = if (curvePanel != 2 && !visualLyrics) {
             val lines = currentLyrics?.lines
             val currentLine = lines?.let { ls ->
                 val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
@@ -1321,11 +1319,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 onlineUnlocked = true
                 onlineButton.visibility = View.VISIBLE
                 sourceTapCount = 0
-                showSourceSheet(true)
             } else if (sourceTapCount == 3) {
                 fmUnlocked = true
                 fmButton.visibility = View.VISIBLE
-                showSourceSheet(false)
             }
         }
     }
@@ -1664,12 +1660,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun curveCard(): LinearLayout {
         val card = card {
-            addView(tabRow(listOf("空间曲线", "音频图谱", "可视化", "同步歌词"), curvePanel, compact = true) {
+            addView(tabRow(listOf("空间曲线", "可视化", "同步歌词"), curvePanel, compact = true) {
                 curvePanel = it
                 curve.visibility = if (it == 0) View.VISIBLE else View.GONE
-                waveformView.visibility = if (it == 1) View.VISIBLE else View.GONE
-                visualizerView.visibility = if (it == 2) View.VISIBLE else View.GONE
-                lyricsView.visibility = if (it == 3) View.VISIBLE else View.GONE
+                visualizerView.visibility = if (it == 1) View.VISIBLE else View.GONE
+                lyricsView.visibility = if (it == 2) View.VISIBLE else View.GONE
                 // 非"空间曲线" tab 隐藏图例并把它的高度转移给 curveContent，
                 // 避免图例行占位造成波形/频谱顶部一片空白。
                 val legendHeight = curveLegend.height.takeIf { h -> h > 0 }
@@ -1724,11 +1719,6 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 visibility = View.GONE
             }
             curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
-            waveformView = WaveformView(this@MainActivity).apply {
-                dark = this@MainActivity.dark
-                visibility = View.GONE
-            }
-            curveContent.addView(waveformView, FrameLayout.LayoutParams(-1, -1))
             visualizerView = VisualizerView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
                 visibility = View.GONE
@@ -2297,8 +2287,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val expandedSections = mutableSetOf("快速入门")
         fun LinearLayout.section(title: String, content: String) {
             lateinit var desc: TextView
-            addView(ThemeUi.text(this@MainActivity, title, 13f, palette, bold = true).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, 0)
+            addView(ThemeUi.text(this@MainActivity, title, 14f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
+                setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f),
+                    ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 8f))
+                background = ThemeUi.bgDrawable(this@MainActivity, palette.surfaceAlt, 6f)
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = ThemeUi.dp(this@MainActivity, 6f) }
                 setOnClickListener {
                     val opening = !expandedSections.remove(title)
                     if (opening) expandedSections += title
@@ -2306,23 +2299,27 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             })
             desc = ThemeUi.text(this@MainActivity, content, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 6f))
+                setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 8f),
+                    ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
                 visibility = if (title in expandedSections) View.VISIBLE else View.GONE
             }
             addView(desc)
-            addView(ThemeUi.divider(this@MainActivity, palette))
         }
-        infoDialog = ThemeUi.showSheet(this, palette, "应用说明", fullHeight = true) {
-            addView(ThemeUi.text(this@MainActivity, "应用说明", 14f, palette, bold = true))
+        infoDialog = ThemeUi.showSheet(this, palette, "说明", fullHeight = true) {
+            addView(ThemeUi.text(this@MainActivity, "应用说明", 16f, palette, bold = true).apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 4f))
+            })
+            addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             listOf(
                 "快速入门" to "1. 选择本地歌曲、FM 电台或在线曲库；\n2. 在空间风格里选一个预设；\n3. 点击播放后可通过音频图谱和可视化观察效果；\n4. 需要修正歌词时，在「同步歌词」长按歌词即可。",
                 "歌词" to "同步歌词自动滚动；点击任意行可跳转；长按当前歌词进入搜索、候选与预览。",
-                "可视化" to "波形 / 频谱 / 响度 / 相位可组合显示；声谱、粒子、穿梭为独占模式；穿梭模式会叠加当前歌词。",
+                "可视化" to "波形 / 频谱 / 响度 / 相位可组合显示；声谱、图谱、粒子、穿梭为独占模式；后三者会叠加当前歌词。",
                 "导出与录音" to "本地歌曲可导出 WAV / MP3；FM 电台可录制最终 8D 输出。"
             ).forEach { (title, content) -> section(title, content) }
-            addView(ThemeUi.text(this@MainActivity, "参数说明", 14f, palette, bold = true).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 12f), 0, 0)
+            addView(ThemeUi.text(this@MainActivity, "参数说明", 16f, palette, bold = true).apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 18f), 0, ThemeUi.dp(this@MainActivity, 4f))
             })
+            addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             PARAM_INFO.forEach { info ->
                 section(info.label, info.desc)
             }
@@ -2334,6 +2331,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         (infoDialog?.window?.decorView?.findViewWithTag<View>("sheetBody")?.parent as? android.widget.ScrollView)?.apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = true
+            // 展开内容不能反过来撑高滚动容器；固定剩余高度，全部展开后仍可滚到底部。
+            post { layoutParams = layoutParams.apply { height = (parent as? View)?.height ?: height } }
         }
     }
 
@@ -2391,22 +2390,14 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun showSourceSheet(online: Boolean) {
         if (if (online) !onlineUnlocked else !fmUnlocked) return
-        if (sourceDialog?.isShowing == true) {
-            if (onlineSourceDialog != online) sourceDialog?.dismiss()
-            else {
-                sourceDialog?.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody")
-                    ?.let { populateSourceSheet(it, online) }
-                sourceDialog?.show()
-                return
-            }
-        }
-        onlineSourceDialog = online
+        val current = if (online) onlineDialog else fmDialog
+        if (current?.isShowing == true) return
         sourceStatusView = null
         val sheet = ThemeUi.showSheet(this, palette, if (online) "在线曲库" else "FM 电台", "多源聚合 · 自动回退 · 8D 实时处理",
             cancelLabel = "关闭", fullHeight = true, scrollable = false) {
             populateSourceSheet(this, online)
         }
-        sourceDialog = sheet
+        if (online) onlineDialog = sheet else fmDialog = sheet
         sourceStatusView = ThemeUi.text(this, if (online) "检索各平台公开曲目，按当前账号权限播放" else "选择 FM 电台，或粘贴自己的直播流地址", 11f, palette,
             role = ThemeUi.ROLE_SUB)
         sheet.findViewById<ViewGroup>(android.R.id.content)?.let { content ->
@@ -2416,7 +2407,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     }
 
     private fun showSourceSheetRecreate() {
-        showSourceSheet(onlineSourceDialog)
+        val dialog = onlineDialog ?: return
+        dialog.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody")
+            ?.let { populateSourceSheet(it, true) }
     }
 
     /** 筛选只替换当前独立弹窗内容，不销毁 Dialog，避免整窗闪动。 */
@@ -2444,8 +2437,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             body.addView(filters)
             addStationBrowser(body, filters)
         } else {
-            body.addView(tabRow(listOf("聚合", "酷我", "网易云", "酷狗", "QQ", "Jamendo"), onlineProvider) {
-                onlineProvider = it
+            val providers = listOf("聚合" to 0, "网易云" to 2, "QQ" to 4, "酷狗" to 3, "酷我" to 1, "Jamendo" to 5)
+            body.addView(tabRow(providers.map { it.first }, providers.indexOfFirst { it.second == onlineProvider }) {
+                onlineProvider = providers[it].second
                 onlinePage = 1
                 onlineQuery = ""
                 showSourceSheetRecreate()
@@ -2522,7 +2516,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             override fun afterTextChanged(s: android.text.Editable?) {
                 val q = s?.toString().orEmpty()
                 main.postDelayed({
-                    if (seq == sourceSearchSeq && sourceDialog?.isShowing == true) {
+                    if (seq == sourceSearchSeq && fmDialog?.isShowing == true) {
                         renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, q))
                     }
                 }, 160)
@@ -2638,7 +2632,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     onlineStatusView?.text = "正在获取 ${track.title} 的播放地址…"
                     onlineMusic.resolve(track) { result ->
                         result.onSuccess { playOnline(track, it) }
-                            .onFailure { if (sourceDialog?.isShowing == true)
+                            .onFailure { if (onlineDialog?.isShowing == true)
                                 onlineStatusView?.text = it.message ?: "播放地址获取失败" }
                     }
                 }
@@ -2656,8 +2650,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun openQqLogin() {
         onlineStatusView?.text = "首次请选择登录文件保存目录，再在微信官方页面完成授权"
         onlineMusic.login { result ->
-            result.onSuccess { if (sourceDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) } }
-                .onFailure { if (sourceDialog?.isShowing == true)
+            result.onSuccess { if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) } }
+                .onFailure { if (onlineDialog?.isShowing == true)
                     onlineStatusView?.text = it.message ?: "登录失败" }
         }
     }
@@ -2722,9 +2716,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun loadOnlineTracks(append: Boolean) {
         val seq = ++onlineSearchSeq
         onlineStatusView?.text = "正在加载…"
-        if (sourceDialog?.isShowing != true) return
+        if (onlineDialog?.isShowing != true) return
         val callback: (Result<List<OnlineTrack>>) -> Unit = { result ->
-            if (seq == onlineSearchSeq && sourceDialog?.isShowing == true) {
+            if (seq == onlineSearchSeq && onlineDialog?.isShowing == true) {
                 result.onSuccess {
                     onlineTracks = if (append) onlineTracks + it else it
                     refreshOnlineBody()
@@ -2745,7 +2739,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         load(item)
     }
 
-    private fun dismissSource() { sourceDialog?.dismiss() }
+    private fun dismissSource() { fmDialog?.dismiss(); onlineDialog?.dismiss() }
 
     private fun playCustom(raw: String) {
         val url = raw.trim()

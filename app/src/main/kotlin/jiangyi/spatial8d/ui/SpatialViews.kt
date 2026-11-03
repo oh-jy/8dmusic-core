@@ -123,7 +123,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         val cy = h * 0.50f
         val elevMax = min(80.0, max(0.0, p.elev)) * Math.PI / 180.0
         val vSpan = (SIN_T + COS_T * sin(elevMax)).toFloat()
-        val r = min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan))
+        val r = min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.4f
         paint.color = if (dark) 0xb8becfe4.toInt() else 0xc7445871.toInt()
@@ -142,15 +142,22 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
         // 彩虹球及初始外圈再次缩小三分之一，人头像保持原尺寸。
         val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.45f
-        val light = project(f, sourceR, cx, cy)
+        // 远近最靠近时也要与人头像保留距离，避免球体进入头部轮廓。
+        val minScale = (28f / sourceR).coerceAtMost(1f)
+        fun clearOfHead(f: SpaceFrame): SpaceFrame {
+            val radius = f.radius.coerceAtLeast(minScale.toDouble())
+            return if (radius == f.radius) f else f.copy(radius = radius,
+                x = sin(f.azimuth) * radius, y = cos(f.azimuth) * radius, z = sin(f.elev) * radius)
+        }
+        val light = project(clearOfHead(f), sourceR, cx, cy)
         paint.color = if (dark) 0x4d4ea1ff.toInt() else 0x3d2e7fe6.toInt()
-        canvas.drawCircle(cx + f.x.toFloat() * sourceR, cy - f.y.toFloat() * SIN_T * sourceR, 3.2f, paint)
+        canvas.drawCircle(light[0], light[1], 3.2f, paint)
         // 前后景遮挡与 UTS 一致，位于前方的小球先画，人头像最后覆盖。
-        if (f.y < 0) {
+        if (clearOfHead(f).y < 0) {
             drawAvatar(canvas, cx, cy, now, light)
-            drawPlanet(canvas, t, sourceR, cx, cy, now, p)
+            drawPlanet(canvas, t, sourceR, cx, cy, now, p, ::clearOfHead)
         } else {
-            drawPlanet(canvas, t, sourceR, cx, cy, now, p)
+            drawPlanet(canvas, t, sourceR, cx, cy, now, p, ::clearOfHead)
             drawAvatar(canvas, cx, cy, now, light)
         }
         canvas.restore()
@@ -207,13 +214,14 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         for (s in 0 until 6) { paint.color = hue(phase + s * 60.0); c.drawCircle(x, y, 6f - s - 0.5f, paint) }
     }
 
-    private fun drawPlanet(c: Canvas, t: Double, r: Float, cx: Float, cy: Float, now: Double, p: SpacePreset) {
+    private fun drawPlanet(c: Canvas, t: Double, r: Float, cx: Float, cy: Float, now: Double, p: SpacePreset,
+        clearOfHead: (SpaceFrame) -> SpaceFrame) {
         val span = min(2.6, max(0.6, p.period * 0.55))
         paint.style = Paint.Style.FILL
         for (k in 42 downTo 1) {
             val u = k / 42.0
             val age = u * (0.35 + 0.65 * u)
-            val f = frameAt(t - span * age, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
+            val f = clearOfHead(frameAt(t - span * age, p.period, p.phase, p.direction, p.elev, p.depth / 100.0))
             val pt = project(f, r, cx, cy)
             val taper = ((1 - u) * (1 - u)).toFloat()
             val dx = pt[0] - cx
@@ -225,7 +233,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             c.drawCircle(pt[0] - dy / len * wobble, pt[1] + dx / len * wobble, max(0.9f, 12f * pt[2] * (0.18f + 0.82f * taper)), paint)
         }
         paint.alpha = 255
-        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
+        val f = clearOfHead(frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0))
         val pt = project(f, r, cx, cy)
         val pr = 5.36f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
         if (playing) {

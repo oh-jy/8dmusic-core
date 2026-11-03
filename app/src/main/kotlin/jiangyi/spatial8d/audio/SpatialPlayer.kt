@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.PowerManager
+import android.os.SystemClock
 import android.util.Log
 import com.jiangyi.spatial8d.NativePreprocess
 import com.jiangyi.spatial8d.NativeSpatialExport
@@ -84,6 +85,7 @@ class SpatialPlayer(context: Context) {
     @Volatile private var outputThread: Thread? = null
     private var playedOnce = false
     private var endMarkerArmed = false
+    private var drainStartedAt = 0L
     private var recorder: PcmWavRecorder? = null
     // 每次 seek/切歌/缓存失效递增代号，旧线程和旧回调立即作废。
     @Volatile private var generation = 0
@@ -125,6 +127,7 @@ class SpatialPlayer(context: Context) {
         cacheStart.set(0)
         trackStarted = false
         endMarkerArmed = false
+        drainStartedAt = 0L
         prepared = true
         playedOnce = false
         syncWakeLock()
@@ -161,6 +164,7 @@ class SpatialPlayer(context: Context) {
         paused = true
         try { synchronized(trackLock) { track?.pause() } } catch (_: Exception) {}
         endMarkerArmed = false
+        drainStartedAt = 0L
         syncWakeLock()
     }
 
@@ -191,6 +195,7 @@ class SpatialPlayer(context: Context) {
             }
             trackStarted = false
             endMarkerArmed = false
+            drainStartedAt = 0L
             decoded = null
             playPos = 0
             headBase = 0
@@ -243,6 +248,7 @@ class SpatialPlayer(context: Context) {
                     // 新缓存达到 START_FRAMES 后由输出线程统一起播，避免空轨欠载。
                     trackStarted = false
                     endMarkerArmed = false
+                    drainStartedAt = 0L
                 } catch (_: Exception) {}
             } }
             if (resume && !restartTrack) startWorkers()
@@ -262,6 +268,7 @@ class SpatialPlayer(context: Context) {
         check(track?.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
         trackStarted = false
         endMarkerArmed = false
+        drainStartedAt = 0L
         synchronized(trackLock) { applyPlaybackParams() }
     }
 
@@ -373,6 +380,7 @@ class SpatialPlayer(context: Context) {
             }
             trackStarted = false
             endMarkerArmed = false
+            drainStartedAt = 0L
             startWorkers()
         }
     }
@@ -438,6 +446,13 @@ class SpatialPlayer(context: Context) {
                 finishTrack(own)
                 return true
             }
+            // 播放头与 marker 同时失效时不能永久卡住；只在所有 PCM 已写出后按真实时间兜底。
+            if (drainStartedAt > 0 && endDrainTimedOut(SystemClock.elapsedRealtime() - drainStartedAt,
+                (marker - headBase).coerceAtLeast(0) * 1000L / sampleRate, transform.speed)) {
+                Log.i("8DEnd", "drain timeout, completing generation=$own")
+                finishTrack(own)
+                return true
+            }
             return false
         }
         // 系统通知负责正常曲尾，播放头补检只处理同一曲尾的丢失回调。
@@ -450,6 +465,7 @@ class SpatialPlayer(context: Context) {
             override fun onPeriodicNotification(track: AudioTrack) = Unit
         }, main)
         audio.notificationMarkerPosition = marker
+        drainStartedAt = SystemClock.elapsedRealtime()
         if (hasReachedEndMarker(trackStarted, marker, lastHeardFrame())) {
             finishTrack(own)
             return true
@@ -462,6 +478,7 @@ class SpatialPlayer(context: Context) {
         paused = true
         playedOnce = false
         endMarkerArmed = false
+        drainStartedAt = 0L
         syncWakeLock()
         main.post { if (own == generation) onEnd?.invoke() }
     }
@@ -497,6 +514,7 @@ class SpatialPlayer(context: Context) {
             old.release()
             trackStarted = false
             endMarkerArmed = false
+            drainStartedAt = 0L
         }
     }
 
@@ -639,6 +657,8 @@ class SpatialPlayer(context: Context) {
         const val START_FRAMES = 3072
         internal fun hasReachedEndMarker(trackStarted: Boolean, marker: Int, heardFrames: Int) =
             trackStarted && marker > 0 && heardFrames >= marker
+        internal fun endDrainTimedOut(elapsedMs: Long, remainingMs: Long, speed: Double) =
+            elapsedMs >= remainingMs / speed.coerceIn(0.5, 2.0) + 2_000L
         internal fun shouldRestartOutput(own: Int, currentGeneration: Int, prepared: Boolean,
             paused: Boolean, hasLiveOutput: Boolean) =
             own <= currentGeneration && prepared && !paused && !hasLiveOutput

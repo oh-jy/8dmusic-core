@@ -6,6 +6,7 @@ import jiangyi.spatial8d.MainActivity.Companion.interleavedPitchOptions
 import jiangyi.spatial8d.MainActivity.Companion.matchingPresetOrDefault
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
+import jiangyi.spatial8d.audio.SpatialPlayer.Companion.endDrainTimedOut
 import jiangyi.spatial8d.audio.PlaybackQueue
 import jiangyi.spatial8d.data.MusicItem
 import jiangyi.spatial8d.data.PlayMode
@@ -40,6 +41,13 @@ class MainActivityLogicCheck {
         check(!hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 99))
         check(hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 100))
         check(hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 101))
+    }
+
+    @Test fun stalledHeadCannotBlockNaturalCompletionForever() {
+        check(!endDrainTimedOut(3_999, 2_000, speed = 1.0))
+        check(endDrainTimedOut(4_000, 2_000, speed = 1.0))
+        check(!endDrainTimedOut(2_999, 2_000, speed = 2.0))
+        check(endDrainTimedOut(3_000, 2_000, speed = 2.0))
     }
 
     @Test fun timeSortUsesAddedThenModified() {

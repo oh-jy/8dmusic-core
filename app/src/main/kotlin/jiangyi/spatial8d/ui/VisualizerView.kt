@@ -38,6 +38,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val layers = booleanArrayOf(true, true, true, true)
     private val layerRow = row()
     private var expandButton: Button? = null
+    val showsLyrics: Boolean get() = exclusive
 
     init {
         orientation = VERTICAL
@@ -54,7 +55,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 updateMode()
             }.also(layerButtons::add))
         }
-        listOf("声谱" to 1, "粒子" to 2, "穿梭" to 3).forEach { (label, mode) ->
+        listOf("声谱" to 1, "图谱" to 4, "粒子" to 2, "穿梭" to 3).forEach { (label, mode) ->
             layerRow.addView(button(label) {
                 exclusive = true
                 visualMode = mode
@@ -75,7 +76,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.mode = if (!exclusive) 0 else visualMode
         canvas.layers = layers.copyOf()
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
-        exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == i + 1 }
+        exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == listOf(1, 4, 2, 3)[i] }
         restyle()
     }
 
@@ -286,8 +287,14 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 1 -> drawSpectrogram(c)
                 2 -> drawParticles(c)
                 3 -> drawTravel(c)
+                4 -> drawGraph(c)
                 else -> drawCombined(c)
             }
+        }
+
+        private fun drawGraph(c: Canvas) {
+            drawCombined(c)
+            drawLyricLine(c)
         }
 
         private fun drawCombined(c: Canvas) {
@@ -298,7 +305,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             // 顶部留给悬浮按钮，图表标签不再与波形和按钮重叠。
             val chartTop = dp(30f)
-            val chartHeight = height - chartTop
+            val chartHeight = height - chartTop - if (mode == 4) dp(38f) else 0f
             enabled.forEachIndexed { index, layer ->
                 val top = chartTop + chartHeight * index / enabled.size
                 val bottom = chartTop + chartHeight * (index + 1) / enabled.size
@@ -417,6 +424,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 paint.style = Paint.Style.FILL
                 c.drawPath(particlePaths[group], paint)
             }
+            paint.alpha = 255
+            drawLyricLine(c)
         }
 
         /** 始终由远及近穿梭，亮度沿尾迹渐变，不再随相位相关突然反向。 */
@@ -503,8 +512,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             paint.style = Paint.Style.FILL
             val y = height - dp(28f)
             c.drawText(text, width / 2f, y, paint)
-            // 键入光标：仅在键入阶段显示在末尾。
-            if (visibleChars < line.text.length && (System.nanoTime() / 300_000_000) % 2 == 0L) {
+            // 光标保留到本行淡出，键入完成后也不消失。
+            if ((System.nanoTime() / 300_000_000) % 2 == 0L) {
                 val cursorX = width / 2f + paint.measureText(text) / 2 + dp(2f)
                 c.drawRect(cursorX, y - dp(14f), cursorX + dp(2f), y, paint)
             }
