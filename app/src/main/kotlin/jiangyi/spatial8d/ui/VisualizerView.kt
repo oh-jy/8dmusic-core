@@ -54,7 +54,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 updateMode()
             }.also(layerButtons::add))
         }
-        listOf("声谱图" to 1, "粒子" to 2, "穿梭" to 3).forEach { (label, mode) ->
+        listOf("声谱" to 1, "粒子" to 2, "穿梭" to 3).forEach { (label, mode) ->
             layerRow.addView(button(label) {
                 exclusive = true
                 visualMode = mode
@@ -126,6 +126,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
+        // PCM 到达比实际听感提前约 80ms；按绘制时间消费延迟样本，避免缓冲越积越多。
+        private val visualQueue = ArrayDeque<ByteArray>()
+        private var delayedSamplesRead = false
+        private val delayedSpectrum = DoubleArray(256)
+        private var delayedRms = 0f
+        private var delayedPeak = 0f
         // 平滑响度（RMS 滑动平均）和基于真实时间的帧推进，避免动画被解码 buffer 节奏拉扯。
         private var smoothRms = 0f
         private var smoothPeak = 0f
@@ -147,6 +153,27 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         fun accept(data: ByteArray, bytes: Int) {
+            val chunk = data.copyOf(bytes)
+            visualQueue.addLast(chunk)
+            val targetFrames = 44100 * 80 / 1000
+            while (visualQueue.size > 1 &&
+                visualQueue.sumOf { it.size / 4 } - visualQueue.first().size / 4 > targetFrames) {
+                visualQueue.removeFirst()
+                delayedSamplesRead = false
+            }
+            consumeDelayedSamples()
+            analyzeImmediate(data, bytes)
+        }
+
+        private fun consumeDelayedSamples() {
+            // 80ms 窗口里的首个完整 PCM 包直接用于粒子与穿梭；即时图表仍走原数据。
+            if (!delayedSamplesRead) visualQueue.firstOrNull()?.let {
+                analyzeDelayed(it)
+                delayedSamplesRead = true
+            }
+        }
+
+        private fun analyzeImmediate(data: ByteArray, bytes: Int) {
             val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
             var energy = .0
             var loudest = .0
@@ -180,6 +207,30 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             analyze()
             postInvalidateOnAnimation()
+        }
+
+        private fun analyzeDelayed(data: ByteArray) {
+            val input = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+            val samples = ShortArray(input.remaining())
+            input.get(samples)
+            if (samples.isEmpty()) return
+            for (band in delayedSpectrum.indices) {
+                val hz = 40.0 * Math.pow(500.0, band / 255.0)
+                val coefficient = 2 * cos(2 * PI * hz / 44100)
+                var s1 = .0
+                var s2 = .0
+                for (i in samples.indices) {
+                    val s0 = samples[i] / 32768.0 + coefficient * s1 - s2
+                    s2 = s1
+                    s1 = s0
+                }
+                val power = max(1e-18, (s1 * s1 + s2 * s2 - coefficient * s1 * s2) /
+                    (samples.size.toDouble() * samples.size))
+                val db = (10 * ln(power) / ln(10.0)).coerceIn(-100.0, 0.0)
+                delayedSpectrum[band] = sqrt(((db + 70) / 70).coerceIn(0.0, 1.0))
+            }
+            delayedRms = sqrt(samples.sumOf { val v = it / 32768.0; v * v } / samples.size).toFloat()
+            delayedPeak = samples.maxOf { abs(it.toInt()) } / 32768f
         }
 
         /** 计算自上次绘制以来的真实秒数（首次或长时间挂起时给一帧保守值）。 */
@@ -225,6 +276,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
+            consumeDelayedSamples()
             // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
             val surface = ThemeUi.palette(dark).surface
             c.drawColor(surface)
@@ -328,7 +380,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawSpectrogram(c: Canvas) {
-            label(c, "声谱图  时间向下 · 频率向右", height.toFloat())
+            label(c, "声谱  时间向下 · 频率向右", height.toFloat())
             val top = dp(30f)
             val cellW = width / 128f
             val cellH = (height - top) / 64f
@@ -340,7 +392,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         private fun drawParticles(c: Canvas) {
             // 整体强度由响度驱动：安静时几乎静止，起伏时粒子立刻反应。
-            val drive = (smoothRms * 9f + smoothPeak * 1.5f).coerceIn(0f, 1f)
+            val drive = (delayedRms * 9f + delayedPeak * 1.5f).coerceIn(0f, 1f)
             phase += frameDeltaSeconds() * (.12f + drive * .9f)
             val cx = width / 2f
             val cy = height / 2f
@@ -348,7 +400,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             particlePaths.forEach(Path::rewind)
             for (i in 0 until 320) {
                 val angle = i * 2.399963f + phase
-                val band = sqrt(spectrum[i % spectrum.size].toFloat())
+                val band = sqrt(delayedSpectrum[i % delayedSpectrum.size].toFloat())
                 val baseRadius = (12 + i % 100) * radiusUnit
                 // 半径随频带能量扩张，叠加整体响度驱动；静默时收缩到内核。
                 val radius = baseRadius * (.35f + drive * .45f + band * (0.6f + drive * 1.3f))
@@ -371,7 +423,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private fun drawTravel(c: Canvas) {
             // 前进速度由响度驱动：高潮时飞驰，平缓时近乎悬停。
             // 用 RMS 滑动平均 + 真实帧间隔，节奏感保留但速度上限被钳制，避免"爆点一来就加速"的卡顿感。
-            val drive = (smoothRms * 9f + smoothPeak * 1.5f).coerceIn(0f, 1f)
+            val drive = (delayedRms * 9f + delayedPeak * 1.5f).coerceIn(0f, 1f)
             phase += frameDeltaSeconds() * (.10f + drive * .65f)
             val cx = width / 2f
             val cy = height * .46f
@@ -381,13 +433,14 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val progress = (i * .6180339f + phase * .24f) % 1f
                 val z = progress
                 val depth = .04f + z * z * .96f
-                val energy = spectrum[i % spectrum.size].toFloat()
+                val energy = delayedSpectrum[i % delayedSpectrum.size].toFloat()
                 val rayX = sin(i * 12.37f) * width * .58f
                 val rayY = cos(i * 8.73f) * height * .55f
                 val x = cx + rayX * depth
                 val y = cy + rayY * depth
                 // 频带能量越大尾迹越长、粒子越大，直接反映音频起伏。
-                val tailStretch = .02f + depth * (.08f + energy * .5f + drive * .18f)
+                // 更短的彗尾：随能量伸长，但始终比旧版收窄。
+                val tailStretch = .015f + depth * (.045f + energy * .28f + drive * .10f)
                 val tailDepth = (depth - tailStretch).coerceAtLeast(.015f)
                 val tailX = cx + rayX * tailDepth
                 val tailY = cy + rayY * tailDepth
@@ -398,16 +451,23 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val nx = -dy / length * size
                 val ny = dx / length * size
                 val group = (depth * 3.99f).toInt().coerceIn(0, 3)
-                // 三角形尾迹由尖端渐细到零，四组路径合批，避免逐粒子 draw call。
+                // 彗尾分三段：靠近头部最宽、末端最窄，视觉上形成连续衰减。
+                val midDepth = (depth + tailDepth) * .5f
+                val midX = cx + rayX * midDepth
+                val midY = cy + rayY * midDepth
                 travelPaths[group].moveTo(x + nx, y + ny)
+                travelPaths[group].lineTo(midX - nx * .55f, midY - ny * .55f)
                 travelPaths[group].lineTo(tailX, tailY)
+                travelPaths[group].lineTo(midX + nx * .55f, midY + ny * .55f)
                 travelPaths[group].lineTo(x - nx, y - ny)
                 travelPaths[group].close()
                 travelHeads[group].addCircle(x, y, size, Path.Direction.CW)
             }
             travelPaths.indices.forEach { group ->
-                // 与界面一致的蓝青主题，不再混入紫色。
-                paint.color = Color.HSVToColor(floatArrayOf(198f + group * 5f, .65f, .95f))
+                // 频段能量驱动蓝→青→橙渐变；深度只负责层次，不再固定每组颜色。
+                val energy = delayedSpectrum[group * 64].toFloat()
+                val hue = 210f - energy * 180f
+                paint.color = Color.HSVToColor(floatArrayOf(hue % 360f, .68f, .95f))
                 paint.alpha = (10 + group * 8 + (drive * 40).toInt()).coerceIn(0, 255)
                 c.drawPath(travelPaths[group], paint)
                 paint.alpha = (60 + group * 25 + (drive * 150).toInt()).coerceIn(0, 255)

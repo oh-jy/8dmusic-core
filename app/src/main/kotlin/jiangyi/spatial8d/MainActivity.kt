@@ -480,8 +480,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         popupVisualizer?.dark = dark
         if (::lyricsView.isInitialized) lyricsView.dark = dark
         if (::playerBar.isInitialized) ThemeUi.bg(playerBar, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
-        // 应用图标保持原色，不叠加主题色背景。
-        if (::disc.isInitialized) disc.imageTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+        // 透明圆形应用图标自带颜色，深浅模式下都不叠 tint。
+        if (::disc.isInitialized) disc.imageTintList = null
         tint(root, palette.text)
         if (::playerBar.isInitialized) ThemeUi.applyTheme(playerBar, palette)
         // PNG 图标不经过 Button 主题回刷；播放键白色，普通控制键随主题切换。
@@ -1305,16 +1305,24 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         return bar
     }
 
-    /** 音源是页面级隐藏入口：1.2 秒内三击标题解锁，不写入持久化。 */
+    /** 音源是页面级隐藏入口：1.2 秒内三击解锁 FM，五击解锁在线曲库；不写入持久化。 */
     private fun unlockSource() {
-        if (sourceUnlocked) return
         val now = SystemClock.elapsedRealtime()
         sourceTapCount = if (now - sourceTapAt <= 1200) sourceTapCount + 1 else 1
         sourceTapAt = now
         if (sourceTapCount >= 3) {
-            sourceUnlocked = true
-            sourceTapCount = 0
-            sourceButton.visibility = View.VISIBLE
+            if (!sourceUnlocked) {
+                sourceUnlocked = true
+                sourceButton.visibility = View.VISIBLE
+            }
+            if (sourceTapCount >= 5) {
+                sourceTab = 1
+                sourceTapCount = 0
+                showSourceSheet()
+            } else if (sourceTapCount == 3) {
+                sourceTab = 0
+                showSourceSheet()
+            }
         }
     }
 
@@ -1965,9 +1973,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         playerBar = bar
         val meta = ThemeUi.row(this)
         disc = ImageView(this).apply {
-            // 透明 PNG 音符 + 主题色 tint，无背景，仅纯色旋转图标。
-            setImageResource(jiangyi.spatial8d.R.drawable.ic_note)
-            imageTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+            // 透明圆形应用图标：深浅模式下不再依赖 tint 或背景。
+            setImageResource(jiangyi.spatial8d.R.drawable.ic_app_round_xxxhdpi)
+            imageTintList = null
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(0, 0, 0, 0)
             background = null
@@ -2282,7 +2290,22 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun showInfoSheet() {
         if (infoDialog?.isShowing == true) return
-        infoDialog = ThemeUi.showSheet(this, palette, "参数说明", fullHeight = true) {
+        infoDialog = ThemeUi.showSheet(this, palette, "应用说明", fullHeight = true) {
+            listOf(
+                "快速入门" to "1. 选择本地歌曲、FM 电台或在线曲库；\n2. 在空间风格里选一个预设；\n3. 点击播放后可通过音频图谱和可视化观察效果；\n4. 需要修正歌词时，在「同步歌词」长按歌词即可。",
+                "隐藏入口" to "1.2 秒内连续点击标题 3 次打开 FM；连续点击 5 次直接打开在线曲库。",
+                "歌词" to "同步歌词自动滚动；点击任意行可跳转；长按当前歌词进入搜索、候选与预览。",
+                "可视化" to "波形 / 频谱 / 响度 / 相位可组合显示；声谱、粒子、穿梭为独占模式；穿梭模式会叠加当前歌词。",
+                "导出与录音" to "本地歌曲可导出 WAV / MP3；FM 电台可录制最终 8D 输出。"
+            ).forEach { (label, desc) ->
+                addView(ThemeUi.text(this@MainActivity, label, 13f, palette, bold = true).apply {
+                    setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, 0)
+                })
+                addView(ThemeUi.text(this@MainActivity, desc, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                    setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 6f))
+                })
+                addView(ThemeUi.divider(this@MainActivity, palette))
+            }
             PARAM_INFO.forEachIndexed { index, info ->
                 lateinit var desc: TextView
                 addView(ThemeUi.text(this@MainActivity, info.label, 13f, palette, bold = true).apply {
@@ -2485,11 +2508,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
 
     private fun addStationBrowser(parent: LinearLayout, filters: LinearLayout) {
-        val stations = RadioCatalog.filter(sourceTab == 1, sourceRegion, sourceCity, sourceType)
+        val stations = RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val search = ThemeUi.input(this, palette, "搜索电台 / 省市 / 类型").apply {
             setOnEditorActionListener { _, _, _ ->
-                renderStations(body, RadioCatalog.filter(sourceTab == 1, sourceRegion, sourceCity, sourceType, text.toString()))
+                renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, text.toString()))
                 true
             }
         }
@@ -2502,7 +2525,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 val q = s?.toString().orEmpty()
                 main.postDelayed({
                     if (seq == sourceSearchSeq && sourceDialog?.isShowing == true) {
-                        renderStations(body, RadioCatalog.filter(sourceTab == 1, sourceRegion, sourceCity, sourceType, q))
+                        renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, q))
                     }
                 }, 160)
             }

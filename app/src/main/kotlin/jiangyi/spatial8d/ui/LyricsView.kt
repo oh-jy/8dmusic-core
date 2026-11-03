@@ -172,8 +172,13 @@ class LyricsView(context: Context) : ScrollView(context) {
     private fun applyColors() {
         val p = palette
         rows.forEachIndexed { index, row ->
-            val played = index <= activeIndex
-            row.setTextColor(if (played) p.accent else p.sub)
+            val current = index == activeIndex
+            val played = index < activeIndex
+            row.setTextColor(when {
+                current -> p.accent
+                played -> p.sub
+                else -> p.faint
+            })
             row.typeface = if (index == activeIndex) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             row.alpha = if (index == activeIndex) 1f else if (played) 0.85f else 0.72f
         }

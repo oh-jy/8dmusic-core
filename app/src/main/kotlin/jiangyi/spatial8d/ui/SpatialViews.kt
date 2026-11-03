@@ -140,7 +140,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         canvas.drawText("左", 7f, cy + 4f, paint)
         canvas.drawText("右", w - 7f, cy + 4f, paint)
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
-        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat()
+        // 用户反馈球体偏大：整体半径缩小约三分之一。
+        val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.67f
         val light = project(f, sourceR, cx, cy)
         paint.color = if (dark) 0x4d4ea1ff.toInt() else 0x3d2e7fe6.toInt()
         canvas.drawCircle(cx + f.x.toFloat() * sourceR, cy - f.y.toFloat() * SIN_T * sourceR, 3.2f, paint)
@@ -219,14 +220,14 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             val dy = pt[1] - cy
             val len = max(1f, sqrt(dx * dx + dy * dy))
             val wobble = sin(u * 9.0 + now * 1.7).toFloat() * 2.2f * u.toFloat()
-            paint.color = hue(f.azimuth * 180.0 / Math.PI)
+            paint.color = planetHue(f.azimuth * 180.0 / Math.PI)
             paint.alpha = (173f * taper).toInt()
             c.drawCircle(pt[0] - dy / len * wobble, pt[1] + dx / len * wobble, max(0.9f, 12f * pt[2] * (0.18f + 0.82f * taper)), paint)
         }
         paint.alpha = 255
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
         val pt = project(f, r, cx, cy)
-        val pr = 12f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
+        val pr = 8f * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
         if (playing) {
             paint.style = Paint.Style.STROKE
             paint.strokeWidth = 1.4f
@@ -243,14 +244,25 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         for (s in 0 until 42) {
             val rw = max(1f, pr / 42)
             paint.strokeWidth = rw + 0.18f
-            paint.color = hue(s * (360.0 / 42.0) - now * 96.0)
+            paint.color = planetHue(s * (360.0 / 42.0) - now * 96.0)
             val rr = pr - (s + 0.5f) * rw
             if (rr > 0) c.drawCircle(pt[0], pt[1], rr, paint)
         }
         paint.alpha = 255
     }
 
-    private fun hue(value: Double): Int = Color.HSVToColor(floatArrayOf(((value % 360 + 360) % 360).toFloat(), 1f, 1f))
+    /** 球本体的橙黄占约四成时间，红蓝各约一成；耳环仍保持标准彩虹色。 */
+    private fun planetHue(value: Double): Int {
+        val phase = (value % 360 + 360) % 360
+        val mapped = if (phase < 36.0) phase * (60.0 / 36.0)
+        else if (phase < 180.0) 60.0 + (phase - 36.0) * (20.0 / 144.0)
+        else if (phase < 252.0) 80.0 + (phase - 180.0) * (120.0 / 72.0)
+        else if (phase < 288.0) 200.0 + (phase - 252.0)
+        else 300.0 + (phase - 288.0) * (60.0 / 72.0)
+        return Color.HSVToColor(floatArrayOf(mapped.toFloat(), 1f, 1f))
+    }
+    private fun hue(value: Double): Int =
+        Color.HSVToColor(floatArrayOf(((value % 360 + 360) % 360).toFloat(), 1f, 1f))
 }
 
 class CurveView(context: Context) : AnimatedCanvasView(context) {

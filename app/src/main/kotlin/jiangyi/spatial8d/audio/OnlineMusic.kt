@@ -71,7 +71,10 @@ class OnlineMusic(private val activity: Activity) {
                 catch (e: Exception) { failures += providerLabel(providers[index]); emptyList() }
             }
             if (results.all { it.isEmpty() } && failures.size == providers.size) error("在线曲库暂不可用，请稍后重试")
-            (0 until results.maxOf { it.size }).flatMap { index -> results.mapNotNull { it.getOrNull(index) } }
+            // 用户希望可播放优先级：网易云、QQ、酷狗、酷我、Jamendo。
+            val providerOrder = listOf("网易云音乐", "QQ音乐", "酷狗音乐", "酷我音乐", "Jamendo")
+            val providerBuckets = results.flatten().groupBy { it.provider }
+            providerOrder.flatMap { provider -> providerBuckets[provider].orEmpty() }
         } finally { pool.shutdownNow() }
     }
 
