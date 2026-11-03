@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import j5i.spatial8d.audio.LyricsResult
 import j5i.spatial8d.data.MusicItem
+import android.util.Log
 import kotlin.math.abs
 
 /** 驾驶模式复用当前可视化，播放器仍由原服务控制。 */
@@ -31,6 +32,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
     }
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
+    private var lastLoggedIndex = -2
     private var downX = 0f
 
     init {
@@ -76,6 +78,10 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         lyrics = result
         positionMs = position
         val current = result?.lines?.indexOfLast { it.timeMs <= positionMs } ?: -1
+        if (current != lastLoggedIndex) {
+            lastLoggedIndex = current
+            Log.i("8DDriveLyrics", "index=$current positionMs=$positionMs lines=${result?.lines?.size ?: 0}")
+        }
         lines.forEachIndexed { index, view ->
             view.text = result?.lines?.getOrNull(current - 1 + index)?.text.orEmpty()
         }

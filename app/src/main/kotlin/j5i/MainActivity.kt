@@ -1288,7 +1288,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun navbar(): LinearLayout {
         val bar = ThemeUi.row(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(ThemeUi.dp(this@MainActivity, 16f), 0, ThemeUi.dp(this@MainActivity, 16f), 0)
+            setPadding(ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 10f), 0)
             setBackgroundColor(palette.background)
             tag = "navbar"
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 52f))
@@ -1317,16 +1317,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         }
         fmButton = navButton("FM") { showSourceSheet(false) }.apply {
             visibility = if (fmUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
         }
         bar.addView(fmButton)
         onlineButton = navButton(t("library")) { showSourceSheet(true) }.apply {
             visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
         }
         bar.addView(onlineButton)
         bar.addView(navButton(t("driving")) { showDrivingMode() })
-        bar.addView(navButton(t("language")) { showLanguagePicker() })
         themeButton = navButton(when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }) {
             // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
             themeMode = (themeMode + 1) % 3
@@ -1334,9 +1333,14 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             refreshTheme()
         }
         themeButton.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
         }
         bar.addView(themeButton)
+        bar.addView(navButton(t("language")) { showLanguagePicker() }.apply {
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply {
+                leftMargin = ThemeUi.dp(this@MainActivity, 3f)
+            }
+        })
         return bar
     }
 
@@ -1860,6 +1864,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 currentLyrics = it
                 lyricsView.setLyrics(it)
                 pushLyricsToVisualizer()
+                updateDriving()
             }.onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
         }, { progress ->
             if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
@@ -1870,6 +1875,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun pushLyricsToVisualizer() {
         if (::visualizerView.isInitialized) visualizerView.setLyrics(currentLyrics)
         popupVisualizer?.setLyrics(currentLyrics)
+        updateDriving()
     }
 
     /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
@@ -2008,6 +2014,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                                 result.onSuccess {
                                     currentLyrics = it
                                     lyricsView.setLyrics(it)
+                                    updateDriving()
                                     pushLyricsToVisualizer()
                                 }
                                     .onFailure { toast(it.message ?: "歌词获取失败") }

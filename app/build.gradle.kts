@@ -15,7 +15,7 @@ android {
             commandLine("powershell", "-NoProfile", "-Command", "Get-Date -Format yyMMddHHmm")
         // 保留发布时间十位格式；Android Int 上限内按位保留低 31 位，仍随时间递增。
         }.standardOutput.asText.get().trim().toLong().and(Int.MAX_VALUE.toLong()).toInt()
-        versionName = "2.2.5"
+        versionName = "2.2.6"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
