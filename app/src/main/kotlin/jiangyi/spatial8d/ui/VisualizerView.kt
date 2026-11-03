@@ -31,6 +31,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     var dark = true
         set(value) { field = value; canvas.dark = value; restyle() }
     private val canvas = AudioCanvas(context)
+    private val graphView = WaveformView(context)
     private var exclusive = false
     private var visualMode = 0
     private val layerButtons = mutableListOf<Button>()
@@ -45,6 +46,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         val stage = FrameLayout(context)
         addView(stage, LayoutParams(-1, 0, 1f))
         stage.addView(canvas, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(graphView, FrameLayout.LayoutParams(-1, -1).apply {
+            topMargin = dp(30f); bottomMargin = dp(38f)
+        })
         stage.addView(layerRow, FrameLayout.LayoutParams(-1, dp(28f)).apply {
             leftMargin = dp(4f); rightMargin = dp(4f); topMargin = dp(2f)
         })
@@ -66,7 +70,16 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         updateMode()
     }
 
-    fun accept(data: ByteArray, bytes: Int) = canvas.accept(data, bytes)
+    fun accept(data: ByteArray, bytes: Int) {
+        // AudioTrack 输出线程只负责投递；绘制状态与 View 均在主线程更新。
+        val chunk = data.copyOf(bytes)
+        if (!isAttachedToWindow) return
+        post {
+            if (!isAttachedToWindow) return@post
+            canvas.accept(chunk, chunk.size)
+            graphView.accept(chunk, chunk.size)
+        }
+    }
 
     /** 当前歌曲歌词与播放位置，用于在穿梭模式中叠加逐行歌词字幕。 */
     fun setLyrics(result: LyricsResult?) = canvas.setLyrics(result)
@@ -75,6 +88,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private fun updateMode() {
         canvas.mode = if (!exclusive) 0 else visualMode
         canvas.layers = layers.copyOf()
+        graphView.dark = dark
+        graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
+        canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
         exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == listOf(1, 4, 2, 3)[i] }
         restyle()
@@ -287,14 +303,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 1 -> drawSpectrogram(c)
                 2 -> drawParticles(c)
                 3 -> drawTravel(c)
-                4 -> drawGraph(c)
                 else -> drawCombined(c)
             }
-        }
-
-        private fun drawGraph(c: Canvas) {
-            drawCombined(c)
-            drawLyricLine(c)
         }
 
         private fun drawCombined(c: Canvas) {
@@ -305,7 +315,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             // 顶部留给悬浮按钮，图表标签不再与波形和按钮重叠。
             val chartTop = dp(30f)
-            val chartHeight = height - chartTop - if (mode == 4) dp(38f) else 0f
+            val chartHeight = height - chartTop
             enabled.forEachIndexed { index, layer ->
                 val top = chartTop + chartHeight * index / enabled.size
                 val bottom = chartTop + chartHeight * (index + 1) / enabled.size
