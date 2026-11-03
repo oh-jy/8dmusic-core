@@ -29,6 +29,7 @@ class LyricsView(context: Context) : ScrollView(context) {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
     }
+    private fun t(key: String) = AppLanguage.text(context, key)
     private val rows = mutableListOf<TextView>()
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
@@ -57,8 +58,8 @@ class LyricsView(context: Context) : ScrollView(context) {
         rows.clear()
         val p = palette
         when {
-            value == null -> message("暂无匹配歌词")
-            value.instrumental -> message("纯音乐，无歌词")
+            value == null -> message(t("no.lyrics"))
+            value.instrumental -> message(t("instrumental"))
             value.synchronized -> value.lines.forEach { line ->
                 val row = TextView(context).apply {
                     text = line.text
@@ -80,7 +81,7 @@ class LyricsView(context: Context) : ScrollView(context) {
                 content.addView(row)
             }
             value.plainLyrics.isNotBlank() -> message(value.plainLyrics)
-            else -> message("该歌曲暂无歌词")
+            else -> message(t("song.no.lyrics"))
         }
         updatePadding()
         setPosition(positionMs, true)
@@ -110,7 +111,7 @@ class LyricsView(context: Context) : ScrollView(context) {
         positionMs = -1
         setLyrics(null)
         content.removeAllViews()
-        message("正在匹配在线歌词…")
+        message(t("lyrics.matching"))
     }
 
     fun showError(fileName: String) {
@@ -118,8 +119,8 @@ class LyricsView(context: Context) : ScrollView(context) {
         content.removeAllViews()
         val p = palette
         // 与"长按歌词 → 修正"走同一套候选/预览流程，避免另一套单输入框的简陋 UI。
-        message("未找到匹配歌词：$fileName")
-        content.addView(ThemeUi.button(context, p, "手动修正歌词") {
+        message(t("lyrics.not.found") + fileName)
+        content.addView(ThemeUi.button(context, p, t("lyrics.edit")) {
             onManual?.invoke()
         }, LinearLayout.LayoutParams(-2, dp(36f)))
         ThemeUi.applyTheme(content, p)

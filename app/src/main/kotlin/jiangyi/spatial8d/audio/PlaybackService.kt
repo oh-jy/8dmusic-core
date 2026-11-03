@@ -30,9 +30,11 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
+import jiangyi.spatial8d.ui.AppLanguage
 
 /** 音频链路的唯一持有者，同时把真实播放状态同步给锁屏与通知栏。 */
 class PlaybackService : Service() {
+    private fun t(key: String) = AppLanguage.text(this, key)
     inner class Binder : android.os.Binder() {
         val service: PlaybackService get() = this@PlaybackService
     }
@@ -350,10 +352,10 @@ class PlaybackService : Service() {
             .setContentTitle(title).setContentText(subtitle).setContentIntent(content)
             .setVisibility(Notification.VISIBILITY_PUBLIC).setOnlyAlertOnce(true).setOngoing(playing)
             .setShowWhen(false)
-            .addAction(android.R.drawable.ic_media_previous, "上一首", action("previous"))
+            .addAction(android.R.drawable.ic_media_previous, t("previous"), action("previous"))
             .addAction(if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (playing) "暂停" else "播放", action(if (playing) "pause" else "play"))
-            .addAction(android.R.drawable.ic_media_next, "下一首", action("next"))
+                if (playing) t("pause") else t("play"), action(if (playing) "pause" else "play"))
+            .addAction(android.R.drawable.ic_media_next, t("next"), action("next"))
             .setStyle(style).build()
     }
 

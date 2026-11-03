@@ -79,6 +79,7 @@ import jiangyi.spatial8d.ui.SpatialVisualization
 import jiangyi.spatial8d.ui.PlaylistDialog
 import jiangyi.spatial8d.ui.PlaylistHost
 import jiangyi.spatial8d.ui.ThemeUi
+import jiangyi.spatial8d.ui.AppLanguage
 import java.util.Locale
 import org.json.JSONObject
 import kotlin.math.roundToInt
@@ -114,6 +115,9 @@ class MainActivity : AppCompatActivity(), PlaylistHost {
     private val main = Handler(Looper.getMainLooper())
     private val onlineMusic by lazy { OnlineMusic(this) }
     private val preferences by lazy { getSharedPreferences("spatial8d", Context.MODE_PRIVATE) }
+
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
+    private fun t(key: String): String = AppLanguage.text(this, key)
 
     private lateinit var root: LinearLayout
     private lateinit var status: TextView
@@ -267,7 +271,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         themeMode = if (preferences.contains("themeMode")) preferences.getInt("themeMode", 0)
         else if (preferences.getBoolean("dark", true)) 0 else 1
         dark = resolveDark()
-        playbackStatus = "就绪"
+        playbackStatus = t("ready")
         restorePlaybackState()
         palette = ThemeUi.palette(dark)
         buildUi()
@@ -374,7 +378,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         // 下拉、展开控件、方向、曲线共用 preset，任何入口修改后都从这里统一回灌。
         presetPicker.text = preset.name
         presetNote.text = preset.note
-        val dirLabels = listOf("顺时针" to 1.0, "逆时针" to -1.0, "随机" to 0.0)
+        val dirLabels = listOf(t("direction.cw") to 1.0, t("direction.ccw") to -1.0, t("direction.random") to 0.0)
         dirButtons.forEachIndexed { i, btn ->
             val (label, value) = dirLabels[i]
             btn.text = label
@@ -399,9 +403,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (::pitchPicker.isInitialized) pitchPicker.text = pitchPickerLabel()
         if (::pitchLabel.isInitialized) {
             pitchLabel.text = when {
-                transform.semi == 0.0 -> "原声"
-                transform.semi > 0 -> "+${transform.semi.toInt()} 半音"
-                else -> "${transform.semi.toInt()} 半音"
+                transform.semi == 0.0 -> t("original")
+                transform.semi > 0 -> "+${transform.semi.toInt()} ${t("semitone")}"
+                else -> "${transform.semi.toInt()} ${t("semitone")}"
             }
             pitchSlider.progress = (transform.semi.roundToInt() + 12).coerceIn(0, 24)
                 speedLabel.text = String.format(Locale.US, "%.2f×", transform.speed)
@@ -412,7 +416,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (speedChipButtons.isNotEmpty()) {
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEachIndexed { i, v ->
                 val btn = speedChipButtons[i]
-                btn.text = "${formatSpeedShort(v)}×\n实时"
+                btn.text = "${formatSpeedShort(v)}×\n${t("speed.realtime")}"
                 btn.gravity = Gravity.CENTER
                 btn.setLineSpacing(0f, 0.85f)
                 btn.tag = if (transform.speed == v) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
@@ -431,7 +435,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             if (child.tag == "localOnly") child.visibility = if (isLive) View.GONE else View.VISIBLE
         }
         if (::denoiseLabel.isInitialized) {
-            denoiseLabel.text = if (transform.denoiseLevel == 0) "关闭" else "${transform.denoiseLevel}%"
+            denoiseLabel.text = if (transform.denoiseLevel == 0) t("off") else "${transform.denoiseLevel}%"
             denoiseSlider.progress = transform.denoiseLevel
         }
         updatingControls = false
@@ -486,7 +490,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
         if (::playerBar.isInitialized) tintIcons(playerBar)
-        if (::themeButton.isInitialized) themeButton.text = when (themeMode) { 0 -> "深色"; 1 -> "浅色"; else -> "跟随" }
+        if (::themeButton.isInitialized) themeButton.text = when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }
         tint(root, palette.text)
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
@@ -556,9 +560,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             (playButton as ImageButton).setImageResource(
                 if (playing) jiangyi.spatial8d.R.drawable.ic_pause else jiangyi.spatial8d.R.drawable.ic_play
             )
-            playButton.contentDescription = if (playing) "暂停" else "播放"
+            playButton.contentDescription = if (playing) t("pause") else t("play")
         } else {
-            (playButton as Button).text = if (playing) "暂停" else "播放"
+            (playButton as Button).text = if (playing) t("pause") else t("play")
         }
         visualization.playing = playing
         curve.playing = playing
@@ -566,7 +570,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (::lyricsView.isInitialized) lyricsView.setPosition(lyricPositionMs)
         if (::visualizerView.isInitialized) visualizerView.setPosition(lyricPositionMs)
         popupVisualizer?.setPosition(lyricPositionMs)
-        songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: "未选择歌曲"
+        songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
         durationTime.text = time(player?.duration ?: 0.0)
@@ -1064,7 +1068,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun showVisualizerSheet() {
         if (visualizerDialog?.isShowing == true) return
-        val dialog = ThemeUi.showSheet(this, palette, "音频可视化", "实际输出 · 独立图表 · 全屏展示",
+        val dialog = ThemeUi.showSheet(this, palette, t("visualizer.popup"), t("visualizer.popup.subtitle"),
             fullHeight = true, scrollable = false) {
             popupVisualizer = jiangyi.spatial8d.ui.VisualizerView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
@@ -1232,9 +1236,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     } catch (_: Exception) { PlayMode.LOOP_LIST }
 
     private fun modeText() = when (currentMode()) {
-        PlayMode.LOOP_LIST -> "列表循环"
-        PlayMode.LOOP_ONE -> "单曲循环"
-        PlayMode.SHUFFLE -> "随机播放"
+        PlayMode.LOOP_LIST -> t("mode.list")
+        PlayMode.LOOP_ONE -> t("mode.one")
+        PlayMode.SHUFFLE -> t("mode.shuffle")
     }
 
     private fun time(seconds: Double): String {
@@ -1267,7 +1271,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         bar.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, "8D 空间音频", 16f, palette, bold = true).apply {
+                addView(ThemeUi.text(this@MainActivity, t("app.name"), 16f, palette, bold = true).apply {
                     setOnClickListener { unlockSource() }
                 })
                 addView(ThemeUi.text(this@MainActivity, "ⓘ", 18f, palette, role = ThemeUi.ROLE_SUB).apply {
@@ -1278,7 +1282,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     setOnClickListener { showInfoSheet() }
                 })
             })
-            addView(ThemeUi.text(this@MainActivity, "HRTF 双耳引擎 · Android", 10f, palette, role = ThemeUi.ROLE_FAINT))
+            addView(ThemeUi.text(this@MainActivity, t("app.subtitle"), 10f, palette, role = ThemeUi.ROLE_FAINT))
         }.apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         })
@@ -1291,12 +1295,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
         bar.addView(fmButton)
-        onlineButton = navButton("曲库") { showSourceSheet(true) }.apply {
+        onlineButton = navButton(t("library")) { showSourceSheet(true) }.apply {
             visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
         bar.addView(onlineButton)
-        themeButton = navButton(when (themeMode) { 0 -> "深色"; 1 -> "浅色"; else -> "跟随" }) {
+        bar.addView(navButton(t("language")) { showLanguagePicker() })
+        themeButton = navButton(when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }) {
             // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
             themeMode = (themeMode + 1) % 3
             dark = resolveDark()
@@ -1307,6 +1312,15 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
         bar.addView(themeButton)
         return bar
+    }
+
+    private fun showLanguagePicker() {
+        val values = listOf(AppLanguage.SYSTEM, AppLanguage.SIMPLIFIED, AppLanguage.TRADITIONAL, AppLanguage.ENGLISH)
+        val labels = listOf(t("language.system"), t("language.simplified"), t("language.traditional"), t("language.english"))
+        pickOption(t("language"), labels, values.indexOf(AppLanguage.current(this))) {
+            AppLanguage.select(this, values[it])
+            recreate()
+        }
     }
 
     /** 三击开放 FM，五击开放曲库；两个入口及弹窗各自独立，不写入持久化。 */
@@ -1333,7 +1347,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             val header = FrameLayout(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 32f))
             }
-            header.addView(ThemeUi.text(this@MainActivity, "空间风格", 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
+            header.addView(ThemeUi.text(this@MainActivity, t("space.style"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             presetPicker = ThemeUi.text(this@MainActivity, preset.name, 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 ThemeUi.hideOverflow(this)
                 gravity = Gravity.CENTER
@@ -1345,7 +1359,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                         SPACE_PRESETS.firstOrNull { !it.raw })
                     val all = pinned + (SPACE_PRESETS + customPresets).filter { it !in pinned }
                         .sortedWith(compareBy({ it.room }, { it.name }))
-                    pickOption("选择空间风格 · 房间由小到大", all.map { "${it.name} · ${it.room.toInt()} 米" },
+                    pickOption(t("space.choose"), all.map { "${it.name} · ${it.room.toInt()} m" },
                         all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
@@ -1359,7 +1373,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     rightMargin = ThemeUi.dp(this@MainActivity, 67f)
                 }
             })
-            header.addView(ThemeUi.text(this@MainActivity, "展开 ▾", 11f, palette, role = ThemeUi.ROLE_SUB).apply {
+            header.addView(ThemeUi.text(this@MainActivity, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
                 tag = "toggleP"
                 layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
                 setOnClickListener { toggleParameterOpen() }
@@ -1378,15 +1392,15 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             })
             parameterPanel.addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, "旋转方向", 12f, palette).apply {
+                addView(ThemeUi.text(this@MainActivity, t("direction"), 12f, palette).apply {
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })
                 addView(dirSegmented(), LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 32f), 2.2f))
             })
-            parameterPanel.addView(ThemeUi.text(this@MainActivity, "随机模式每 2–8 秒自动切换顺/逆时针", 10f, palette, role = ThemeUi.ROLE_FAINT))
+            parameterPanel.addView(ThemeUi.text(this@MainActivity, t("direction.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
             parameterPanel.addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, "运动轨迹", 12f, palette, bold = true))
-                addView(ThemeUi.text(this@MainActivity, "环绕速度 · 起伏 · 起手方位", 10f, palette, role = ThemeUi.ROLE_FAINT))
+                addView(ThemeUi.text(this@MainActivity, t("trajectory"), 12f, palette, bold = true))
+                addView(ThemeUi.text(this@MainActivity, t("trajectory.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
             }.apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 4f))
             })
@@ -1399,7 +1413,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 setSingleLine()
                 setPadding(ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 10f), 0)
                 background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 8f)
-                hint = "自定义名称，留空自动编号"
+                hint = t("preset.name.hint")
                 textSize = 11f
             }
             saveRow.addView(saveInput.apply {
@@ -1407,7 +1421,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     rightMargin = ThemeUi.dp(this@MainActivity, 8f)
                 }
             })
-            saveRow.addView(ThemeUi.button(this@MainActivity, palette, "保存风格", role = ThemeUi.ROLE_ACCENT_FILL) {
+            saveRow.addView(ThemeUi.button(this@MainActivity, palette, t("preset.save"), role = ThemeUi.ROLE_ACCENT_FILL) {
                 saveCustomPreset(saveInput.text.toString())
             })
             parameterPanel.addView(saveRow)
@@ -1417,8 +1431,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             })
             parameterPanel.addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, "房间声学", 12f, palette, bold = true))
-                addView(ThemeUi.text(this@MainActivity, "空间大小 · 混响量感与尾音", 10f, palette, role = ThemeUi.ROLE_FAINT))
+                addView(ThemeUi.text(this@MainActivity, t("room.acoustics"), 12f, palette, bold = true))
+                addView(ThemeUi.text(this@MainActivity, t("room.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
             }.apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 4f), 0, ThemeUi.dp(this@MainActivity, 4f))
             })
@@ -1432,7 +1446,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val group = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         definitions.forEach { definition ->
             val row = ThemeUi.row(this)
-            row.addView(ThemeUi.text(this, definition.label, 12f, palette).apply {
+            row.addView(ThemeUi.text(this, t("slider.${definition.key}"), 12f, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
             sliderValues[definition.key] = ThemeUi.text(this, "", 12f, palette, role = ThemeUi.ROLE_ACCENT)
@@ -1461,7 +1475,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun dirSegmented(): LinearLayout {
         val row = ThemeUi.row(this)
-        val options = listOf("顺时针" to 1.0, "逆时针" to -1.0, "随机" to 0.0)
+        val options = listOf(t("direction.cw") to 1.0, t("direction.ccw") to -1.0, t("direction.random") to 0.0)
         options.forEach { (label, value) ->
             val btn = ThemeUi.button(this, palette, label).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 32f), 1f)
@@ -1484,14 +1498,14 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             val header = FrameLayout(this@MainActivity).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 32f))
             }
-            header.addView(ThemeUi.text(this@MainActivity, "音频变换", 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
+            header.addView(ThemeUi.text(this@MainActivity, t("transform"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             pitchPicker = ThemeUi.text(this@MainActivity, "原声", 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 gravity = Gravity.CENTER
                 ThemeUi.hideOverflow(this)
                 layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 168f), ThemeUi.dp(this@MainActivity, 32f), Gravity.CENTER)
                 setOnClickListener {
                     val options = interleavedPitchOptions(PITCH_PRESETS)
-                    pickOption("选择变声风格 · 从原声开始", options.map { formatPitchLabel(it.name, it.semi) },
+                    pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.name, it.semi) },
                         options.indexOfFirst { it.semi == transform.semi }, twoColumns = true) {
                         transform = transform.copy(semi = options[it].semi); applyTransform(); refreshAll()
                     }
@@ -1505,7 +1519,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     rightMargin = ThemeUi.dp(this@MainActivity, 67f)
                 }
             })
-            header.addView(ThemeUi.text(this@MainActivity, "展开 ▾", 11f, palette, role = ThemeUi.ROLE_SUB).apply {
+            header.addView(ThemeUi.text(this@MainActivity, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
                 tag = "toggleT"
                 layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
                 setOnClickListener { toggleTransformOpen() }
@@ -1518,10 +1532,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             })
             val pitchRow = ThemeUi.row(this@MainActivity)
-            pitchRow.addView(ThemeUi.text(this@MainActivity, "变声", 12f, palette).apply {
+            pitchRow.addView(ThemeUi.text(this@MainActivity, t("pitch"), 12f, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
-            pitchLabel = ThemeUi.text(this@MainActivity, "原声", 12f, palette, role = ThemeUi.ROLE_ACCENT)
+            pitchLabel = ThemeUi.text(this@MainActivity, t("original"), 12f, palette, role = ThemeUi.ROLE_ACCENT)
             pitchRow.addView(pitchLabel)
             transformBody.addView(pitchRow)
             pitchSlider = SeekBar(this@MainActivity).apply {
@@ -1566,13 +1580,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             }
             transformBody.addView(tickRow)
             pitchTicks = pitchTickButtons
-            transformBody.addView(switchRow("倒放", "从结尾向开头播放") { reverse = it; service?.player?.reverse = it; service?.controlsReverse = reverse }.also {
+            transformBody.addView(switchRow(t("reverse"), t("reverse.hint")) { reverse = it; service?.player?.reverse = it; service?.controlsReverse = reverse }.also {
                 reverseSwitch = it.second
             }.first.apply { tag = "localOnly" })
             speedLabel = ThemeUi.text(this@MainActivity, "1.00×", 12f, palette, role = ThemeUi.ROLE_ACCENT)
             transformBody.addView(ThemeUi.row(this@MainActivity).apply {
                 tag = "localOnly"
-                addView(ThemeUi.text(this@MainActivity, "倍速", 12f, palette).apply {
+                addView(ThemeUi.text(this@MainActivity, t("speed"), 12f, palette).apply {
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 })
                 addView(speedLabel)
@@ -1597,7 +1611,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             transformBody.addView(speedSlider)
             denoiseLabel = ThemeUi.text(this@MainActivity, "65%", 12f, palette, role = ThemeUi.ROLE_ACCENT)
             transformBody.addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, "降噪", 12f, palette).apply {
+                addView(ThemeUi.text(this@MainActivity, t("denoise"), 12f, palette).apply {
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 })
                 addView(denoiseLabel)
@@ -1620,7 +1634,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             transformBody.addView(denoiseSlider)
             val chips = ThemeUi.row(this@MainActivity)
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
-                chips.addView(ThemeUi.button(this@MainActivity, palette, "${formatSpeedShort(value)}×\n实时", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
+                chips.addView(ThemeUi.button(this@MainActivity, palette, "${formatSpeedShort(value)}×\n${t("speed.realtime")}", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
                     layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 40f), 1f).apply {
                         leftMargin = ThemeUi.dp(this@MainActivity, 3f)
                     }
@@ -1637,16 +1651,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             speedChipButtons = (0 until chips.childCount).map { chips.getChildAt(it) as Button }
             chips.tag = "localOnly"
             transformBody.addView(chips)
-            transformBody.addView(switchRow("磁带模式", "音高随时长一起变") { transform = transform.copy(tape = it); applyTransform() }.also {
+            transformBody.addView(switchRow(t("tape"), t("tape.hint")) { transform = transform.copy(tape = it); applyTransform() }.also {
                 tapeSwitch = it.second
             }.first.apply { tag = "localOnly" })
-            durationHint = ThemeUi.text(this@MainActivity, "新时长 --:--", 12f, palette, role = ThemeUi.ROLE_ACCENT)
+            durationHint = ThemeUi.text(this@MainActivity, "${t("new.duration")} --:--", 12f, palette, role = ThemeUi.ROLE_ACCENT)
             transformBody.addView(ThemeUi.row(this@MainActivity).apply {
                 tag = "localOnly"
                 background = ThemeUi.bgDrawable(this@MainActivity, palette.surfaceAlt, 8f)
                 setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 6f),
                     ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 6f))
-                addView(ThemeUi.text(this@MainActivity, "新时长", 10f, palette, role = ThemeUi.ROLE_FAINT).apply {
+                addView(ThemeUi.text(this@MainActivity, t("new.duration"), 10f, palette, role = ThemeUi.ROLE_FAINT).apply {
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 })
                 addView(durationHint)
@@ -1660,7 +1674,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun curveCard(): LinearLayout {
         val card = card {
-            addView(tabRow(listOf("空间曲线", "可视化", "同步歌词"), curvePanel, compact = true) {
+            addView(tabRow(listOf(t("curve"), t("visualizer"), t("lyrics")), curvePanel, compact = true) {
                 curvePanel = it
                 if (it == 1) installPcmRenderer()
                 curve.visibility = if (it == 0) View.VISIBLE else View.GONE
@@ -1682,10 +1696,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             })
             curveLegend = ThemeUi.row(this@MainActivity).apply {
                 listOf(
-                    "左耳" to 0xff4ea1ff.toInt(),
-                    "右耳" to 0xffff7a59.toInt(),
-                    "仰角" to 0xff4fd396.toInt(),
-                    "远近" to 0xffa98ce8.toInt()
+                    t("left.ear") to 0xff4ea1ff.toInt(),
+                    t("right.ear") to 0xffff7a59.toInt(),
+                    t("elevation") to 0xff4fd396.toInt(),
+                    t("distance") to 0xffa98ce8.toInt()
                 ).forEach { (label, color) ->
                     addView(ThemeUi.row(this@MainActivity).apply {
                         addView(View(this@MainActivity).apply {
@@ -2173,13 +2187,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (::parameterPanel.isInitialized) {
             parameterPanel.visibility = if (parameterOpen) View.VISIBLE else View.GONE
         (root.findViewWithTag<View>("toggleP") as? TextView)?.let {
-                it.text = if (parameterOpen) "收起 ▴" else "展开 ▾"
+                it.text = if (parameterOpen) t("collapse") else t("expand")
             }
         }
         if (::transformBody.isInitialized) {
             transformBody.visibility = if (transformOpen) View.VISIBLE else View.GONE
             (root.findViewWithTag<View>("toggleT") as? TextView)?.let {
-                it.text = if (transformOpen) "收起 ▴" else "展开 ▾"
+                it.text = if (transformOpen) t("collapse") else t("expand")
             }
         }
     }
@@ -2294,7 +2308,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun showInfoSheet() {
         if (infoDialog?.isShowing == true) return
-        val expandedSections = mutableSetOf("快速入门")
+        val expandedSections = mutableSetOf(t("info.quick"))
         fun LinearLayout.section(title: String, content: String) {
             lateinit var desc: TextView
             addView(ThemeUi.text(this@MainActivity, title, 14f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
@@ -2324,8 +2338,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
         val header = ThemeUi.row(this).apply {
             layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 48f))
-            addView(ThemeUi.text(this@MainActivity, "说明", 16f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
-            addView(ThemeUi.text(this@MainActivity, "关闭", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            addView(ThemeUi.text(this@MainActivity, t("info"), 16f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(ThemeUi.text(this@MainActivity, t("close"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 gravity = Gravity.CENTER
                 layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 56f), -1)
                 setOnClickListener { infoDialog?.dismiss() }
@@ -2335,24 +2349,24 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         content.addView(ThemeUi.divider(this, palette))
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(ThemeUi.text(this@MainActivity, "应用说明", 16f, palette, bold = true).apply {
+            addView(ThemeUi.text(this@MainActivity, t("info.app"), 16f, palette, bold = true).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
             addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             listOf(
-                "快速入门" to "1. 选择本地歌曲、FM 电台或在线曲库；\n2. 在空间风格里选一个预设；\n3. 点击播放后可通过音频图谱和可视化观察效果；\n4. 需要修正歌词时，在「同步歌词」长按歌词即可。",
-                "歌词" to "同步歌词自动滚动；点击任意行可跳转；长按当前歌词进入搜索、候选与预览。",
-                "可视化" to "波形 / 频谱 / 响度 / 相位可组合显示；声谱、图谱、粒子、穿梭为独占模式；后三者会叠加当前歌词。",
-                "导出与录音" to "本地歌曲可导出 WAV / MP3；FM 电台可录制最终 8D 输出。"
+                t("info.quick") to t("info.quick.body"),
+                t("info.lyrics") to t("info.lyrics.body"),
+                t("info.visualizer") to t("info.visualizer.body"),
+                t("info.export") to t("info.export.body")
             ).forEach { (title, content) -> section(title, content) }
-            addView(ThemeUi.text(this@MainActivity, "参数说明", 16f, palette, bold = true).apply {
+            addView(ThemeUi.text(this@MainActivity, t("info.params"), 16f, palette, bold = true).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
             addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             PARAM_INFO.forEach { info ->
-                section(info.label, info.desc)
+                section(t("slider.${info.key}"), t("param.${info.key}"))
             }
-            addView(ThemeUi.text(this@MainActivity, "曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+            addView(ThemeUi.text(this@MainActivity, t("info.legend"), 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 12f))
             })
         }
@@ -2434,12 +2448,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val current = if (online) onlineDialog else fmDialog
         if (current?.isShowing == true) return
         sourceStatusView = null
-        val sheet = ThemeUi.showSheet(this, palette, if (online) "在线曲库" else "FM 电台", "多源聚合 · 自动回退 · 8D 实时处理",
-            cancelLabel = "关闭", fullHeight = true, scrollable = false) {
+        val sheet = ThemeUi.showSheet(this, palette, if (online) t("online") else t("fm"), "8D",
+            cancelLabel = t("close"), fullHeight = true, scrollable = false) {
             populateSourceSheet(this, online)
         }
         if (online) onlineDialog = sheet else fmDialog = sheet
-        sourceStatusView = ThemeUi.text(this, if (online) "检索各平台公开曲目，按当前账号权限播放" else "选择 FM 电台，或粘贴自己的直播流地址", 11f, palette,
+        sourceStatusView = ThemeUi.text(this, t(if (online) "online.status" else "fm.status"), 11f, palette,
             role = ThemeUi.ROLE_SUB)
         sheet.findViewById<ViewGroup>(android.R.id.content)?.let { content ->
             (content.getChildAt(0) as? LinearLayout)?.addView(sourceStatusView)
@@ -2458,27 +2472,27 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         body.removeAllViews()
         if (!online) {
             val filters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            filters.addView(filterScroll("地区", RadioCatalog.regions, sourceRegion) {
+            filters.addView(filterScroll(t("region"), RadioCatalog.regions, sourceRegion) {
                 sourceRegion = it
                 sourceCity = "全部"
                 showSourceSheetRecreate()
             })
             if (sourceRegion != "全部" && sourceRegion != "全国") {
-                    val cities = listOf("全部") + RadioCatalog.filter(false, sourceRegion)
+                    val cities = listOf(t("all")) + RadioCatalog.filter(false, sourceRegion)
                     .map { it.city }.distinct()
-                if (cities.size > 1) filters.addView(filterScroll("城市", cities, sourceCity) {
+                if (cities.size > 1) filters.addView(filterScroll(t("city"), cities, sourceCity) {
                     sourceCity = it
                     showSourceSheetRecreate()
                 })
             }
-            filters.addView(filterScroll("类型", RadioCatalog.types, sourceType) {
+            filters.addView(filterScroll(t("genre"), RadioCatalog.types, sourceType) {
                 sourceType = it
                 showSourceSheetRecreate()
             })
             body.addView(filters)
             addStationBrowser(body, filters)
         } else {
-            val providers = listOf("聚合" to 0, "网易云" to 2, "QQ" to 4, "酷狗" to 3, "酷我" to 1, "Jamendo" to 5)
+            val providers = listOf(t("online.aggregate") to 0, "网易云" to 2, "QQ" to 4, "酷狗" to 3, "酷我" to 1, "Jamendo" to 5)
             body.addView(tabRow(providers.map { it.first }, providers.indexOfFirst { it.second == onlineProvider }) {
                 onlineProvider = providers[it].second
                 onlinePage = 1
@@ -2543,7 +2557,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun addStationBrowser(parent: LinearLayout, filters: LinearLayout) {
         val stations = RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val search = ThemeUi.input(this, palette, "搜索电台 / 省市 / 类型").apply {
+        val search = ThemeUi.input(this, palette, t("fm.search.hint")).apply {
             setOnEditorActionListener { _, _, _ ->
                 renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, text.toString()))
                 true
@@ -2568,22 +2582,22 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         renderStations(body, stations)
         val footer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val toggle = ThemeUi.text(this, "流地址 / 麦克风录音 ▸", 11f, palette, role = ThemeUi.ROLE_SUB).apply {
+        val toggle = ThemeUi.text(this, t("fm.custom"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f))
             setOnClickListener {
                 val open = details.visibility != View.VISIBLE
                 details.visibility = if (open) View.VISIBLE else View.GONE
-                text = if (open) "流地址 / 麦克风录音 ▾" else "流地址 / 麦克风录音 ▸"
+                text = if (open) t("fm.custom").replace("▸", "▾") else t("fm.custom")
             }
         }
-        val input = ThemeUi.input(this, palette, "粘贴 MP3/AAC 直播流地址").apply {
+        val input = ThemeUi.input(this, palette, t("fm.url.hint")).apply {
             setText(preferences.getString("customRadio", ""))
             setOnEditorActionListener { _, _, _ -> playCustom(text.toString()); true }
         }
         details.addView(ThemeUi.row(this).apply {
             addView(input, LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 42f), 1f))
-            addView(ThemeUi.button(this@MainActivity, palette, "播放", ThemeUi.ROLE_ACCENT_FILL) {
+            addView(ThemeUi.button(this@MainActivity, palette, t("play"), ThemeUi.ROLE_ACCENT_FILL) {
                 playCustom(input.text.toString())
             })
         })
@@ -2592,7 +2606,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             if (recordingKind == "mic") sourceStatusView?.let(::finishMicRecording)
             else requestMic.launch(Manifest.permission.RECORD_AUDIO)
         })
-        details.addView(ThemeUi.text(this, "电台自动尝试多路备用源；录音会保存最终 8D 输出。",
+        details.addView(ThemeUi.text(this, t("fm.recording.note"),
             11f, palette, role = ThemeUi.ROLE_SUB))
         footer.addView(toggle)
         footer.addView(details)
@@ -2618,7 +2632,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                         10f, palette, role = ThemeUi.ROLE_SUB))
                     addView(ThemeUi.text(this@MainActivity, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT))
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                addView(ThemeUi.text(this@MainActivity, if (active) "LIVE" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                addView(ThemeUi.text(this@MainActivity, if (active) "LIVE" else "${t("play")} ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener { playRadio(station); dismissSource() }
             })
         }
@@ -2633,12 +2647,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         body.removeAllViews()
         body.addView(ThemeUi.row(this).apply {
             val authenticated = onlineProvider > 0 && onlineMusic.loggedIn(onlineProvider)
-            addView(ThemeUi.text(this@MainActivity, if (authenticated) "已登录 · 按账号权限播放" else "未登录 · 公开曲目与免费内容",
+            addView(ThemeUi.text(this@MainActivity, t(if (authenticated) "online.logged.in" else "online.logged.out"),
                 11f, palette, role = ThemeUi.ROLE_SUB), LinearLayout.LayoutParams(0, -2, 1f))
             addView(ThemeUi.button(this@MainActivity, palette, when {
                 onlineProvider == 5 -> "Client ID"
-                authenticated -> "退出登录"
-                else -> "账号认证"
+                authenticated -> t("online.logout")
+                else -> t("online.login")
             }) {
                 if (onlineProvider == 5) showJamendoConfig()
                 else
@@ -2646,10 +2660,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 else showOnlineAuthentication()
             })
         })
-        val input = ThemeUi.input(this, palette, "搜索歌曲 / 歌手").apply { setText(onlineQuery) }
+        val input = ThemeUi.input(this, palette, t("online.search.hint")).apply { setText(onlineQuery) }
         body.addView(ThemeUi.row(this).apply {
             addView(input, LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 42f), 1f))
-            addView(ThemeUi.button(this@MainActivity, palette, "搜索", ThemeUi.ROLE_ACCENT_FILL) {
+            addView(ThemeUi.button(this@MainActivity, palette, t("search"), ThemeUi.ROLE_ACCENT_FILL) {
                 onlineQuery = input.text.toString().trim()
                 onlinePage = 1
                 loadOnlineTracks(false)
@@ -2668,13 +2682,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     addView(ThemeUi.text(this@MainActivity, track.title, 13f, palette, bold = true))
                     addView(ThemeUi.text(this@MainActivity, "${track.artist} · ${track.provider}", 11f, palette, role = ThemeUi.ROLE_SUB))
                 }, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(ThemeUi.text(this@MainActivity, "试听 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                addView(ThemeUi.text(this@MainActivity, t("online.preview"), 12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener {
-                    onlineStatusView?.text = "正在获取 ${track.title} 的播放地址…"
+                    onlineStatusView?.text = String.format(t("online.address"), track.title)
                     onlineMusic.resolve(track) { result ->
                         result.onSuccess { playOnline(track, it) }
                             .onFailure { if (onlineDialog?.isShowing == true)
-                                onlineStatusView?.text = it.message ?: "播放地址获取失败" }
+                                onlineStatusView?.text = it.message ?: t("online.address.failed") }
                     }
                 }
             })
@@ -2684,7 +2698,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             loadOnlineTracks(true)
         })
         body.addView(ScrollView(this).apply { addView(tracks) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        body.addView(ThemeUi.text(this, "仅试听平台允许的免费内容；QQ 音乐按当前账号权限播放，不绕过会员限制。",
+        body.addView(ThemeUi.text(this, t("online.footer"),
             10f, palette, role = ThemeUi.ROLE_FAINT))
     }
 
@@ -2756,16 +2770,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun loadOnlineTracks(append: Boolean) {
         val seq = ++onlineSearchSeq
-        onlineStatusView?.text = "正在加载…"
+        onlineStatusView?.text = t("online.searching")
         if (onlineDialog?.isShowing != true) return
         val callback: (Result<List<OnlineTrack>>) -> Unit = { result ->
             if (seq == onlineSearchSeq && onlineDialog?.isShowing == true) {
                 result.onSuccess {
                     onlineTracks = if (append) onlineTracks + it else it
                     refreshOnlineBody()
-                    onlineStatusView?.text = if (onlineTracks.isEmpty()) "没有找到可播放歌曲" else "找到 ${onlineTracks.size} 首"
+                    onlineStatusView?.text = if (onlineTracks.isEmpty()) t("online.no.tracks") else String.format(t("online.tracks"), onlineTracks.size)
                 }.onFailure {
-                    onlineStatusView?.text = it.message ?: "在线曲库暂不可用"
+                    onlineStatusView?.text = it.message ?: t("online.unavailable")
                 }
             }
         }

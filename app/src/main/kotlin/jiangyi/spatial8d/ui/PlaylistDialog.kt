@@ -78,6 +78,7 @@ class PlaylistDialog(
     }
     private var saveOpen = false
     private var reorderMode = false
+    private fun t(key: String) = AppLanguage.text(context, key)
 
     fun isShowing(): Boolean = dialog?.isShowing == true
 
@@ -119,10 +120,10 @@ class PlaylistDialog(
         })
         count = ThemeUi.text(c, "", 11f, p, role = ThemeUi.ROLE_SUB)
         root.addView(ThemeUi.row(c).apply {
-            addView(ThemeUi.text(c, "播放列表", 15f, p, bold = true))
+            addView(ThemeUi.text(c, t("playlist"), 15f, p, bold = true))
             addView(count.apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) } })
-            addView(button("扫描") { (context as? PlaylistHost)?.scanMusic(); close() })
-            addView(ThemeUi.text(c, "关闭", 11f, p, role = ThemeUi.ROLE_SUB).apply {
+            addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
+            addView(ThemeUi.text(c, t("close"), 11f, p, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(dp(12), dp(8), dp(12), dp(8)); setOnClickListener { close() }
             })
         })
@@ -133,9 +134,9 @@ class PlaylistDialog(
                 addView(tabs)
                 layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
             })
-            addView(button(if (saveOpen) "收起" else "保存列表") { toggleSave() })
+            addView(button(if (saveOpen) t("playlist.collapse") else t("playlist.save")) { toggleSave() })
         })
-        search = ThemeUi.input(c, p, "过滤：歌名 / 歌手 / 专辑").apply {
+        search = ThemeUi.input(c, p, t("playlist.filter")).apply {
             setText(store.query)
             addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) { store.query = s.toString(); refresh() }
@@ -204,8 +205,8 @@ class PlaylistDialog(
         songs = store.view(source)
         count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
         tabs.removeAllViews()
-        tabs.addView(chip("全部", store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })
-        tabs.addView(chip("♥ $FAVORITES_NAME", store.playlistIndex == FAVORITES_INDEX) { store.playlistIndex = FAVORITES_INDEX; refresh() })
+        tabs.addView(chip(t("playlist.all"), store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })
+        tabs.addView(chip("♥ ${t("playlist.favorites")}", store.playlistIndex == FAVORITES_INDEX) { store.playlistIndex = FAVORITES_INDEX; refresh() })
         if (store.hidden.isNotEmpty()) tabs.addView(ThemeUi.text(context, "恢复 ${store.hidden.size}", 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
             setPadding(dp(8), dp(10), dp(8), dp(10))
             setOnClickListener { store.restoreHidden(); refresh() }
@@ -224,14 +225,14 @@ class PlaylistDialog(
                 }
             })
         }
-        tabs.addView(chip("＋ 添加", false) { (context as? PlaylistHost)?.addAudio() })
+        tabs.addView(chip(t("playlist.add"), false) { (context as? PlaylistHost)?.addAudio() })
         sortRow.removeAllViews()
         val actions = ThemeUi.row(context).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.END or Gravity.CENTER_VERTICAL
         }
-        sortRow.addView(ThemeUi.text(context, "排序", 11f, p, role = ThemeUi.ROLE_SUB))
-        listOf("name" to "文件名", "artist" to "歌手", "album" to "专辑", "time" to "时间", "manual" to "自定义").forEach { (key, label) ->
+        sortRow.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))
+        listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "album" to t("sort.album"), "time" to t("sort.time"), "manual" to t("sort.manual")).forEach { (key, label) ->
             sortRow.addView(chip(label, store.sort == key) { store.setSort(key); refresh() })
         }
         // The trailing action pair remains fixed after Custom in the UTS order row.
@@ -300,20 +301,20 @@ class PlaylistDialog(
             addView(ThemeUi.text(c, (if (active) "▶ " else "") + displayName, 13f, p, bold = active, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply { ThemeUi.hideOverflow(this) })
             addView(ThemeUi.text(c, "${song.artist} · ${song.album} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) })
         })
-        row.addView(ThemeUi.text(c, "移除", 11f, p, role = ThemeUi.ROLE_FAINT).apply {
+        row.addView(ThemeUi.text(c, t("remove"), 11f, p, role = ThemeUi.ROLE_FAINT).apply {
             setPadding(dp(6), dp(10), dp(4), dp(10))
             setOnClickListener {
                 AlertDialog.Builder(context, if (dark)
                         androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
                     else androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert)
                     .setMessage("从列表移除“${song.name}”？不会删除源文件。")
-                    .setPositiveButton("移除") { _, _ ->
+                    .setPositiveButton(t("remove")) { _, _ ->
                         val playlist = store.playlistIndex
                         if (playlist == FAVORITES_INDEX) store.toggleFavorite(song.id)
                         else if (playlist >= 0) store.removeFromPlaylist(playlist, song) else store.hide(song)
                         status.text = "已移除，不删除源文件"; refresh()
                     }
-                    .setNegativeButton("取消", null).show()
+                    .setNegativeButton(t("cancel"), null).show()
             }
         })
         row.setOnClickListener { if (!reorderMode && dragging < 0) { onPlay(song); dismiss() } }
@@ -422,9 +423,9 @@ class PlaylistDialog(
         val index = root.indexOfChild(search)
         if (saveOpen) {
             val row = ThemeUi.row(context).apply { tag = "save" }
-            val input = ThemeUi.input(context, p, "新播放列表名称")
+            val input = ThemeUi.input(context, p, t("playlist.new"))
             row.addView(input.apply { layoutParams = LinearLayout.LayoutParams(0, dp(36), 1f) })
-            row.addView(ThemeUi.text(context, "保存", 12f, p, role = ThemeUi.ROLE_ACCENT).apply {
+            row.addView(ThemeUi.text(context, t("save"), 12f, p, role = ThemeUi.ROLE_ACCENT).apply {
                 setPadding(dp(10), dp(8), dp(4), dp(8))
                 setOnClickListener {
                     if (store.addPlaylist(input.text.toString(), store.view(source))) { saveOpen = false; root.removeView(row); refresh() }

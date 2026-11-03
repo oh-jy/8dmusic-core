@@ -98,6 +98,7 @@ private class Clock {
 
 /** 原生 Canvas 版空间舞台，轨迹直接复用 core 的 frameAt，不另写一套运动公式。 */
 class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
+    private fun t(key: String) = AppLanguage.text(context, key)
     var preset: SpacePreset? = null
         set(value) { field = value; clock.sync(clock.seconds); invalidate() }
     var position: Double = 0.0
@@ -113,12 +114,12 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val d = resources.displayMetrics.density
     private val random = Random(8_108)
-    private val stars = Array(88) {
+    private val stars = Array(180) {
         floatArrayOf(random.nextFloat(), random.nextFloat(), 0.5f + random.nextFloat() * 0.9f,
             random.nextFloat() * 6.283f, 0.5f + random.nextFloat() * 1.5f)
     }
     private var energy = 0.0
-    private var meteor: Meteor? = null
+    private val meteors = mutableListOf<Meteor>()
     private var nextMeteorAt = 0L
     private var lastMeteorAt = 0L
 
@@ -161,10 +162,10 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.textSize = 12f
         paint.textAlign = Paint.Align.CENTER
         paint.color = if (dark) 0xe0c6d2e2.toInt() else 0xeb374558.toInt()
-        canvas.drawText("前", cx, 12f, paint)
-        canvas.drawText("后", cx, h - 2f, paint)
-        canvas.drawText("左", 7f, cy + 4f, paint)
-        canvas.drawText("右", w - 7f, cy + 4f, paint)
+        canvas.drawText(t("front"), cx, 12f, paint)
+        canvas.drawText(t("back"), cx, h - 2f, paint)
+        canvas.drawText(t("left"), 7f, cy + 4f, paint)
+        canvas.drawText(t("right"), w - 7f, cy + 4f, paint)
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
         // 球体、拖尾和扩散外圈统一缩小；绕行轨道独立放大以避开人头像。
         val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.68f
@@ -197,41 +198,39 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         stars.forEach { star ->
             val twinkle = (sin(now * star[4] + star[3]) + 1.0) * 0.5
             paint.color = starColor
-            paint.alpha = ((0.10 + twinkle * 0.48) * 255).toInt()
+            paint.alpha = ((0.18 + twinkle * 0.68) * 255).toInt()
             c.drawCircle(star[0] * w, star[1] * h, star[2], paint)
         }
         val nowMs = SystemClock.uptimeMillis()
-        val active = meteor
-        if (playing && active == null && (nowMs >= nextMeteorAt ||
-            energy > 0.075 && nowMs - lastMeteorAt > 1_800)) {
+        val meteorLimit = if (energy > 0.075) 3 else 1
+        if (playing && meteors.size < meteorLimit &&
+            (nowMs >= nextMeteorAt || energy > 0.075 && nowMs - lastMeteorAt > 550L)) {
             val startX = random.nextFloat() * w * 0.78f
             val startY = random.nextFloat() * h * 0.64f
-            meteor = Meteor(startX, startY, w * (0.20f + random.nextFloat() * 0.18f),
-                h * (0.10f + random.nextFloat() * 0.14f), nowMs,
+            val angle = random.nextDouble(0.0, Math.PI * 2)
+            val length = w * (0.22f + random.nextFloat() * 0.18f)
+            meteors += Meteor(startX, startY, (cos(angle) * length).toFloat(),
+                (sin(angle) * length * 0.65).toFloat(), nowMs,
                 650L + random.nextLong(550L))
             lastMeteorAt = nowMs
             nextMeteorAt = nowMs + 4_000L + random.nextLong(5_000L)
         }
-        val current = meteor ?: run { paint.alpha = 255; return }
-        val progress = (nowMs - current.startedAt).toFloat() / current.durationMs
-        if (progress >= 1f) {
-            meteor = null
-            paint.alpha = 255
-            return
-        }
-        val headX = current.x + current.dx * progress
-        val headY = current.y + current.dy * progress
-        val alpha = (sin(progress * Math.PI) * 210).toInt().coerceIn(0, 210)
-        // 沿运动反方向分段淡出，流星可跨越整个空间画布，不受椭圆限制。
-        for (segment in 0 until 7) {
-            val tail = segment / 7f
-            paint.color = if (dark) 0xffd6e9ff.toInt() else 0xff7899b8.toInt()
-            paint.alpha = (alpha * (1f - tail)).toInt()
-            paint.strokeWidth = 1.6f * (1f - tail * 0.6f)
-            c.drawLine(headX - current.dx * 0.18f * tail,
-                headY - current.dy * 0.18f * tail,
-                headX - current.dx * 0.18f * (tail + 1f / 7f),
-                headY - current.dy * 0.18f * (tail + 1f / 7f), paint)
+        meteors.removeAll { nowMs - it.startedAt >= it.durationMs }
+        meteors.forEach { current ->
+            val progress = (nowMs - current.startedAt).toFloat() / current.durationMs
+            val headX = current.x + current.dx * progress
+            val headY = current.y + current.dy * progress
+            val alpha = (sin(progress * Math.PI) * 210).toInt().coerceIn(0, 210)
+            for (segment in 0 until 7) {
+                val tail = segment / 7f
+                paint.color = if (dark) 0xffd6e9ff.toInt() else 0xff7899b8.toInt()
+                paint.alpha = (alpha * (1f - tail)).toInt()
+                paint.strokeWidth = 1.6f * (1f - tail * 0.6f)
+                c.drawLine(headX - current.dx * 0.18f * tail,
+                    headY - current.dy * 0.18f * tail,
+                    headX - current.dx * 0.18f * (tail + 1f / 7f),
+                    headY - current.dy * 0.18f * (tail + 1f / 7f), paint)
+            }
         }
         paint.alpha = 255
     }

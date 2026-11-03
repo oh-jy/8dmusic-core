@@ -278,6 +278,7 @@ object ThemeUi {
                 dp(context, 1f)
             ).apply { setMargins(0, dp(context, if (compactPicker) 2f else 8f), 0, dp(context, if (compactPicker) 2f else 8f)) }
         })
+        val cancelText = cancelLabel?.takeIf { it != "取消" } ?: AppLanguage.text(context, "cancel")
         // Full-height content may own its scrolling regions (station/online lists).
         val body = if (scrollable) SheetScrollView(context) else FrameLayout(context)
         body.layoutParams = LinearLayout.LayoutParams(
@@ -295,10 +296,10 @@ object ThemeUi {
         }
         body.addView(bodyRoot)
         root.addView(body)
-        if (cancelLabel != null) {
+        if (cancelText != null) {
             if (fullHeight) {
                 // 满屏页与列表一致使用右上角轻量关闭，不把底部留白换成大按钮。
-                val close = text(context, cancelLabel, 12f, p, role = ROLE_ACCENT).apply {
+                val close = text(context, cancelText, 12f, p, role = ROLE_ACCENT).apply {
                     gravity = Gravity.CENTER
                     setPadding(dp(context, 12f), dp(context, 8f), dp(context, 12f), dp(context, 8f))
                 }
@@ -308,7 +309,7 @@ object ThemeUi {
                 }
                 (root.getChildAt(1) as? ViewGroup)?.addView(close, FrameLayout.LayoutParams(-2, -2, Gravity.END))
             }
-            root.addView(button(context, p, cancelLabel, role = ROLE_SURFACE_ALT).apply {
+            root.addView(button(context, p, cancelText, role = ROLE_SURFACE_ALT).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(context, if (compactPicker) 34f else 42f)).apply {
                     topMargin = dp(context, if (compactPicker) 4f else 12f)
                 }
@@ -327,7 +328,7 @@ object ThemeUi {
             window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
             layoutSheet(this, fullHeight)
             setOnShowListener { layoutSheet(this, fullHeight) }
-            if (cancelLabel != null) {
+            if (cancelText != null) {
                 root.getChildAt(root.childCount - 1)?.setOnClickListener {
                     onCancel?.invoke()
                     dlg?.dismiss()

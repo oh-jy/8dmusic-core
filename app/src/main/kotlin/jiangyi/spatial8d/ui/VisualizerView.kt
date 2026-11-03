@@ -29,6 +29,7 @@ import kotlin.math.sqrt
 
 /** 本地 PCM 可视化，不增加原生依赖；组合图表与独占动效共用同一份输出样本。 */
 class VisualizerView(context: Context) : LinearLayout(context) {
+    private fun t(key: String) = AppLanguage.text(context, key)
     var onExpand: (() -> Unit)? = null
     var dark = true
         set(value) { field = value; canvas.dark = value; restyle() }
@@ -54,21 +55,21 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         stage.addView(layerRow, FrameLayout.LayoutParams(-1, dp(28f)).apply {
             leftMargin = dp(4f); rightMargin = dp(4f); topMargin = dp(2f)
         })
-        listOf("波形", "频谱", "响度", "相位").forEachIndexed { index, label ->
-            layerRow.addView(button(label) {
+        listOf("wave", "spectrum", "loudness", "phase").forEachIndexed { index, key ->
+            layerRow.addView(button(t(key)) {
                 exclusive = false
                 layers[index] = !layers[index]
                 updateMode()
             }.also(layerButtons::add))
         }
-        listOf("声谱" to 1, "图谱" to 4, "粒子" to 2, "穿梭" to 3).forEach { (label, mode) ->
-            layerRow.addView(button(label) {
+        listOf("spectrogram" to 1, "graph" to 4, "particles" to 2, "travel" to 3).forEach { (key, mode) ->
+            layerRow.addView(button(t(key)) {
                 exclusive = true
                 visualMode = mode
                 updateMode()
             }.also(exclusiveButtons::add))
         }
-        expandButton = button("弹窗") { onExpand?.invoke() }.also(layerRow::addView)
+        expandButton = button(t("popup")) { onExpand?.invoke() }.also(layerRow::addView)
         updateMode()
     }
 
