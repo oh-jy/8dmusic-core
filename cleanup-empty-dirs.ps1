@@ -1,9 +1,9 @@
 $workspace = (Resolve-Path 'D:\temp\tools\8dmusic-kt').Path
 $targets = @(
-  'D:\temp\tools\8dmusic-kt\app\src\main\java\jiangyi\spatial8d\app',
+  'D:\temp\tools\8dmusic-kt\app\src\main\java\j5i\spatial8d\app',
   'D:\temp\tools\8dmusic-kt\app\src\main\main\res\values',
   'D:\temp\tools\8dmusic-kt\app\src\main\res\res\values',
-  'D:\temp\tools\8dmusic-kt\core\src\main\main\kotlin\jiangyi\spatial8d\core'
+  'D:\temp\tools\8dmusic-kt\core\src\main\main\kotlin\j5i\spatial8d\core'
 )
 
 $removed = 0

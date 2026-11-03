@@ -1,4 +1,4 @@
-﻿#include <jni.h>
+#include <jni.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -53,7 +53,7 @@ struct Wsola {
         out.resize(before+end);for(int i=0;i<end;i++)out[before+i]=float(den[i]>=1e-6?num[i]/den[i]:num[i]);}
 };
 }
-extern "C" JNIEXPORT jbyteArray JNICALL Java_com_jiangyi_spatial8d_NativePreprocess_run(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint channels,jboolean flt,jlong frames,jdouble speed,jdouble semis,jboolean tape){
+extern "C" JNIEXPORT jbyteArray JNICALL Java_com_j5i_spatial8d_NativePreprocess_run(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint channels,jboolean flt,jlong frames,jdouble speed,jdouble semis,jboolean tape){
     jbyte*ptr=env->GetByteArrayElements(data,nullptr);std::vector<float>a(frames),b,c;const unsigned char*s=reinterpret_cast<unsigned char*>(ptr);
     for(long i=0;i<frames;i++){const unsigned char*p=s+i*bpf;double sum=0;for(int ch=0;ch<channels;ch++){if(flt){float v;std::memcpy(&v,p+ch*4,4);sum+=v;}else{int16_t v;std::memcpy(&v,p+ch*2,2);sum+=v/32768.0;}}a[i]=float(sum/channels);}
     env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);const std::vector<float>*cur=&a;

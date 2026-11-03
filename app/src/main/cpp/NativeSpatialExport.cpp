@@ -1,4 +1,4 @@
-﻿#include <jni.h>
+#include <jni.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -151,7 +151,7 @@ void render(const int16_t*bytes,long frames,const Params&p,int bpf,int ch,bool f
 }
 }
 #ifndef SPATIAL_PLAYER_IMPLEMENTATION
-extern "C" JNIEXPORT void JNICALL Java_com_jiangyi_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jstring path){
+extern "C" JNIEXPORT void JNICALL Java_com_j5i_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jstring path){
     jbyte*ptr=env->GetByteArrayElements(data,nullptr);const char*p=env->GetStringUTFChars(path,nullptr);try{Params q{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),bool(reverse),denoise};render(reinterpret_cast<int16_t*>(ptr),frames,q,bpf,ch,flt,reverse,p);}catch(const std::string&e){env->ThrowNew(env->FindClass("java/io/IOException"),e.c_str());}env->ReleaseStringUTFChars(path,p);env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);
 }
 #endif

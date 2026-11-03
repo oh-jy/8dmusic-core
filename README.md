@@ -12,13 +12,13 @@
 
 ```
 core/                         纯 Kotlin 算法模块
-  src/main/kotlin/jiangyi/spatial8d/core/
+  src/main/kotlin/j5i/spatial8d/core/
     Curve.kt                  轨迹与距离曲线（UTS curve.uts）
     Params.kt                 参数/预设/滑块（UTS params.uts）
     ...                       后续 Binaural/Reverb/Engine/WSOLA/Resampler
 
 app/                          Android 外壳
-  src/main/kotlin/jiangyi/spatial8d/MainActivity.kt
+  src/main/kotlin/j5i/spatial8d/MainActivity.kt
 ```
 
 ## 构建

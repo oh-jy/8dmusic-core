@@ -57,7 +57,7 @@
 
 ## 验收记录（2026-10-30）
 
-- 原 UTS 应用保持原样；原生调试包使用 `jiangyi.spatial8d.native`，便于并行验证。
+- 原 UTS 应用保持原样；原生调试包使用 `j5i.spatial8d.native`，便于并行验证。
 - 删除覆盖 `.kts` 的旧 `app/build.gradle`；包名、`versionCode` 现在只由 `app/build.gradle.kts` 生成。
 - 无线设备安装新包被系统安装器拒绝（`Failure [-99]`），尚未取得原生应用的真实运行结果。
 - APK 已推送至设备 `/sdcard/Download/8dmusic-native-debug.apk`，测试音频为 `/sdcard/Download/8d-test-tone.wav`。

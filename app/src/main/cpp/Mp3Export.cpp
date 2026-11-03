@@ -1,4 +1,4 @@
-﻿#include <jni.h>
+#include <jni.h>
 #include <lame.h>
 #include <cstdio>
 #include <cstdint>
@@ -83,7 +83,7 @@ void encode(const char *wavPath, const char *mp3Path) {
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_jiangyi_spatial8d_Mp3Export_nativeEncode(JNIEnv *env, jclass, jstring wav, jstring mp3) {
+Java_com_j5i_spatial8d_Mp3Export_nativeEncode(JNIEnv *env, jclass, jstring wav, jstring mp3) {
     const char *wavPath = env->GetStringUTFChars(wav, nullptr);
     const char *mp3Path = env->GetStringUTFChars(mp3, nullptr);
     try {
