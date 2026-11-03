@@ -220,7 +220,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             paint.alpha = ((0.16 + twinkle * 0.52 + intensity * 0.42) * 255).toInt().coerceAtMost(255)
             val driftX = sin(now * (0.12 + intensity * 0.8) + star[3]) * (1.5f + intensity * 5f)
             val driftY = cos(now * (0.10 + intensity * 0.6) + star[3]) * (1.5f + intensity * 4f)
-            c.drawCircle(star[0] * w + driftX, star[1] * h + driftY, star[2] * (1f + intensity * 0.5f), paint)
+            c.drawCircle((star[0] * w + driftX).toFloat(), (star[1] * h + driftY).toFloat(),
+                (star[2] * (1f + intensity * 0.5f)).toFloat(), paint)
         }
         val meteorLimit = if (intensity > 0.82) 2 else 1
         if (playing && meteors.size < meteorLimit &&

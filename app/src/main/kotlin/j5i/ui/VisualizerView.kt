@@ -3,6 +3,7 @@ package j5i.spatial8d.ui
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
@@ -230,7 +231,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var correlation = .0
         private var phase = 0f
         private val spectrum = DoubleArray(256)
-        private val spectrogramGradientColors = IntArray(9)
+        private var spectrogramBitmap: Bitmap? = null
+        private var spectrogramScroll = 0f
+        private var spectrogramLastNs = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
@@ -477,18 +480,34 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         private fun drawSpectrogram(c: Canvas) {
             label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
-            // 与图谱共用最新频谱，一次渐变绘制连续色带，避免历史网格复制造成卡顿和黑带。
-            spectrogramGradientColors.indices.forEach { index ->
-                val level = spectrum[(index * 255 / (spectrogramGradientColors.size - 1))].toFloat()
-                spectrogramGradientColors[index] = Color.HSVToColor(floatArrayOf(240f - level * 240f,
-                    .85f, .12f + level * .88f))
-            }
             val top = dp(30f)
-            paint.shader = android.graphics.LinearGradient(0f, top, width.toFloat(), top,
-                spectrogramGradientColors, null, android.graphics.Shader.TileMode.CLAMP)
-            paint.style = Paint.Style.FILL
-            c.drawRect(0f, top, width.toFloat(), height.toFloat(), paint)
-            paint.shader = null
+            val bitmap = spectrogramBitmap ?: Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888).also {
+                spectrogramBitmap = it
+                for (y in 0 until 128) for (x in 0 until 128) {
+                    val level = spectrum[x * 2].toFloat()
+                    it.setPixel(x, y, Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f)))
+                }
+            }
+            val now = System.nanoTime()
+            val dt = if (spectrogramLastNs == 0L) 1.0 / 60.0 else (now - spectrogramLastNs) / 1_000_000_000.0
+            spectrogramLastNs = now
+            spectrogramScroll += (dt.coerceIn(0.0, 0.12) * 18.0).toFloat()
+            if (spectrogramScroll >= 1.0) {
+                val advance = spectrogramScroll.toInt().coerceAtMost(8)
+                val copy = Bitmap.createBitmap(bitmap, 0, advance, 128, 128 - advance)
+                bitmap.eraseColor(Color.TRANSPARENT)
+                val history = Canvas(bitmap)
+                history.drawBitmap(copy, 0f, advance.toFloat(), paint)
+                for (x in 0 until 128) {
+                    val level = spectrum[x * 2].toFloat()
+                    bitmap.setPixel(x, 0, Color.HSVToColor(floatArrayOf(240f - level * 240f,
+                        .85f, .12f + level * .88f)))
+                }
+                copy.recycle()
+                spectrogramScroll -= advance
+            }
+            // 历史位图承载时间变化，最新一列只在顶部追加；不再用即时渐变条替代声谱。
+            c.drawBitmap(bitmap, null, RectF(0f, top, width.toFloat(), height.toFloat()), paint)
         }
 
         private fun drawParticles(c: Canvas) {
