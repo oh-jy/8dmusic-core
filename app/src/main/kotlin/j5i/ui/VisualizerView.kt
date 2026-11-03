@@ -47,6 +47,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val singleLayerButtons = mutableListOf<Button>()
     var showLayerOptions = false
         set(value) { field = value; singleLayerButtons.forEach { it.visibility = if (value) View.VISIBLE else View.GONE } }
+    var drivingLyrics = false
+        set(value) { field = value; updateMode() }
     val showsLyrics: Boolean get() = exclusive && visualMode != 1
 
     init {
@@ -163,7 +165,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
-        lyricOverlay.visibility = if (showsLyrics) View.VISIBLE else View.GONE
+        lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
         if (showsLyrics) lyricOverlay.bringToFront()
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
         singleLayerButtons.forEachIndexed { i, button -> button.isSelected = singleModes[i] && !exclusive }

@@ -400,7 +400,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             val steps = ((definition.max - definition.min) * 10.0.pow(definition.digits)).roundToInt()
             slider.max = steps
             slider.progress = ((value - definition.min) * 10.0.pow(definition.digits)).roundToInt()
-            sliderValues[key]?.text = formatValue(key, value) + when (key) {
+            sliderValues[key]?.text = formatValue(key, value).removeSuffix(definition.unit) + when (key) {
                 "period", "rt60" -> t("unit.seconds")
                 "room" -> t("unit.meters")
                 else -> ""
@@ -1353,6 +1353,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (drivingDialog?.isShowing == true) return
         (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
         visualizerView.showLayerOptions = false
+        visualizerView.drivingLyrics = true
+        visualizerView.visibility = View.VISIBLE
         visualizerView.restoreVisualState(true to 3)
         val view = DrivingView(this, visualizerView).apply {
             onClose = { drivingDialog?.dismiss() }
@@ -1367,6 +1369,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
                 curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
                 visualizerView.showLayerOptions = false
+                visualizerView.drivingLyrics = false
                 visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
                 drivingView = null
             }

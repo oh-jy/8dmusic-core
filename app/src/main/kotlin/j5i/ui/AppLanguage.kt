@@ -111,6 +111,7 @@ object AppLanguage {
         "visualizer" to e("可视化", "視覺化", "Visualizer"),
         "analysis" to e("音频分析", "音訊分析", "Audio analysis"),
         "metadata" to e("歌曲信息", "歌曲資訊", "Song info"),
+        "metadata.edit" to e("编辑", "編輯", "Edit"),
         "metadata.title" to e("歌名", "歌名", "Title"),
         "metadata.artist" to e("歌手", "歌手", "Artist"),
         "metadata.album" to e("专辑", "專輯", "Album"),

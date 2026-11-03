@@ -317,7 +317,7 @@ class PlaylistDialog(
                     .setNegativeButton(t("cancel"), null).show()
             }
         })
-        row.addView(ThemeUi.text(c, t("metadata"), 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
+        row.addView(ThemeUi.text(c, t("metadata.edit"), 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
             setPadding(dp(6), dp(10), dp(4), dp(10))
             setOnClickListener { (context as? PlaylistMetadataHost)?.editMetadata(song) }
         })
