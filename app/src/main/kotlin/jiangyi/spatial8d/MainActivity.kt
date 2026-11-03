@@ -1734,6 +1734,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
     private fun installPcmRenderer() {
         service?.player?.onPcm = { data, bytes ->
+            if (::visualization.isInitialized) visualization.acceptPcm(data, bytes)
             if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
             popupVisualizer?.accept(data, bytes)
         }

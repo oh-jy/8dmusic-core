@@ -15,6 +15,8 @@ import android.os.SystemClock
 import android.view.Choreographer
 import android.view.MotionEvent
 import android.view.View
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import jiangyi.spatial8d.core.SpaceFrame
 import jiangyi.spatial8d.core.SpacePreset
 import jiangyi.spatial8d.core.earGains
@@ -27,6 +29,7 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 import kotlin.math.sqrt
+import kotlin.random.Random
 
 private const val SIN_T = 0.4067f
 private const val COS_T = 0.9135f
@@ -109,6 +112,28 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     private val clock = Clock()
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val d = resources.displayMetrics.density
+    private val random = Random(8_108)
+    private val stars = Array(88) {
+        floatArrayOf(random.nextFloat(), random.nextFloat(), 0.5f + random.nextFloat() * 0.9f,
+            random.nextFloat() * 6.283f, 0.5f + random.nextFloat() * 1.5f)
+    }
+    private var energy = 0.0
+    private var meteor: Meteor? = null
+    private var nextMeteorAt = 0L
+    private var lastMeteorAt = 0L
+
+    /** 复用最终 8D PCM，响度达到高潮阈值时允许提前触发流星。 */
+    fun acceptPcm(data: ByteArray, bytes: Int) {
+        val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        var sum = 0.0
+        var count = 0
+        while (input.hasRemaining()) {
+            val sample = input.get() / 32768.0
+            sum += sample * sample
+            count++
+        }
+        energy = if (count > 0) sqrt(sum / count) else 0.0
+    }
 
     override fun onDraw(canvas: Canvas) {
         val p = preset ?: return
@@ -121,6 +146,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         val now = SystemClock.uptimeMillis() / 1000.0
         val cx = w / 2f
         val cy = h * 0.50f
+        drawSky(canvas, w, h, now)
         val elevMax = min(80.0, max(0.0, p.elev)) * Math.PI / 180.0
         val vSpan = (SIN_T + COS_T * sin(elevMax)).toFloat()
         val r = min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f
@@ -163,6 +189,55 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         }
         canvas.restore()
     }
+
+    private fun drawSky(c: Canvas, w: Float, h: Float, now: Double) {
+        paint.style = Paint.Style.FILL
+        paint.strokeWidth = 1f
+        val starColor = if (dark) 0xffb8d7ff.toInt() else 0xff5b83aa.toInt()
+        stars.forEach { star ->
+            val twinkle = (sin(now * star[4] + star[3]) + 1.0) * 0.5
+            paint.color = starColor
+            paint.alpha = ((0.10 + twinkle * 0.48) * 255).toInt()
+            c.drawCircle(star[0] * w, star[1] * h, star[2], paint)
+        }
+        val nowMs = SystemClock.uptimeMillis()
+        val active = meteor
+        if (playing && active == null && (nowMs >= nextMeteorAt ||
+            energy > 0.075 && nowMs - lastMeteorAt > 1_800)) {
+            val startX = random.nextFloat() * w * 0.78f
+            val startY = random.nextFloat() * h * 0.64f
+            meteor = Meteor(startX, startY, w * (0.20f + random.nextFloat() * 0.18f),
+                h * (0.10f + random.nextFloat() * 0.14f), nowMs,
+                650L + random.nextLong(550L))
+            lastMeteorAt = nowMs
+            nextMeteorAt = nowMs + 4_000L + random.nextLong(5_000L)
+        }
+        val current = meteor ?: run { paint.alpha = 255; return }
+        val progress = (nowMs - current.startedAt).toFloat() / current.durationMs
+        if (progress >= 1f) {
+            meteor = null
+            paint.alpha = 255
+            return
+        }
+        val headX = current.x + current.dx * progress
+        val headY = current.y + current.dy * progress
+        val alpha = (sin(progress * Math.PI) * 210).toInt().coerceIn(0, 210)
+        // 沿运动反方向分段淡出，流星可跨越整个空间画布，不受椭圆限制。
+        for (segment in 0 until 7) {
+            val tail = segment / 7f
+            paint.color = if (dark) 0xffd6e9ff.toInt() else 0xff7899b8.toInt()
+            paint.alpha = (alpha * (1f - tail)).toInt()
+            paint.strokeWidth = 1.6f * (1f - tail * 0.6f)
+            c.drawLine(headX - current.dx * 0.18f * tail,
+                headY - current.dy * 0.18f * tail,
+                headX - current.dx * 0.18f * (tail + 1f / 7f),
+                headY - current.dy * 0.18f * (tail + 1f / 7f), paint)
+        }
+        paint.alpha = 255
+    }
+
+    private data class Meteor(val x: Float, val y: Float, val dx: Float, val dy: Float,
+        val startedAt: Long, val durationMs: Long)
 
     private fun project(f: SpaceFrame, r: Float, cx: Float, cy: Float): FloatArray {
         val perspective = (1f - 0.10f * f.y.toFloat()) * (1f - 0.14f * (f.radius.toFloat() - 1f))
