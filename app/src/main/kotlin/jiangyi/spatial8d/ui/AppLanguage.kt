@@ -34,7 +34,8 @@ object AppLanguage {
             TRADITIONAL -> Locale.TRADITIONAL_CHINESE
             else -> Locale.ENGLISH
         }
-        Locale.setDefault(locale)
+        // 跟随系统必须读取系统 locale，不能被上次手动选择覆盖。
+        if (current(context) != SYSTEM) Locale.setDefault(locale)
         return context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(locale) })
     }
 
@@ -147,6 +148,21 @@ object AppLanguage {
         "slider.wet" to e("混响强度", "混響強度", "Reverb mix"),
         "slider.rt60" to e("混响时间", "混響時間", "Reverb time"),
         "slider.width" to e("声场宽度", "聲場寬度", "Stereo width"),
+        "unit.seconds" to e(" 秒", " 秒", " s"),
+        "unit.meters" to e(" 米", " 米", " m"),
+        "visual.wave" to e("波形  L / R", "波形  L / R", "Waveform  L / R"),
+        "visual.spectrum" to e("频谱  40 Hz - 20 kHz", "頻譜  40 Hz - 20 kHz", "Spectrum  40 Hz - 20 kHz"),
+        "visual.loudness" to e("响度  RMS %.1f dBFS   峰值 %.1f dBFS", "響度  RMS %.1f dBFS   峰值 %.1f dBFS", "Loudness  RMS %.1f dBFS   Peak %.1f dBFS"),
+        "visual.phase" to e("相位  %+.2f   -1 反相 / +1 同相", "相位  %+.2f   -1 反相 / +1 同相", "Phase  %+.2f   -1 inverted / +1 in phase"),
+        "visual.spectrogram" to e("声谱  时间向下 · 频率向右", "聲譜  時間向下 · 頻率向右", "Spectrogram  Time down · frequency right"),
+        "visual.empty" to e("请至少开启一个图表", "請至少開啟一個圖表", "Enable at least one chart"),
+        "preset.custom" to e("自定义", "自訂", "Custom"),
+        "preset.custom.note" to e("当前参数为手动调整，未匹配任何预设。", "目前參數為手動調整，未匹配任何預設。", "Manually adjusted; no preset matches."),
+        "status.preparing" to e("正在准备播放…", "正在準備播放…", "Preparing playback…"),
+        "status.playing" to e("正在播放", "正在播放", "Playing"),
+        "status.paused" to e("已暂停", "已暫停", "Paused"),
+        "status.ready" to e("已就绪，可播放", "已就緒，可播放", "Ready to play"),
+        "status.auto.next" to e("自动续播", "自動續播", "Auto next"),
         "playlist" to e("播放列表", "播放清單", "Playlist"),
         "playlist.filter" to e("过滤：歌名 / 歌手 / 专辑", "篩選：歌名 / 歌手 / 專輯", "Filter: title / artist / album"),
         "playlist.all" to e("全部", "全部", "All"),
@@ -208,4 +224,108 @@ object AppLanguage {
         "param.direction" to e("顺时针 / 逆时针固定绕行；随机模式每隔 2–8 秒自动换向，并保持换向瞬间的角度连续。", "順時針 / 逆時針固定繞行；隨機模式每隔 2–8 秒自動換向，並保持換向瞬間的角度連續。", "Fixed clockwise or counterclockwise motion. Random mode changes direction every 2–8 seconds without angular jumps."),
         "param.width" to e("0% = 双耳完全居中；100% = 标准 HRTF 双耳差异；最高 150% = 更强的左右分离和包围感。", "0% = 雙耳完全居中；100% = 標準 HRTF 雙耳差異；最高 150% = 更強的左右分離和包圍感。", "0% centers both ears; 100% uses standard HRTF differences; up to 150% increases separation and immersion.")
     )
+
+    private val presetNames = listOf(
+        e("原始音频 · 直通", "原始音訊 · 直通", "Original audio · Passthrough"),
+        e("标准绕头 · 默认", "標準繞頭 · 預設", "Standard orbit · Default"),
+        e("室内客厅 · 宽场", "室內客廳 · 寬場", "Living room · Wide"),
+        e("贴身耳语 · 小房间", "貼身耳語 · 小房間", "Close whisper · Small room"),
+        e("舞台前排 · 现场", "舞台前排 · 現場", "Front row · Live"),
+        e("音乐厅包厢 · 包围", "音樂廳包廂 · 包圍", "Concert box · Immersive"),
+        e("大教堂穹顶 · 极空", "大教堂穹頂 · 極空", "Cathedral · Vast"),
+        e("慢速漂浮 · 迷幻", "慢速漂浮 · 迷幻", "Slow drift · Psychedelic"),
+        e("极速环绕 · 眩晕", "極速環繞 · 眩暈", "Fast orbit · Intense"),
+        e("头顶升降 · 垂直", "頭頂升降 · 垂直", "Overhead · Vertical"),
+        e("地下车库 · 近混响", "地下車庫 · 近混響", "Garage · Early reflections"),
+        e("山谷回声 · 远反射", "山谷回聲 · 遠反射", "Valley · Distant echoes"),
+        e("随机巡游 · 不定向", "隨機巡遊 · 不定向", "Random roam · Changing direction"),
+        e("广场回响 · 户外", "廣場迴響 · 戶外", "Plaza · Outdoor"),
+        e("耳机环绕 · 宽阔", "耳機環繞 · 寬闊", "Headphone orbit · Wide"),
+        e("录音棚 · 干声", "錄音棚 · 乾聲", "Studio · Dry"),
+        e("空中轨道 · 升降", "空中軌道 · 升降", "Air orbit · Elevation"),
+        e("深夜卧室 · 轻眠", "深夜臥室 · 輕眠", "Bedroom · Night"),
+        e("金属隧道 · 长鸣", "金屬隧道 · 長鳴", "Metal tunnel · Long tail"),
+        e("侧后方掠影 · 反向", "側後方掠影 · 反向", "Rear pass · Reverse"),
+        e("前方呼吸 · 远近", "前方呼吸 · 遠近", "Front breathing · Depth"),
+        e("剧院楼座 · 宽厅", "劇院樓座 · 寬廳", "Theater balcony · Wide hall"),
+        e("城市广场 · 开阔", "城市廣場 · 開闊", "City square · Open"),
+        e("露天剧场 · 远景", "露天劇場 · 遠景", "Amphitheater · Distant"),
+        e("空旷展馆 · 回声", "空曠展館 · 回聲", "Empty hall · Echo"),
+        e("巨型礼堂 · 深远", "巨型禮堂 · 深遠", "Grand auditorium · Deep")
+    )
+
+    private val presetNotes = listOf(
+        e("不做 HRTF、不加混响，左右声道保持原始素材，用来 A/B 对比。", "不做 HRTF、不加混響，左右聲道保持原始素材，用來 A/B 對比。", "No HRTF or reverb. Original stereo for A/B comparison."),
+        e("最通用的 8 秒一圈，头前上方掠过；适合先判断素材是否合适。", "最通用的 8 秒一圈，頭前上方掠過；適合先判斷素材是否合適。", "An 8-second orbit passing above the head; a good starting point."),
+        e("15 米居家客厅空间，混响短、空间开阔；适合日常听歌与人声播客。", "15 米居家客廳空間，混響短、空間開闊；適合日常聽歌與人聲播客。", "A 15 m living room with short reverb for music and podcasts."),
+        e("人声贴耳、几乎没有尾巴；空间极小，适合 ASMR / 睡前 / 独白。", "人聲貼耳、幾乎沒有尾巴；空間極小，適合 ASMR / 睡前 / 獨白。", "Close vocals with almost no tail for ASMR and spoken word."),
+        e("转得偏快、反射早，像站在乐手前面听；适合摇滚 / 乐队现场。", "轉得偏快、反射早，像站在樂手前面聽；適合搖滾 / 樂隊現場。", "Fast orbit and early reflections for rock and live bands."),
+        e("中等厅堂、尾巴 1.8s，人声有明确包围感但字头仍清楚。", "中等廳堂、尾巴 1.8s，人聲有明確包圍感但字頭仍清楚。", "A medium hall with a 1.8 s tail and clear vocals."),
+        e("50 米空间 + 3.2s 尾巴，声音被拉长拉远；适合氛围 / 合唱 / 空灵段落。", "50 米空間 + 3.2s 尾巴，聲音被拉長拉遠；適合氛圍 / 合唱 / 空靈段落。", "A 50 m space with a 3.2 s tail for ambient and choral music."),
+        e("18 秒一圈、上下和远近摆幅大，像慢慢飘着绕；适合后摇 / 电子 / 助眠。", "18 秒一圈、上下和遠近擺幅大，像慢慢飄著繞；適合後搖 / 電子 / 助眠。", "An 18-second orbit with broad elevation and depth for ambient listening."),
+        e("1 秒一圈，左右耳高速交替；适合短片段特效，不建议整首长听。", "1 秒一圈，左右耳高速交替；適合短片段特效，不建議整首長聽。", "A one-second orbit for short effects, not extended listening."),
+        e("慢速旋转叠加大幅上下起伏，形成头顶掠过与下沉感。", "慢速旋轉疊加大幅上下起伏，形成頭頂掠過與下沉感。", "Slow orbit with strong elevation for overhead and sinking movement."),
+        e("近反射密、尾巴短，低频和人声周围有明显墙面感。", "近反射密、尾巴短，低頻和人聲周圍有明顯牆面感。", "Dense early reflections and short tails with nearby walls."),
+        e("50 米开阔空间、稀疏延迟和长尾，远近落差明显。", "50 米開闊空間、稀疏延遲和長尾，遠近落差明顯。", "A 50 m open space with sparse delays and long echoes."),
+        e("每 2–8 秒随机切换顺/逆时针，配合较大起伏，听感不可预测。", "每 2–8 秒隨機切換順/逆時針，配合較大起伏，聽感不可預測。", "Direction changes every 2–8 seconds with broad movement."),
+        e("34 米大空间 + 逆时针、从右侧起手，反射多而散；适合开阔感的编曲。", "34 米大空間 + 逆時針、從右側起手，反射多而散；適合開闊感的編曲。", "A 34 m space with a reverse orbit and diffuse reflections."),
+        e("加快左右交替并拉宽双耳差异，保持较浅混响，突出耳边的绕行感。", "加快左右交替並拉寬雙耳差異，保持較淺混響，突出耳邊的繞行感。", "Fast interaural changes and wide stereo with light reverb."),
+        e("小房间、低混响和轻微仰角，尽量保留口播、乐器的直接细节。", "小房間、低混響和輕微仰角，盡量保留口播、樂器的直接細節。", "Small room and light reverb to preserve detail."),
+        e("大幅上下起伏配合逆时针运动，形成从头顶掠过后沉入侧后方的轨迹。", "大幅上下起伏配合逆時針運動，形成從頭頂掠過後沉入側後方的軌跡。", "Strong elevation and reverse motion from above to rear-side."),
+        e("慢速、近距离、短尾音，适合低音量助眠，不强调夸张的左右跳跃。", "慢速、近距離、短尾音，適合低音量助眠，不強調誇張的左右跳躍。", "Slow, close and short-tailed for quiet nighttime listening."),
+        e("较窄空间配合较长的混响尾巴，适合合成器、氛围和实验音效。", "較窄空間配合較長的混響尾巴，適合合成器、氛圍和實驗音效。", "A narrow space with a long tail for synth and ambient effects."),
+        e("从右后方起步，以中速反向绕行，适合需要明确后脑方位的试听。", "從右後方起步，以中速反向繞行，適合需要明確後腦方位的試聽。", "A medium reverse orbit from the rear-right for clear rear imaging."),
+        e("慢速绕行，增强远近变化，让声源在前方周期性靠近又远离。", "慢速繞行，增強遠近變化，讓聲源在前方週期性靠近又遠離。", "Slow orbit with strong depth movement in front."),
+        e("30 米厅堂与 2 秒尾音，保留清晰人声，同时增加环绕包围。", "30 米廳堂與 2 秒尾音，保留清晰人聲，同時增加環繞包圍。", "A 30 m hall with a 2 s tail for clear, immersive vocals."),
+        e("36 米开阔空间，反射舒展，适合现场和层次丰富的编曲。", "36 米開闊空間，反射舒展，適合現場和層次豐富的編曲。", "A 36 m open space for live and layered music."),
+        e("40 米空间与较大的远近落差，声像更开阔，尾音不过分拖沓。", "40 米空間與較大的遠近落差，聲像更開闊，尾音不過分拖沓。", "A 40 m space with broad imaging and controlled reverb."),
+        e("44 米大空间与 3 秒尾音，强化宽阔回响，适合氛围和人声。", "44 米大空間與 3 秒尾音，強化寬闊迴響，適合氛圍和人聲。", "A 44 m hall with a 3 s tail for spacious vocals and ambience."),
+        e("48 米深广厅堂，长反射与慢速绕行营造庄重、深远的空间感。", "48 米深廣廳堂，長反射與慢速繞行營造莊重、深遠的空間感。", "A 48 m auditorium with long reflections and a slow, deep orbit.")
+    )
+
+    fun preset(context: Context, index: Int, note: Boolean = false): String {
+        val value = if (note) presetNotes.getOrNull(index) else presetNames.getOrNull(index)
+        return value?.let { when (resolved(context)) {
+            TRADITIONAL -> it.traditional
+            ENGLISH -> it.english
+            else -> it.simplified
+        } } ?: text(context, "preset.custom")
+    }
+
+    private val pitchNames = listOf(
+        "Chipmunk", "Screech", "Elf", "Cute", "Minion", "Crisp", "Bright", "Playful",
+        "Cartoon", "Lively", "Clear", "Soft bright", "Original", "Warm", "Low", "Mature",
+        "Steady", "Full", "Narrator", "Magnetic", "Demon", "Beast", "Torn", "Heavy", "Growl"
+    )
+
+    fun pitch(context: Context, semi: Double): String = when (resolved(context)) {
+        ENGLISH -> pitchNames.getOrNull((12 - semi.toInt()).coerceIn(0, 24)) ?: text(context, "preset.custom")
+        else -> when (semi.toInt()) {
+            0 -> text(context, "original")
+            12 -> if (resolved(context) == TRADITIONAL) "花栗鼠" else "花栗鼠"
+            11 -> "尖叫鸡"
+            10 -> if (resolved(context) == TRADITIONAL) "小精靈" else "小精灵"
+            9 -> if (resolved(context) == TRADITIONAL) "萌寵" else "萌宠"
+            8 -> if (resolved(context) == TRADITIONAL) "小黃人" else "小黄人"
+            7 -> "脆生生"
+            6 -> if (resolved(context) == TRADITIONAL) "少女" else "少女"
+            5 -> if (resolved(context) == TRADITIONAL) "俏皮" else "俏皮"
+            4 -> if (resolved(context) == TRADITIONAL) "卡通" else "卡通"
+            3 -> if (resolved(context) == TRADITIONAL) "靈動" else "灵动"
+            2 -> if (resolved(context) == TRADITIONAL) "清亮" else "清亮"
+            1 -> if (resolved(context) == TRADITIONAL) "微亮" else "微亮"
+            -1 -> if (resolved(context) == TRADITIONAL) "溫潤" else "温润"
+            -2 -> "低沉"
+            -3 -> if (resolved(context) == TRADITIONAL) "成熟男聲" else "成熟男声"
+            -4 -> if (resolved(context) == TRADITIONAL) "穩重" else "稳重"
+            -5 -> if (resolved(context) == TRADITIONAL) "厚實" else "厚实"
+            -6 -> if (resolved(context) == TRADITIONAL) "低沉旁白" else "低沉旁白"
+            -7 -> "磁性"
+            -8 -> if (resolved(context) == TRADITIONAL) "惡魔" else "恶魔"
+            -9 -> if (resolved(context) == TRADITIONAL) "巨獸" else "巨兽"
+            -10 -> "撕裂"
+            -11 -> if (resolved(context) == TRADITIONAL) "重壓" else "重压"
+            else -> "低吼"
+        }
+    }
 }

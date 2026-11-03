@@ -119,6 +119,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             random.nextFloat() * 6.283f, 0.5f + random.nextFloat() * 1.5f)
     }
     private var energy = 0.0
+    private var smoothEnergy = 0.0
     private val meteors = mutableListOf<Meteor>()
     private var nextMeteorAt = 0L
     private var lastMeteorAt = 0L
@@ -134,6 +135,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             count++
         }
         energy = if (count > 0) sqrt(sum / count) else 0.0
+        smoothEnergy = smoothEnergy * 0.82 + energy * 0.18
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -195,10 +197,12 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.style = Paint.Style.FILL
         paint.strokeWidth = 1f
         val starColor = if (dark) 0xffb8d7ff.toInt() else 0xff5b83aa.toInt()
-        stars.forEach { star ->
+        val intensity = (smoothEnergy * 9.0).coerceIn(0.0, 1.0)
+        val visibleStars = 60 + (intensity * 120).toInt()
+        stars.take(visibleStars).forEach { star ->
             val twinkle = (sin(now * star[4] + star[3]) + 1.0) * 0.5
             paint.color = starColor
-            paint.alpha = ((0.18 + twinkle * 0.68) * 255).toInt()
+            paint.alpha = ((0.22 + twinkle * 0.58 + intensity * 0.22) * 255).toInt().coerceAtMost(255)
             c.drawCircle(star[0] * w, star[1] * h, star[2], paint)
         }
         val nowMs = SystemClock.uptimeMillis()
@@ -211,7 +215,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             val length = w * (0.22f + random.nextFloat() * 0.18f)
             meteors += Meteor(startX, startY, (cos(angle) * length).toFloat(),
                 (sin(angle) * length * 0.65).toFloat(), nowMs,
-                650L + random.nextLong(550L))
+                1_100L + random.nextLong(800L))
             lastMeteorAt = nowMs
             nextMeteorAt = nowMs + 4_000L + random.nextLong(5_000L)
         }

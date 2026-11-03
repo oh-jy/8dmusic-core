@@ -43,6 +43,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val layers = booleanArrayOf(true, true, true, true)
     private val layerRow = row()
     private var expandButton: Button? = null
+    private val singleLayerButtons = mutableListOf<Button>()
     val showsLyrics: Boolean get() = exclusive && visualMode != 1
 
     init {
@@ -58,10 +59,18 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         listOf("wave", "spectrum", "loudness", "phase").forEachIndexed { index, key ->
             layerRow.addView(button(t(key)) {
                 exclusive = false
-                layers[index] = !layers[index]
+                singleModes.fill(false)
+                singleModes[index] = true
+                layers[index] = true
                 updateMode()
-            }.also(layerButtons::add))
+            }.also(singleLayerButtons::add))
         }
+        layerRow.addView(button(t("visualizer")) {
+            exclusive = false
+            singleModes.fill(false)
+            layers.fill(true)
+            updateMode()
+        })
         listOf("spectrogram" to 1, "graph" to 4, "particles" to 2, "travel" to 3).forEach { (key, mode) ->
             layerRow.addView(button(t(key)) {
                 exclusive = true
@@ -85,6 +94,18 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private var receivedPcm = 0L
     private var consumedPcm = 0L
     private var lastDiagnosticAt = 0L
+    private val singleModes = booleanArrayOf(false, false, false, false)
+    val visualState: Pair<Boolean, Int> get() = exclusive to visualMode
+    val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
+    fun restoreVisualState(state: Pair<Boolean, Int>, single: Int = -1) {
+        exclusive = state.first
+        visualMode = state.second
+        if (single >= 0) {
+            singleModes.fill(false)
+            singleModes[single] = true
+        }
+        updateMode()
+    }
     private val consumePcm = object : Runnable {
         override fun run() {
             renderPosted.set(false)
@@ -136,6 +157,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private fun updateMode() {
         canvas.mode = if (!exclusive) 0 else visualMode
         canvas.layers = layers.copyOf()
+        canvas.singleLayer = singleVisualLayer
         graphView.dark = dark
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
@@ -143,6 +165,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         lyricOverlay.visibility = if (showsLyrics) View.VISIBLE else View.GONE
         if (showsLyrics) lyricOverlay.bringToFront()
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
+        singleLayerButtons.forEachIndexed { i, button -> button.isSelected = singleModes[i] && !exclusive }
         exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == listOf(1, 4, 2, 3)[i] }
         restyle()
     }
@@ -181,6 +204,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         var dark = true
         var mode = 0
         var layers = BooleanArray(4) { true }
+        var singleLayer = -1
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val history = ShortArray(2048 * 2)
         private var total = 0L
@@ -191,6 +215,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val spectrum = DoubleArray(256)
         private val spectrogram = IntArray(128 * 64)
         private var spectrogramRow = 0
+        private var spectrogramOffset = 0f
+        private var lastSpectrogramDrawNs = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
@@ -329,7 +355,6 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val level = spectrum[x * 2].toFloat()
                 spectrogram[row + x] = Color.HSVToColor(floatArrayOf((240f - level * 240f), .85f, .12f + level * .88f))
             }
-            spectrogramRow = (spectrogramRow + 1) % 64
         }
 
         override fun onDraw(c: Canvas) {
@@ -352,9 +377,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawCombined(c: Canvas) {
-            val enabled = layers.indices.filter { layers[it] }
+            val enabled = if (singleLayer >= 0) listOf(singleLayer) else layers.indices.filter { layers[it] }
             if (enabled.isEmpty()) {
-                c.drawText("请至少开启一个图表", dp(14f), height / 2f, paint)
+                c.drawText(AppLanguage.text(context, "visual.empty"), dp(14f), height / 2f, paint)
                 return
             }
             // 顶部留给悬浮按钮，图表标签不再与波形和按钮重叠。
@@ -380,7 +405,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawWave(c: Canvas, top: Float, bottom: Float) {
-            label(c, "波形  L / R", bottom)
+            label(c, AppLanguage.text(context, "visual.wave"), bottom)
             val available = min(total / 2, 1024).toInt()
             if (available == 0) return
             // 底部保留说明文字行，波形振幅不侵入标签区域。
@@ -406,7 +431,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawSpectrum(c: Canvas, top: Float, bottom: Float) {
-            label(c, "频谱  40 Hz - 20 kHz", bottom)
+            label(c, AppLanguage.text(context, "visual.spectrum"), bottom)
             val baseline = bottom - dp(15f)
             val bar = width / 64f
             for (i in 0 until 64) {
@@ -418,7 +443,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         private fun drawLoudness(c: Canvas, top: Float, bottom: Float) {
             val db = if (rms > 0) 20 * ln(rms) / ln(10.0) else -80.0
-            label(c, String.format("响度  RMS %.1f dBFS   峰值 %.1f dBFS", db, if (peak > 0) 20 * ln(peak) / ln(10.0) else -80.0), bottom)
+            label(c, String.format(AppLanguage.text(context, "visual.loudness"), db, if (peak > 0) 20 * ln(peak) / ln(10.0) else -80.0), bottom)
             val left = 0f
             val right = width.toFloat()
             val y = top + (bottom - top - dp(18f)) / 2
@@ -429,7 +454,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawPhase(c: Canvas, top: Float, bottom: Float) {
-            label(c, String.format("相位相关  %+.2f   -1 反相 / +1 同相", correlation), bottom)
+            label(c, String.format(AppLanguage.text(context, "visual.phase"), correlation), bottom)
             val center = width / 2f
             val y = top + (bottom - top - dp(18f)) / 2
             paint.strokeWidth = dp(2f)
@@ -441,14 +466,26 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawSpectrogram(c: Canvas) {
-            label(c, "声谱  时间向下 · 频率向右", height.toFloat())
+            label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
+            val now = System.nanoTime()
+            val dt = if (lastSpectrogramDrawNs == 0L) 1f / 60f else (now - lastSpectrogramDrawNs) / 1_000_000_000f
+            lastSpectrogramDrawNs = now
+            spectrogramOffset += dt.coerceIn(0f, .1f) * 24f
+            if (spectrogramOffset >= 1f) {
+                val advance = spectrogramOffset.toInt()
+                spectrogramRow = (spectrogramRow + advance) % 64
+                spectrogramOffset -= advance
+            }
             val top = dp(30f)
             val cellW = width / 128f
             val cellH = (height - top) / 64f
+            c.save()
+            c.translate(0f, spectrogramOffset * cellH)
             for (y in 0 until 64) for (x in 0 until 128) {
                 paint.color = spectrogram[((spectrogramRow + y) % 64) * 128 + x]
                 c.drawRect(x * cellW, top + y * cellH, (x + 1) * cellW + 1, top + (y + 1) * cellH + 1, paint)
             }
+            c.restore()
         }
 
         private fun drawParticles(c: Canvas) {

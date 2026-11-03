@@ -180,6 +180,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var sourceRegion = "全部"
     private var sourceCity = "全部"
     private var sourceType = "全部"
+    private var stationListBody: LinearLayout? = null
     private var onlineProvider = 0
     private var curvePanel = 0
     private var onlinePage = 1
@@ -377,7 +378,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         palette = ThemeUi.palette(dark)
         // 下拉、展开控件、方向、曲线共用 preset，任何入口修改后都从这里统一回灌。
         presetPicker.text = preset.name
-        presetNote.text = preset.note
+        val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
+        if (presetIndex >= 0) {
+            presetPicker.text = AppLanguage.preset(this, presetIndex)
+            presetNote.text = AppLanguage.preset(this, presetIndex, note = true)
+        }
         val dirLabels = listOf(t("direction.cw") to 1.0, t("direction.ccw") to -1.0, t("direction.random") to 0.0)
         dirButtons.forEachIndexed { i, btn ->
             val (label, value) = dirLabels[i]
@@ -391,7 +396,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             val steps = ((definition.max - definition.min) * 10.0.pow(definition.digits)).roundToInt()
             slider.max = steps
             slider.progress = ((value - definition.min) * 10.0.pow(definition.digits)).roundToInt()
-            sliderValues[key]?.text = formatValue(key, value)
+            sliderValues[key]?.text = formatValue(key, value) + when (key) {
+                "period", "rt60" -> t("unit.seconds")
+                "room" -> t("unit.meters")
+                else -> ""
+            }
         }
         visualization.preset = preset
         val playing = if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
@@ -580,7 +589,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 ?: if (it.type == "网络台") "网络电台" else "电台直播"
         }.orEmpty()
         modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
-        status.text = playbackStatus
+        val effectiveStatus = when {
+            playing -> t("status.playing")
+            playbackStatus == t("status.preparing") && service?.player?.isPrepared == true -> t("status.ready")
+            else -> playbackStatus
+        }
+        status.text = effectiveStatus
         // 歌词只允许出现在一个位置：同步歌词，或可视化的图谱/粒子/穿梭及其弹窗。
         val visualLyrics = curvePanel == 1 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
         val statusLine = if (curvePanel != 2 && !visualLyrics) {
@@ -589,8 +603,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
                 if (idx >= 0) ls[idx].text else null
             }
-            currentLine?.takeIf { it.isNotBlank() } ?: playbackStatus
-        } else playbackStatus
+            currentLine?.takeIf { it.isNotBlank() } ?: effectiveStatus
+        } else effectiveStatus
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.text = statusLine
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
@@ -788,7 +802,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         currentIndex = queue.indexOfFirst { it.id == item.id && it.uri == item.uri }
         currentQueue = queue
         currentUri = item.uri
-        playbackStatus = "正在准备播放…"
+        playbackStatus = t("status.preparing")
         service?.let {
             it.controlsPreset = preset
             it.controlsTransform = transform
@@ -811,13 +825,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 try {
                     if (stream != null) AudioDecoder(this).decode(stream, { percent ->
                         main.post { if (generation == loadGeneration && service?.player?.isPlaying != true) {
-                            playbackStatus = "正在准备播放…"; refreshPlayback()
+                            playbackStatus = t("status.preparing"); refreshPlayback()
                         } }
                     }, { generation == loadGeneration }, onHead = { head, _ ->
                         main.post { prepareLoaded(item, head, autoplay, resumePosition, generation) }
                     }) else AudioDecoder(this).decode(musicStore.readableUri(item), { percent ->
                     main.post { if (generation == loadGeneration && service?.player?.isPlaying != true) {
-                        playbackStatus = "正在准备播放…"; refreshPlayback()
+                        playbackStatus = t("status.preparing"); refreshPlayback()
                     } }
                 }, { generation == loadGeneration }, onHead = { head, _ ->
                     main.post { prepareLoaded(item, head, autoplay, resumePosition, generation) }
@@ -825,7 +839,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 } finally { stream?.close() }
                 main.post {
                     if (generation == loadGeneration) {
-                        if (service?.player?.isPlaying != true) playbackStatus = "已就绪，可播放"
+                        if (service?.player?.isPlaying != true) playbackStatus = t("status.ready")
                         refreshPlayback()
                     }
                 }
@@ -852,7 +866,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         currentUri = item.uri
         currentIndex = currentQueue.indexOfFirst { it.uri == item.uri }
         loadLyrics(item)
-        playbackStatus = "自动续播 · ${item.name}"
+        playbackStatus = t("status.auto.next")
         refreshPlayback()
     }
 
@@ -867,6 +881,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         // prepare 已把起点设为零；恢复位置时再定位一次，避免连续重建两代渲染缓存。
         if (resumePosition > 0.0) service?.player?.seek(resumePosition)
         playbackStatus = "已加载 · ${head.sampleRate} Hz"
+        if (service?.player?.isPlaying == true) playbackStatus = t("status.playing")
         seekGuardUntil = SystemClock.elapsedRealtime() + 1500
         if (!item.uri.startsWith("http")) preferences.edit().putString("lastUri", item.uri).apply()
         if (autoplayRequests > 0) {
@@ -1070,14 +1085,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (visualizerDialog?.isShowing == true) return
         val dialog = ThemeUi.showSheet(this, palette, t("visualizer.popup"), t("visualizer.popup.subtitle"),
             fullHeight = true, scrollable = false) {
-            popupVisualizer = jiangyi.spatial8d.ui.VisualizerView(this@MainActivity).apply {
-                dark = this@MainActivity.dark
-                setLyrics(currentLyrics)
-                setPosition(((service?.player?.position ?: 0.0) * 1000).toLong())
-            }
-            addView(popupVisualizer, LinearLayout.LayoutParams(-1, 0, 1f))
+            (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
+            addView(visualizerView, LinearLayout.LayoutParams(-1, 0, 1f))
+            popupVisualizer = visualizerView
         }
-        dialog.setOnDismissListener { popupVisualizer = null }
+        dialog.setOnDismissListener {
+            popupVisualizer = null
+            (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
+            curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
+            visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
+        }
         visualizerDialog = dialog
         dialog.show()
     }
@@ -1359,7 +1376,9 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                         SPACE_PRESETS.firstOrNull { !it.raw })
                     val all = pinned + (SPACE_PRESETS + customPresets).filter { it !in pinned }
                         .sortedWith(compareBy({ it.room }, { it.name }))
-                    pickOption(t("space.choose"), all.map { "${it.name} · ${it.room.toInt()} m" },
+                    pickOption(t("space.choose"), all.map { item ->
+                        val index = SPACE_PRESETS.indexOfFirst { it.name == item.name }
+                        "${if (index >= 0) AppLanguage.preset(this@MainActivity, index) else item.name} · ${item.room.toInt()}${t("unit.meters")}" },
                         all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
@@ -2232,22 +2251,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     }
 
     private fun semiName(semi: Double): String = when (semi) {
-        -12.0 -> "低吼"
-        -8.0 -> "恶魔"
-        -4.0 -> "稳重"
-        0.0 -> "原声"
-        4.0 -> "卡通"
-        8.0 -> "小黄人"
-        12.0 -> "花栗鼠"
+        -12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0 -> AppLanguage.pitch(this, semi)
         else -> "${if (semi > 0) "+" else ""}${semi.toInt()}"
     }
 
     private fun formatPitchLabel(name: String, semi: Double): String =
-        "${name.substringBeforeLast(' ')} · ${if (semi > 0) "+" else ""}${semi.toInt()}半音"
+        "${AppLanguage.pitch(this, semi)} · ${if (semi > 0) "+" else ""}${semi.toInt()} ${t("semitone")}"
 
     private fun pitchPickerLabel(): String = PITCH_PRESETS.firstOrNull { it.semi == transform.semi }
         ?.let { formatPitchLabel(it.name, it.semi) }
-        ?: "自定义 · ${if (transform.semi > 0) "+" else ""}${transform.semi.toInt()} 半音"
+        ?: "${t("preset.custom")} · ${if (transform.semi > 0) "+" else ""}${transform.semi.toInt()} ${t("semitone")}"
 
     /** 用户点击“退出”时彻底停掉音频链路，否则前台服务会让应用继续驻留后台。 */
     private fun shutdownForExit() {
@@ -2475,19 +2488,19 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             filters.addView(filterScroll(t("region"), RadioCatalog.regions, sourceRegion) {
                 sourceRegion = it
                 sourceCity = "全部"
-                showSourceSheetRecreate()
+                populateSourceSheet(fmDialog?.window?.decorView?.findViewWithTag("sheetBody") ?: return@filterScroll, false)
             })
             if (sourceRegion != "全部" && sourceRegion != "全国") {
                     val cities = listOf(t("all")) + RadioCatalog.filter(false, sourceRegion)
                     .map { it.city }.distinct()
                 if (cities.size > 1) filters.addView(filterScroll(t("city"), cities, sourceCity) {
                     sourceCity = it
-                    showSourceSheetRecreate()
+                    refreshStationFilter()
                 })
             }
             filters.addView(filterScroll(t("genre"), RadioCatalog.types, sourceType) {
                 sourceType = it
-                showSourceSheetRecreate()
+                refreshStationFilter()
             })
             body.addView(filters)
             addStationBrowser(body, filters)
@@ -2557,6 +2570,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun addStationBrowser(parent: LinearLayout, filters: LinearLayout) {
         val stations = RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        stationListBody = body
         val search = ThemeUi.input(this, palette, t("fm.search.hint")).apply {
             setOnEditorActionListener { _, _, _ ->
                 renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, text.toString()))
@@ -2612,6 +2626,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         footer.addView(details)
         details.visibility = View.GONE
         filters.addView(footer)
+    }
+
+    private fun refreshStationFilter() {
+        val body = stationListBody ?: return
+        body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)) }
     }
 
     private fun renderStations(parent: LinearLayout, stations: List<RadioStation>) {
