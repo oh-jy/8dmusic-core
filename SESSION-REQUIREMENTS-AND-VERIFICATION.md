@@ -207,7 +207,7 @@
 
 | 模块 | 已实现内容 | 当前主要代码入口 | 实现完整度 |
 |---|---|---|---|
-| 工程与发布 | 多模块 Gradle、纯 Kotlin `core`、C++/JNI DSP、LAME MP3、签名正式包、时间戳版本号、arm64 与 16 KB 对齐 | `app/build.gradle.kts`、`build.ps1`、`build-native.ps1` | 已实现；Lint 尚未清零 |
+| 工程与发布 | 多模块 Gradle、纯 Kotlin `core`、C++/JNI DSP、LAME MP3、签名正式包、时间戳版本号、arm64 与 16 KB 对齐 | `app/build.gradle.kts`、`build.ps1`、`build-native.ps1`、签名说明 `build/signing/README.md`（密码在 `build/signing/password.txt`） | 已实现；Lint 尚未清零 |
 | 本地媒体库 | MediaStore/文件扫描、文件选择、可读 URI、歌曲元数据、缓存、隐藏与恢复 | `data/MusicStore.kt`、`MainActivity.kt` | 已实现，待完整回归 |
 | 队列与列表 | 搜索、文件名/歌手/专辑/时间/自定义排序、自建列表、保存列表、拖动排序、定位当前歌曲 | `data/Models.kt`、`ui/PlaylistDialog.kt`、`audio/PlaybackQueue.kt` | 已实现，排序单测已有 |
 | 收藏 | 内置不可删除收藏列表、空列表提示、播放控制处空心/实心爱心、深浅主题配色 | `HeartDrawable.kt`、`MusicStore.kt`、`PlaylistDialog.kt` | 已实现，待真机确认最新配色 |
