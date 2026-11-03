@@ -220,10 +220,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             service?.onPlaybackError = { main.post { toast(it) } }
             service?.onPlaybackChanged = { main.post { refreshPlayback() } }
             service?.onTrackChanged = { item -> main.post { adoptServiceTrack(item) } }
-            service?.player?.onPcm = { data, bytes ->
-                if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
-                popupVisualizer?.accept(data, bytes)
-            }
+            installPcmRenderer()
             service?.radio?.onReady = { main.post {
                 playbackStatus = "电台播放中 · ${currentItem?.name ?: "自定义电台"}"
                 refreshPlayback()
@@ -963,6 +960,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     override fun onResume() {
         super.onResume()
         pageActive = true
+        installPcmRenderer()
         service?.appInForeground = true
         // 回到前台立即撤掉播放通知，不打扰使用。
         service?.let { s ->
@@ -1664,6 +1662,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         val card = card {
             addView(tabRow(listOf("空间曲线", "可视化", "同步歌词"), curvePanel, compact = true) {
                 curvePanel = it
+                if (it == 1) installPcmRenderer()
                 curve.visibility = if (it == 0) View.VISIBLE else View.GONE
                 visualizerView.visibility = if (it == 1) View.VISIBLE else View.GONE
                 lyricsView.visibility = if (it == 2) View.VISIBLE else View.GONE
@@ -1730,6 +1729,14 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             addView(curveContent)
         }
         return card
+    }
+
+    /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
+    private fun installPcmRenderer() {
+        service?.player?.onPcm = { data, bytes ->
+            if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
+            popupVisualizer?.accept(data, bytes)
+        }
     }
 
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */
