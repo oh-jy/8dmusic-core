@@ -576,6 +576,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun refreshPlayback() {
         val player = service?.player
         val radio = service?.radio
+        // 自动续播的真实曲目以服务为准；即使首块通知丢失，也不能让标题和歌词停留在旧曲。
+        service?.currentTrack?.let { active ->
+            if (!isLive && currentUri != active.uri) adoptServiceTrack(active)
+        }
         val playing = if (isLive) radio?.isPlaying == true else player?.isPlaying == true
         if (playButton is ImageButton) {
             (playButton as ImageButton).setImageResource(
