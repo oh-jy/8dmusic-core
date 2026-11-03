@@ -42,7 +42,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val layers = booleanArrayOf(true, true, true, true)
     private val layerRow = row()
     private var expandButton: Button? = null
-    val showsLyrics: Boolean get() = exclusive
+    val showsLyrics: Boolean get() = exclusive && visualMode != 1
 
     init {
         orientation = VERTICAL
@@ -139,8 +139,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
-        lyricOverlay.visibility = if (exclusive) View.VISIBLE else View.GONE
-        if (exclusive) lyricOverlay.bringToFront()
+        lyricOverlay.visibility = if (showsLyrics) View.VISIBLE else View.GONE
+        if (showsLyrics) lyricOverlay.bringToFront()
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
         exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == listOf(1, 4, 2, 3)[i] }
         restyle()
@@ -512,25 +512,27 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val ny = dx / length * size
                 val group = (depth * 3.99f).toInt().coerceIn(0, 3)
                 // 多段连续收窄：头部之后多次变细，最终收束到一点。
-                val left = Path()
-                val right = Path()
-                left.moveTo(x + nx, y + ny)
-                right.moveTo(x - nx, y - ny)
+                val tail = Path()
+                tail.moveTo(x + nx, y + ny)
                 for (segment in 1..5) {
                     val fraction = segment / 5f
                     val segmentDepth = depth + (tailDepth - depth) * fraction
                     val segmentX = cx + rayX * segmentDepth
                     val segmentY = cy + rayY * segmentDepth
                     val half = size * (1f - fraction)
-                    left.lineTo(segmentX - dy / length * half, segmentY + dx / length * half)
-                    right.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
+                    tail.lineTo(segmentX - dy / length * half, segmentY + dx / length * half)
                 }
-                left.lineTo(tailX, tailY)
-                right.lineTo(tailX, tailY)
-                left.close()
-                right.close()
-                travelPaths[group].addPath(left)
-                travelPaths[group].addPath(right)
+                tail.lineTo(tailX, tailY)
+                for (segment in 4 downTo 0) {
+                    val fraction = segment / 5f
+                    val segmentDepth = depth + (tailDepth - depth) * fraction
+                    val segmentX = cx + rayX * segmentDepth
+                    val segmentY = cy + rayY * segmentDepth
+                    val half = size * (1f - fraction)
+                    tail.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
+                }
+                tail.close()
+                travelPaths[group].addPath(tail)
                 travelHeads[group].addCircle(x, y, size, Path.Direction.CW)
             }
             travelPaths.indices.forEach { group ->
@@ -596,7 +598,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             paint.textAlign = Paint.Align.CENTER
             paint.style = Paint.Style.FILL
             paint.typeface = android.graphics.Typeface.DEFAULT
-            val baseline = height - 18f * density
+            val baseline = height - 10f * density
             val metrics = paint.fontMetrics
             paint.color = ThemeUi.palette(dark).surface
             paint.alpha = 238

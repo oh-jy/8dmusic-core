@@ -1070,6 +1070,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             fullHeight = true, scrollable = false) {
             popupVisualizer = jiangyi.spatial8d.ui.VisualizerView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
+                setLyrics(currentLyrics)
+                setPosition(((service?.player?.position ?: 0.0) * 1000).toLong())
             }
             addView(popupVisualizer, LinearLayout.LayoutParams(-1, 0, 1f))
         }

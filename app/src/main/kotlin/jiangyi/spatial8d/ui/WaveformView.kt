@@ -64,8 +64,6 @@ class WaveformView(context: Context) : View(context) {
         paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
         val density = resources.displayMetrics.density
         val horizontalPadding = 6f * density
-        canvas.drawText("AudioTrack PCM", horizontalPadding + 4f * density,
-            30f * density + paint.textSize, paint)
         paint.color = if (dark) 0xff91b9e8.toInt() else 0xff315f91.toInt()
         paint.strokeWidth = 1f
         val middle = h * 0.42f
@@ -90,7 +88,7 @@ class WaveformView(context: Context) : View(context) {
         labels.forEachIndexed { index, label ->
             val centerX = padding + index * columnWidth + columnWidth / 2
             // 四列本身已有足够空间，不主动截断文本。
-            canvas.drawText(label, centerX, h - 8f * density, paint)
+            canvas.drawText(label, centerX, 30f * density + paint.textSize, paint)
         }
         paint.textAlign = oldAlign
     }
