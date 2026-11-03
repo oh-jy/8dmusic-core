@@ -5,6 +5,7 @@ import jiangyi.spatial8d.core.PITCH_PRESETS
 import jiangyi.spatial8d.MainActivity.Companion.interleavedPitchOptions
 import jiangyi.spatial8d.MainActivity.Companion.matchingPresetOrDefault
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
+import jiangyi.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
 import jiangyi.spatial8d.audio.PlaybackQueue
 import jiangyi.spatial8d.data.MusicItem
 import jiangyi.spatial8d.data.PlayMode
@@ -32,6 +33,13 @@ class MainActivityLogicCheck {
         check(!shouldRestartOutput(2, 2, prepared = true, paused = false, hasLiveOutput = true))
         check(shouldRestartOutput(2, 2, prepared = true, paused = false, hasLiveOutput = false))
         check(!shouldRestartOutput(2, 2, prepared = true, paused = true, hasLiveOutput = false))
+    }
+
+    @Test fun drainedOutputCompletesEvenWhenMarkerCallbackWasMissed() {
+        check(!hasReachedEndMarker(trackStarted = false, marker = 100, heardFrames = 100))
+        check(!hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 99))
+        check(hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 100))
+        check(hasReachedEndMarker(trackStarted = true, marker = 100, heardFrames = 101))
     }
 
     @Test fun timeSortUsesAddedThenModified() {

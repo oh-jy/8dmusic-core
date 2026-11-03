@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.PowerManager
+import android.util.Log
 import com.jiangyi.spatial8d.NativePreprocess
 import com.jiangyi.spatial8d.NativeSpatialExport
 import com.jiangyi.spatial8d.NativeSpatialPlayer
@@ -426,17 +427,33 @@ class SpatialPlayer(context: Context) {
         val source = decoded ?: return false
         if (!source.decodeDone || current.startFrame + current.produced.get() < source.frames) return false
         if (own != generation) return true
-        if (!trackStarted || endMarkerArmed) return false
-        // 系统按实际输出帧通知排干，不能用已写入帧数或可能停走的播放头猜曲尾。
+        if (!trackStarted) return false
         val marker = playPos
         if (marker <= 0) return false
         val audio = track ?: return false
+        if (endMarkerArmed) {
+            // 部分 ROM 在标记设置前已越过曲尾时不再回调，输出线程必须补检一次。
+            if (hasReachedEndMarker(trackStarted, marker, lastHeardFrame())) {
+                Log.i("8DEnd", "head reached end marker, completing generation=$own")
+                finishTrack(own)
+                return true
+            }
+            return false
+        }
+        // 系统通知负责正常曲尾，播放头补检只处理同一曲尾的丢失回调。
         endMarkerArmed = true
         audio.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
-            override fun onMarkerReached(track: AudioTrack) = finishTrack(own)
+            override fun onMarkerReached(track: AudioTrack) {
+                Log.i("8DEnd", "marker reached generation=$own")
+                finishTrack(own)
+            }
             override fun onPeriodicNotification(track: AudioTrack) = Unit
         }, main)
         audio.notificationMarkerPosition = marker
+        if (hasReachedEndMarker(trackStarted, marker, lastHeardFrame())) {
+            finishTrack(own)
+            return true
+        }
         return false
     }
 
@@ -620,6 +637,8 @@ class SpatialPlayer(context: Context) {
         const val SEEK_RESUME_DELAY_MS = 120L
         // 与 UTS 一致：三个输出块约 70ms，避免首个缓冲未填满就起播造成欠载。
         const val START_FRAMES = 3072
+        internal fun hasReachedEndMarker(trackStarted: Boolean, marker: Int, heardFrames: Int) =
+            trackStarted && marker > 0 && heardFrames >= marker
         internal fun shouldRestartOutput(own: Int, currentGeneration: Int, prepared: Boolean,
             paused: Boolean, hasLiveOutput: Boolean) =
             own <= currentGeneration && prepared && !paused && !hasLiveOutput
