@@ -41,6 +41,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val layerButtons = mutableListOf<Button>()
     private val exclusiveButtons = mutableListOf<Button>()
     private val layers = booleanArrayOf(true, true, true, true)
+    private val singleModes = booleanArrayOf(false, false, false, false)
     private val layerRow = row()
     private var expandButton: Button? = null
     private val singleLayerButtons = mutableListOf<Button>()
@@ -94,7 +95,6 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private var receivedPcm = 0L
     private var consumedPcm = 0L
     private var lastDiagnosticAt = 0L
-    private val singleModes = booleanArrayOf(false, false, false, false)
     val visualState: Pair<Boolean, Int> get() = exclusive to visualMode
     val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
     fun restoreVisualState(state: Pair<Boolean, Int>, single: Int = -1) {
