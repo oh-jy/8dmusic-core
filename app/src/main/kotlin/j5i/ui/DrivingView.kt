@@ -21,7 +21,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
     var onPrevious: (() -> Unit)? = null
     var onNext: (() -> Unit)? = null
     private val title = ThemeUi.text(context, "", 20f, ThemeUi.palette(true), bold = true)
-    private val play = ThemeUi.button(context, ThemeUi.palette(true), "▶", ThemeUi.ROLE_ACCENT_FILL, minHeightDp = 68f)
+    private val play = ThemeUi.button(context, ThemeUi.palette(true), "▶", ThemeUi.ROLE_SURFACE_ALT, minHeightDp = 68f)
     private val lines = Array(3) { index ->
         ThemeUi.text(context, "", 18f, ThemeUi.palette(true), bold = index == 1,
             role = if (index == 1) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_SUB).apply {
@@ -50,7 +50,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
             gravity = Gravity.CENTER
             setPadding(0, dp(14), 0, 0)
             addView(bigButton("⏮") { onPrevious?.invoke() }, LinearLayout.LayoutParams(0, dp(68), 1f))
-            addView(play.apply { setOnClickListener { onPlayPause?.invoke() } }, LinearLayout.LayoutParams(0, dp(68), 1.35f).apply {
+            addView(play.apply { textSize = 28f; setOnClickListener { onPlayPause?.invoke() } }, LinearLayout.LayoutParams(0, dp(68), 1f).apply {
                 leftMargin = dp(18); rightMargin = dp(18)
             })
             addView(bigButton("⏭") { onNext?.invoke() }, LinearLayout.LayoutParams(0, dp(68), 1f))

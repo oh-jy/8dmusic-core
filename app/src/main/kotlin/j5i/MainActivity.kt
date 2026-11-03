@@ -354,11 +354,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         frame.setBackgroundColor(palette.background)
         frame.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(nowPlayingBar())
-        frame.addView(ThemeUi.button(this, palette, t("driving"), ThemeUi.ROLE_ACCENT, minHeightDp = 36f).apply {
-            setOnClickListener { showDrivingMode() }
-        }, FrameLayout.LayoutParams(-2, ThemeUi.dp(this, 36f), Gravity.TOP or Gravity.END).apply {
-            topMargin = ThemeUi.dp(this@MainActivity, 64f); rightMargin = ThemeUi.dp(this@MainActivity, 14f)
-        })
         setContentView(frame)
         // 首屏用实际测量值分配曲线剩余空间，避免按屏幕高度硬减常量留下空白。
         curveContent.post { resizeCurveToRemainingSpace() }
@@ -418,6 +413,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         visualization.invalidate()
         curve.preset = preset
         curve.playing = playing
+        updateDriving()
         curve.invalidate()
         if (::pitchPicker.isInitialized) pitchPicker.text = pitchPickerLabel()
         if (::pitchLabel.isInitialized) {
@@ -1097,12 +1093,14 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             fullHeight = true, scrollable = false) {
             (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
             addView(visualizerView, LinearLayout.LayoutParams(-1, 0, 1f))
+            visualizerView.showLayerOptions = true
             popupVisualizer = visualizerView
         }
         dialog.setOnDismissListener {
             popupVisualizer = null
             (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
+            visualizerView.showLayerOptions = false
             visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
         }
         visualizerDialog = dialog
@@ -1327,6 +1325,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 6f) }
         }
         bar.addView(onlineButton)
+        bar.addView(navButton(t("driving")) { showDrivingMode() })
         bar.addView(navButton(t("language")) { showLanguagePicker() })
         themeButton = navButton(when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }) {
             // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
@@ -1353,6 +1352,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun showDrivingMode() {
         if (drivingDialog?.isShowing == true) return
         (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
+        visualizerView.showLayerOptions = false
         visualizerView.restoreVisualState(true to 3)
         val view = DrivingView(this, visualizerView).apply {
             onClose = { drivingDialog?.dismiss() }
@@ -1366,6 +1366,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             setOnDismissListener {
                 (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
                 curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
+                visualizerView.showLayerOptions = false
                 visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
                 drivingView = null
             }
@@ -1838,6 +1839,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         service?.player?.onPcm = { data, bytes ->
             if (::visualization.isInitialized) visualization.acceptPcm(data, bytes)
             if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
+            if (drivingDialog?.isShowing == true) visualizerView.accept(data, bytes)
             popupVisualizer?.accept(data, bytes)
         }
     }

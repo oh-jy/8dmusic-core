@@ -45,6 +45,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private val layerRow = row()
     private var expandButton: Button? = null
     private val singleLayerButtons = mutableListOf<Button>()
+    var showLayerOptions = false
+        set(value) { field = value; singleLayerButtons.forEach { it.visibility = if (value) View.VISIBLE else View.GONE } }
     val showsLyrics: Boolean get() = exclusive && visualMode != 1
 
     init {
@@ -63,7 +65,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 singleModes.fill(false)
                 layers[index] = !layers[index]
                 updateMode()
-            }.also(singleLayerButtons::add))
+            }.also(singleLayerButtons::add).also { it.visibility = View.GONE })
         }
         layerRow.addView(button(t("analysis")) {
             exclusive = false
@@ -487,6 +489,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             for (y in 0 until 64) for (x in 0 until 128) {
                 paint.color = spectrogram[((spectrogramRow + y) % 64) * 128 + x]
                 c.drawRect(x * cellW, top + y * cellH, (x + 1) * cellW + 1, top + (y + 1) * cellH + 1, paint)
+            }
+            // 平移时补绘顶部一行，避免上一帧移走后露出黑色断带。
+            for (x in 0 until 128) {
+                paint.color = spectrogram[((spectrogramRow + 63) % 64) * 128 + x]
+                c.drawRect(x * cellW, top - cellH, (x + 1) * cellW + 1, top, paint)
             }
             c.restore()
         }
