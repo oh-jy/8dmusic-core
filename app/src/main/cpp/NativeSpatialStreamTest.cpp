@@ -47,6 +47,15 @@ int main(){
         if(&renderer.rev.p!=&renderer.p){std::cerr<<"reverb retained constructor parameter\n";return 1;}
     }
     {
+        // 标准绕头只增强默认预设的前后耳廓线索，不扩大到其他空间风格。
+        Params standard{44100,8,35,45,0,1,100,10,1.2,18,false,false,58};
+        Params other{44100,8,35,45,0,1,100,10,1.2,18,false,false,58};
+        other.depth=50;
+        if(ctrl(0,standard,1).rear!=0||ctrl(2,standard,1).rear<=ctrl(2,other,1).rear){
+            std::cerr<<"standard front/rear cue is not strengthened\n";return 1;
+        }
+    }
+    {
         // 本地播放传入局部 PCM；连续歌曲帧号必须与整段渲染完全一致。
         Params p{44100,9,40,42,0,1,110,24,58,2.6,false,false,0};
         constexpr int n=44100;

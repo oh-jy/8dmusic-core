@@ -35,6 +35,14 @@ data class LyricsResult(
     val synchronized: Boolean get() = lines.isNotEmpty()
 }
 
+data class LyricsCandidate(
+    val trackName: String,
+    val artistName: String,
+    val durationSeconds: Double = 0.0,
+    val source: String,
+    val query: String
+)
+
 /**
  * LRCLIB 检索失败时回退 QQ 歌词。调用方传入实际曲目时长，结果优先从本地缓存读取。
  * 回调始终切回主线程；查不到、无时间轴和网络失败均通过 Result 明确返回。
@@ -49,6 +57,34 @@ class Lyrics(context: Context) {
     private val prefetchGeneration = AtomicInteger()
     private val requestLock = Any()
     private val requests = mutableMapOf<String, Pair<Long, MutableList<(Result<LyricsResult>) -> Unit>>>()
+
+    /**
+     * 手动检索候选列表。自动匹配写错时，允许用户在候选上重新选择，并可通过完整歌手/时长参与打分。
+     */
+    fun candidates(
+        title: String,
+        artist: String = "",
+        durationSeconds: Double = 0.0,
+        callback: (Result<List<LyricsCandidate>>) -> Unit,
+        onProgress: (String) -> Unit = {}
+    ) {
+        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        if (title.isBlank()) {
+            appContext.mainExecutor.execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
+            return
+        }
+        progress("正在检索歌词候选…")
+        thread(name = "lyrics-candidates") {
+            val result = try {
+                Result.success(searchCandidates(title.trim(), knownArtist(artist.trim()), durationSeconds))
+            } catch (e: NoSuchElementException) {
+                Result.failure(e)
+            } catch (e: Exception) {
+                Result.failure(IOException("暂时无法获取在线歌词", e))
+            }
+            appContext.mainExecutor.execute { callback(result) }
+        }
+    }
 
     fun load(
         title: String,
@@ -167,6 +203,217 @@ class Lyrics(context: Context) {
         }.maxWithOrNull(compareBy({ it.first }, { synchronizedWeight(it.second) }))?.second
             ?: throw NoSuchElementException("未找到匹配歌词")
         return parse(best).also { writeCache(file, best) }
+    }
+
+    private fun searchCandidates(title: String, artist: String, duration: Double): List<LyricsCandidate> {
+        val rows = try {
+            JSONArray(request("https://lrclib.net/api/search?track_name=${encode(title)}") ?: "[]")
+        } catch (_: Exception) {
+            JSONArray()
+        }
+        val lrclib = (0 until rows.length()).mapNotNull { row ->
+            rowToCandidate(rows.getJSONObject(row), "LRCLIB")
+        }
+        // QQ 作为第二路候选，手动选择可覆盖自动打分选错的问题。
+        val qq = try {
+            fetchQqCandidates(title, artist, duration)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val merged = LinkedHashMap<LyricsCandidate, Unit>()
+        lrclib.forEach { merged[it] = Unit }
+        // 自动回退视图同样可用，酷狗候选保留在末尾。
+        try {
+            fetchKugouCandidates(title, artist, duration).forEach { merged[it] = Unit }
+        } catch (_: Exception) {}
+        if (merged.isEmpty()) throw NoSuchElementException("未找到可选的歌词候选")
+        return merged.keys.sortedBy { -scoreCandidate(it) }
+    }
+
+    private fun fetchQqCandidates(title: String, artist: String, duration: Double): List<LyricsCandidate> {
+        val query = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" ")
+        val search = JSONObject(request("https://c.y.qq.com/soso/fcgi-bin/client_search_cp" +
+            "?w=${encode(query)}&format=json&n=20&p=1") ?: "{}")
+        val rows = search.optJSONObject("data")?.optJSONObject("song")?.optJSONArray("list") ?: JSONArray()
+        return (0 until rows.length()).mapNotNull { index ->
+            val row = rows.getJSONObject(index)
+            val name = Lyrics.decode(row.optString("songname"))
+            val artists = row.optJSONArray("singer") ?: JSONArray()
+            val singer = (0 until artists.length()).joinToString(" / ") {
+                Lyrics.decode(artists.getJSONObject(it).optString("name"))
+            }
+            LyricsCandidate(
+                trackName = name,
+                artistName = singer,
+                durationSeconds = row.optDouble("interval", 0.0),
+                source = "QQ",
+                query = Lyrics.encode(row.optString("songmid"))
+            )
+        }
+    }
+
+    private fun fetchKugouCandidates(title: String, artist: String, duration: Double): List<LyricsCandidate> {
+        val query = listOf(title, artist).filter { it.isNotBlank() }.joinToString(" ")
+        val url = "http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encode(query)}" +
+            if (duration > 0) "&duration=${(duration * 1000).toInt()}" else ""
+        val rows = JSONObject(request(url) ?: "{}").optJSONArray("candidates") ?: JSONArray()
+        return (0 until rows.length()).mapNotNull { index ->
+            val row = rows.getJSONObject(index)
+            LyricsCandidate(
+                trackName = row.optString("song"),
+                artistName = row.optString("singer"),
+                durationSeconds = row.optDouble("duration", 0.0) / 1000.0,
+                source = "酷狗",
+                query = Lyrics.encode(row.optString("id") + "|" + row.optString("accesskey"))
+            )
+        }
+    }
+
+    /**
+     * 使用选中的候选强制写入缓存。手动选择代表当时的意图，不能再次被旧缓存或自动打分覆盖。
+     */
+    fun applyCandidate(
+        title: String,
+        artist: String,
+        durationSeconds: Double,
+        candidate: LyricsCandidate,
+        callback: (Result<LyricsResult>) -> Unit,
+        onProgress: (String) -> Unit = {}
+    ) {
+        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        progress("正在获取所选歌词…")
+        thread(name = "lyrics-apply") {
+            val result = try {
+                val fetched = fetchCandidate(candidate, title, artist, durationSeconds, persist = true)
+                failures.edit().remove(key(title, knownArtist(artist), durationSeconds)).apply()
+                Result.success(fetched)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            appContext.mainExecutor.execute { callback(result) }
+        }
+    }
+
+    /** 候选确认前的预览读取，不写本地缓存；与 applyCandidate 共用抓取逻辑。 */
+    fun previewCandidate(
+        title: String,
+        artist: String,
+        durationSeconds: Double,
+        candidate: LyricsCandidate,
+        callback: (Result<LyricsResult>) -> Unit,
+        onProgress: (String) -> Unit = {}
+    ) {
+        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        progress("正在获取所选歌词…")
+        thread(name = "lyrics-preview") {
+            val result = try {
+                Result.success(fetchCandidate(candidate, title, artist, durationSeconds, persist = false))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            appContext.mainExecutor.execute { callback(result) }
+        }
+    }
+
+    private fun fetchCandidate(
+        candidate: LyricsCandidate,
+        title: String,
+        artist: String,
+        duration: Double,
+        persist: Boolean
+    ): LyricsResult = when (candidate.source) {
+        "QQ" -> fetchQqByMid(candidate, title, artist, duration, persist)
+        "酷狗" -> fetchKugouById(candidate, title, artist, persist)
+        "LRCLIB" -> fetchLrclibRow(candidate, title, artist, duration, persist)
+        else -> throw NoSuchElementException("无效的歌词来源")
+    }
+
+    private fun fetchLrclibRow(
+        candidate: LyricsCandidate,
+        title: String,
+        artist: String,
+        duration: Double,
+        persist: Boolean
+    ): LyricsResult {
+        val row = try { JSONObject(candidate.query) } catch (_: Exception) { null }
+            ?: throw NoSuchElementException("LRCLIB 候选缺少歌词内容")
+        val result = parse(row)
+        if (persist) writeCache(cacheFile(title, knownArtist(artist), duration), result.toRow(duration))
+        return result
+    }
+
+    private fun fetchQqByMid(
+        candidate: LyricsCandidate,
+        title: String,
+        artist: String,
+        duration: Double,
+        persist: Boolean
+    ): LyricsResult {
+        val mid = candidate.query
+        val decodedMid = decode(mid)
+        if (decodedMid.isBlank()) throw NoSuchElementException("QQ 候选缺少歌曲编号")
+        val lyric = JSONObject(request("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
+            "?songmid=${encode(decodedMid)}&format=json&nobase64=1&g_tk=5381") ?: "{}")
+        val synced = lyric.optString("lyric")
+        val lines = parseLrc(synced)
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
+        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, synced)
+        if (persist) writeCache(cacheFile(title, knownArtist(artist), duration), result.toRow(duration))
+        return result
+    }
+
+    private fun fetchKugouById(
+        candidate: LyricsCandidate,
+        title: String,
+        artist: String,
+        persist: Boolean
+    ): LyricsResult {
+        val parts = decode(candidate.query).split("|", limit = 2)
+        if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) throw NoSuchElementException("酷狗候选缺少歌词编号")
+        val lyricUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8" +
+            "&id=${encode(parts[0])}&accesskey=${encode(parts[1])}"
+        val lyric = JSONObject(request(lyricUrl) ?: "{}")
+        val synced = String(Base64.getDecoder().decode(lyric.optString("content")), Charsets.UTF_8)
+        val lines = parseLrc(synced)
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
+        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, synced)
+        if (persist) writeCache(cacheFile(title, knownArtist(artist), 0.0), result.toRow(candidate.durationSeconds))
+        return result
+    }
+
+    private fun LyricsResult.toRow(duration: Double) = JSONObject().apply {
+        put("trackName", trackName)
+        put("artistName", artistName)
+        put("syncedLyrics", lines.joinToString("\n") {
+            val total = it.timeMs
+            "[%02d:%02d.%02d]%s".format(total / 60000, total / 1000 % 60, total % 1000 / 10, it.text)
+        })
+        put("plainLyrics", plainLyrics)
+        put("instrumental", instrumental)
+        put("duration", duration)
+    }
+
+    private fun rowToCandidate(row: JSONObject, source: String): LyricsCandidate? {
+        val trackName = row.optString("trackName", row.optString("name"))
+        val artistName = row.optString("artistName")
+        val hasLyrics = row.optString("syncedLyrics").isNotBlank() ||
+            row.optString("plainLyrics").isNotBlank() || row.optBoolean("instrumental")
+        if (trackName.isBlank() || !hasLyrics) return null
+        return LyricsCandidate(
+            trackName = trackName,
+            artistName = artistName,
+            durationSeconds = row.optDouble("duration", 0.0),
+            source = source,
+            query = row.toString()
+        )
+    }
+
+    private fun scoreCandidate(candidate: LyricsCandidate): Int {
+        var score = if (candidate.source == "LRCLIB") 100 else 0
+        if (candidate.trackName.isNotBlank()) score += 5
+        if (candidate.artistName.isNotBlank()) score += 2
+        if (candidate.durationSeconds > 0) score += 3
+        return score
     }
 
     /** QQ 的公开搜索与歌词接口独立回退，LRCLIB 过载时不必把整首歌判为无歌词。 */

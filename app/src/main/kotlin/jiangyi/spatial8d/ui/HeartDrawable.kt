@@ -10,11 +10,15 @@ import android.graphics.drawable.Drawable
 import kotlin.math.min
 
 /** 矢量爱心：空心描边与实心填充共用同一路径，不依赖系统表情字体。 */
-class HeartDrawable(private val filled: Boolean) : Drawable() {
+class HeartDrawable(private val filled: Boolean, private val color: Int) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = if (filled) Paint.Style.FILL else Paint.Style.STROKE
         strokeJoin = Paint.Join.ROUND
         strokeCap = Paint.Cap.ROUND
+    }
+
+    init {
+        paint.color = color
     }
 
     override fun draw(canvas: Canvas) {

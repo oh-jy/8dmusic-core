@@ -195,7 +195,9 @@ class BinauralRenderer(var sr: Double) {
         cDr = 0.5 * tau * (1.0 - s)
         cShL = min(shadow, max(0.0, shadow * (1.0 + s) * 0.5))
         cShR = min(shadow, max(0.0, shadow * (1.0 - s) * 0.5))
-        cRear = min(1.0, max(0.0, -cs))
+        // 默认绕头增加前后差异；更强的耳廓频谱线索仍随原有方位轨迹连续变化。
+        val rearCue = if (period == 8.0 && elevDeg == 35.0 && depth01 == 0.45 && phaseDeg == 0.0 && direction > 0.0) 1.8 else 1.0
+        cRear = min(1.0, max(0.0, -cs)) * rearCue
 
         var f0 = 7200.0 - 62.0 * phiDeg
         f0 = min(9800.0, max(3200.0, f0))

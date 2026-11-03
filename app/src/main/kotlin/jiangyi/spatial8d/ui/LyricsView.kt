@@ -19,6 +19,7 @@ import kotlin.math.abs
  */
 class LyricsView(context: Context) : ScrollView(context) {
     var onSearch: ((String) -> Unit)? = null
+    var onManual: (() -> Unit)? = null
 
     var dark = true
         set(value) { field = value; applyColors() }
@@ -69,6 +70,10 @@ class LyricsView(context: Context) : ScrollView(context) {
                     setOnClickListener {
                         manualUntil = 0
                         setPosition(line.timeMs, true)
+                    }
+                    setOnLongClickListener {
+                        onManual?.invoke()
+                        true
                     }
                 }
                 rows += row

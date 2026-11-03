@@ -6,12 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.content.ContentValues
-import android.content.BroadcastReceiver
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.app.Dialog
 import android.graphics.Typeface
-import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
@@ -51,6 +48,8 @@ import jiangyi.spatial8d.audio.PlaybackService
 import jiangyi.spatial8d.audio.OnlineMusic
 import jiangyi.spatial8d.audio.OnlineTrack
 import jiangyi.spatial8d.audio.Lyrics
+import jiangyi.spatial8d.audio.LyricsCandidate
+import jiangyi.spatial8d.audio.LyricsResult
 import jiangyi.spatial8d.ui.LyricsView
 import jiangyi.spatial8d.ui.WaveformView
 import jiangyi.spatial8d.ui.VisualizerView
@@ -194,6 +193,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private var sourceTapCount = 0
     private var sourceTapAt = 0L
     private var exitDialog: Dialog? = null
+    private var lyricsDialog: Dialog? = null
     private lateinit var sourceButton: Button
     private lateinit var radioRefreshButton: Button
     private var sourceStatusView: TextView? = null
@@ -203,52 +203,20 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private lateinit var liveTimeline: LinearLayout
     private lateinit var recordingLabel: TextView
     private lateinit var transformCardRoot: LinearLayout
-    private var pausedByHeadset = false
     private var lastStateSavedAt = 0L
-    // 只恢复耳机造成的暂停；手动暂停后重新插入耳机不能擅自出声。
-    private val headsetReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val unplugged = intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY ||
-                (intent?.action == Intent.ACTION_HEADSET_PLUG && intent.getIntExtra("state", 0) == 0)
-            val plugged = intent?.action == Intent.ACTION_HEADSET_PLUG && intent.getIntExtra("state", 0) == 1
-            val playing = if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
-            if (unplugged && playing) {
-                pausedByHeadset = true
-                if (isLive) service?.radio?.pause() else service?.player?.pause()
-                playbackStatus = "耳机已断开，播放已暂停"
-                refreshPlayback()
-            } else if (plugged && pausedByHeadset) {
-                pausedByHeadset = false
-                requestPlaybackFocus()
-                val resumed = if (isLive) service?.radio?.play() == true else service?.player?.play() == true
-                if (resumed) playbackStatus = "耳机已接入，继续播放"
-                refreshPlayback()
-            }
-        }
-    }
 
-    private val audioFocus by lazy {
-        AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setOnAudioFocusChangeListener(focusListener).build()
-    }
-    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
-        if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-            main.post { if (isLive) service?.radio?.pause() else service?.player?.pause(); refreshPlayback() }
-        }
-    }
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             service = (binder as PlaybackService.Binder).service
             service?.controls = object : PlaybackService.Controls {
                 override fun play() { main.post { if (!isPlaying()) togglePlayback() } }
                 override fun pause() { main.post { if (isPlaying()) togglePlayback() } }
-                override fun previous() { main.post { previous() } }
-                override fun next() { main.post { next() } }
+                override fun previous() { main.post { service?.previous() } }
+                override fun next() { main.post { service?.next() } }
             }
-            service?.player?.onEnd = {
-                Log.i("8DQueue", "track ended in service callback")
-                main.post { next(auto = true) }
-            }
-            service?.player?.onError = { main.post { toast(it) } }
+            service?.onPlaybackError = { main.post { toast(it) } }
+            service?.onPlaybackChanged = { main.post { refreshPlayback() } }
+            service?.onTrackChanged = { item -> main.post { adoptServiceTrack(item) } }
             service?.player?.onPcm = { data, bytes ->
                 if (::waveformView.isInitialized && curvePanel == 1) waveformView.accept(data, bytes)
                 if (::visualizerView.isInitialized && curvePanel == 2) visualizerView.accept(data, bytes)
@@ -305,7 +273,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             override fun handleOnBackPressed() {
                 if (exitDialog?.isShowing == true) { exitDialog?.dismiss(); return }
                 var dismissed = false
-                listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog).forEach { dialog ->
+                listOf(sourceDialog, infoDialog, exportDialog, visualizerDialog, lyricsDialog).forEach { dialog ->
                     if (dialog?.isShowing == true) { dialog.dismiss(); dismissed = true }
                 }
                 if (playlistDialog?.isShowing() == true) { playlistDialog?.dismiss(); dismissed = true }
@@ -325,10 +293,6 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        registerReceiver(headsetReceiver, IntentFilter().apply {
-            addAction(Intent.ACTION_HEADSET_PLUG)
-            addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        }, Context.RECEIVER_NOT_EXPORTED)
         bindService(Intent(this, PlaybackService::class.java), connection, Context.BIND_AUTO_CREATE)
         if (hasAudioPermission()) scanMusic()
         scheduleLyricsPrefetch()
@@ -341,7 +305,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         service?.radio?.stopRecording()
         micRecorder?.stop()
         main.removeCallbacks(ticker)
-        try { unregisterReceiver(headsetReceiver) } catch (_: Exception) {}
+        service?.controls = null
+        service?.onTrackChanged = null
+        service?.onPlaybackError = null
+        service?.onPlaybackChanged = null
+        service?.player?.onPcm = null
         if (bound) unbindService(connection)
         super.onDestroy()
     }
@@ -511,7 +479,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (::playerBar.isInitialized) ThemeUi.applyTheme(playerBar, palette)
         // PNG 图标不经过 Button 主题回刷；播放键白色，普通控制键随主题切换。
         fun tintIcons(view: View) {
-            if (view is ImageButton) view.imageTintList = ColorStateList.valueOf(
+            if (view is ImageButton && !(::favoriteButton.isInitialized && view === favoriteButton)) view.imageTintList = ColorStateList.valueOf(
                 if (view.tag == ThemeUi.ROLE_ACCENT_FILL) 0xffffffff.toInt() else palette.controlText)
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
@@ -608,12 +576,16 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
         if (::radioRefreshButton.isInitialized) radioRefreshButton.visibility = if (isLive) View.VISIBLE else View.GONE
         if (::favoriteButton.isInitialized) {
+            favoriteButton.background = null
+            favoriteButton.tag = "favoriteButton"
+            favoriteButton.imageTintList = null
             val item = currentItem
             val local = !isLive && item != null && item.uri.isNotBlank() && !item.uri.startsWith("http")
             favoriteButton.visibility = if (local) View.VISIBLE else View.GONE
             if (local) {
                 val favorite = musicStore.isFavorite(item.id)
-                favoriteButton.setImageDrawable(jiangyi.spatial8d.ui.HeartDrawable(favorite))
+                val color = if (favorite) 0xffff5c7a.toInt() else palette.controlText
+                favoriteButton.setImageDrawable(jiangyi.spatial8d.ui.HeartDrawable(favorite, color))
                 favoriteButton.contentDescription = if (favorite) "取消收藏" else "收藏"
             }
         }
@@ -638,6 +610,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun applyPreset() {
         service?.player?.preset = preset
+        service?.controlsPreset = preset
         service?.radio?.preset = preset
         savePlaybackState()
         refreshAll()
@@ -652,6 +625,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             return
         }
         service?.player?.transform = transform
+        service?.controlsTransform = transform
+        service?.controlsReverse = reverse
         service?.radio?.denoise = transform.denoiseLevel
         // 实时播放走 PlaybackParams，导出时才离线重算 PCM，因此这里立即完成。
         playbackStatus = if (transform.active) "音频已更新（${formatSpeedShort(transform.speed)}× · ${transform.semi.toInt()}半音）"
@@ -770,17 +745,22 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (autoplay) autoplayRequests++ else autoplayRequests = 0
         val resumePosition = if (autoplay) 0.0 else restorePosition
         service?.player?.stop()
-        service?.player?.onEnd = {
-            Log.i("8DQueue", "track ended generation=$generation")
-            main.post { if (generation == loadGeneration) next(auto = true) }
-        }
-        service?.player?.onError = { main.post { if (generation == loadGeneration) toast(it) } }
         currentItem = item
         loadLyrics(item)
         queue = musicStore.view(songs)
         currentIndex = queue.indexOfFirst { it.id == item.id && it.uri == item.uri }
         currentQueue = queue
         currentUri = item.uri
+        playbackStatus = "正在准备播放…"
+        service?.let {
+            it.controlsPreset = preset
+            it.controlsTransform = transform
+            it.controlsReverse = reverse
+            it.syncQueue(currentQueue, currentUri)
+            it.onTrackChanged = { next -> main.post { adoptServiceTrack(next) } }
+            it.load(item, currentQueue, autoplay)
+            return
+        }
         songTitle.text = Lyrics.displayTitle(item.name)
         playbackStatus = "正在准备播放…"
         Thread {
@@ -828,6 +808,17 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }.start()
     }
 
+    private fun adoptServiceTrack(item: MusicItem) {
+        if (currentUri == item.uri) return
+        currentQueue = service?.queueSnapshot?.ifEmpty { currentQueue } ?: currentQueue
+        currentItem = item
+        currentUri = item.uri
+        currentIndex = currentQueue.indexOfFirst { it.uri == item.uri }
+        loadLyrics(item)
+        playbackStatus = "自动续播 · ${item.name}"
+        refreshPlayback()
+    }
+
     /** 本地文件与在线音频共用首块起播，后续 PCM 继续写入同一播放缓冲。 */
     private fun prepareLoaded(item: MusicItem, head: jiangyi.spatial8d.core.PcmBuffer,
         autoplay: Boolean, resumePosition: Double, generation: Int) {
@@ -851,6 +842,13 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     private fun adoptOrRestorePlayback() {
         if (currentItem != null) return
+        val active = service?.currentTrack
+        if (active != null && service?.player?.isPrepared == true) {
+            currentQueue = service?.queueSnapshot ?: queue
+            adoptServiceTrack(active)
+            refreshPlayback()
+            return
+        }
         val uri = restoreUri ?: preferences.getString("lastUri", null) ?: return
         val item = songs.firstOrNull { it.uri == uri }
         if (item == null) {
@@ -936,11 +934,10 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     }
 
     private fun togglePlayback() {
-        pausedByHeadset = false
         if (isLive) {
             val radio = service?.radio ?: return
             if (radio.isPlaying) { radio.pause(); playbackStatus = "电台已暂停" }
-            else { requestPlaybackFocus(); if (radio.play()) playbackStatus = "电台播放中" }
+            else if (service?.play() == true) playbackStatus = "电台播放中"
             refreshPlayback()
             return
         }
@@ -952,8 +949,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         if (player.isPlaying) {
             player.pause()
         } else {
-            requestPlaybackFocus()
-            if (!player.play()) {
+            if (service?.play() != true) {
                 songs.getOrNull(currentIndex)?.let { load(it) }
             }
         }
@@ -1006,7 +1002,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun showPlaylist() {
         // 弹层回调的视图队列会成为切歌快照，过滤/排序改变时同步更新。
         playlistDialog = PlaylistDialog(this, musicStore, dark, songs.firstOrNull { it.uri == currentUri }?.id ?: -1L,
-            { item -> currentQueue = queue; load(item) }, { queue = it }, songs)
+            { item -> currentQueue = queue; load(item) }, {
+                queue = it
+                currentQueue = it
+                service?.syncQueue(it, currentUri)
+            }, songs)
         playlistDialog?.show()
     }
 
@@ -1048,9 +1048,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
 
     @Suppress("DEPRECATION")
     private fun requestPlaybackFocus() {
-        val manager = getSystemService(AudioManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26) manager.requestAudioFocus(audioFocus)
-        else manager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+        service?.requestPlaybackFocus()
     }
 
     private fun exportWav(uri: Uri, onComplete: () -> Unit = {}) {
@@ -1504,7 +1502,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             }
             transformBody.addView(tickRow)
             pitchTicks = pitchTickButtons
-            transformBody.addView(switchRow("倒放", "从结尾向开头播放") { reverse = it; service?.player?.reverse = it }.also {
+            transformBody.addView(switchRow("倒放", "从结尾向开头播放") { reverse = it; service?.player?.reverse = it; service?.controlsReverse = reverse }.also {
                 reverseSwitch = it.second
             }.first.apply { tag = "localOnly" })
             speedLabel = ThemeUi.text(this@MainActivity, "1.00×", 12f, palette, role = ThemeUi.ROLE_ACCENT)
@@ -1642,6 +1640,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             lyricsView = LyricsView(this@MainActivity).apply {
                 dark = this@MainActivity.dark
                 onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
+                onManual = { currentItem?.let { showLyricsCandidates(it) } }
                 visibility = View.GONE
             }
             curveContent.addView(lyricsView, LinearLayout.LayoutParams(-1, -1))
@@ -1673,6 +1672,132 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }, { progress ->
             if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
         })
+    }
+
+    /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
+    private fun showLyricsCandidates(item: MusicItem) {
+        if (lyricsDialog?.isShowing == true) return
+        val title = Lyrics.searchTitle(item.name, item.artist)
+        val artist = item.artist
+        val duration = item.duration / 1000.0
+        val sheet = ThemeUi.showSheet(this, palette, "修正歌词", "选择正确歌词或重新搜索", fullHeight = true) {
+            val input = ThemeUi.input(this@MainActivity, palette, "输入更精确的歌名 / 歌手").apply {
+                setText(title)
+                setOnEditorActionListener { _, actionId, _ ->
+                    if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) {
+                        loadLyrics(item, text.toString().trim().ifEmpty { title })
+                        lyricsDialog?.dismiss()
+                        true
+                    } else false
+                }
+            }
+            addView(input)
+            addView(ThemeUi.button(this@MainActivity, palette, "重新检索", ThemeUi.ROLE_ACCENT) {
+                loadLyrics(item, input.text.toString().trim().ifEmpty { title })
+                lyricsDialog?.dismiss()
+            })
+            addView(ThemeUi.text(this@MainActivity, "或从以下候选中选择：", 12f, palette, role = ThemeUi.ROLE_SUB))
+            val list = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            }
+            addView(list)
+            val status = ThemeUi.text(this@MainActivity, "正在检索候选…", 12f, palette, role = ThemeUi.ROLE_SUB)
+            addView(status)
+            lyrics.candidates(title, artist, duration, { result ->
+                status.text = if (result.isSuccess) "共 ${result.getOrThrow().size} 个候选" else result.exceptionOrNull()?.message
+                list.removeAllViews()
+                result.getOrNull()?.take(20)?.forEach { candidate -> list.addView(LyricsCandidateRow(candidate) {
+                    applyLyricsCandidate(item, candidate)
+                }) }
+            }, { stage -> status.text = stage })
+        }
+        lyricsDialog = sheet
+        sheet.show()
+    }
+
+    /** 选中候选后先预览歌词，确认后再写入本地缓存。 */
+    private fun applyLyricsCandidate(item: MusicItem, candidate: LyricsCandidate) {
+        val title = Lyrics.searchTitle(item.name, item.artist)
+        val artist = item.artist
+        val duration = item.duration / 1000.0
+        var previewView: TextView? = null
+        val preview = Dialog(this).apply {
+            val body = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(ThemeUi.dp(this@MainActivity, 18f), ThemeUi.dp(this@MainActivity, 20f),
+                    ThemeUi.dp(this@MainActivity, 18f), ThemeUi.dp(this@MainActivity, 10f))
+                background = ThemeUi.bgDrawable(this@MainActivity, palette.surface, 14f)
+                addView(ThemeUi.text(this@MainActivity, "预览歌词", 16f, palette, bold = true))
+                addView(ThemeUi.text(this@MainActivity,
+                    "${candidate.trackName} · ${candidate.artistName}", 12f, palette, role = ThemeUi.ROLE_SUB))
+                val previewLines = TextView(this@MainActivity).apply {
+                    textSize = 13f
+                    setTextColor(palette.text)
+                    setPadding(0, ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 10f))
+                    maxLines = 14
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                previewView = previewLines
+                addView(previewLines)
+                addView(ThemeUi.row(this@MainActivity, gravity = Gravity.END).apply {
+                    addView(ThemeUi.text(this@MainActivity, "取消", 13f, palette, role = ThemeUi.ROLE_SUB).apply {
+                        setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f),
+                            ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
+                        setOnClickListener { dismiss() }
+                    })
+                    addView(ThemeUi.text(this@MainActivity, "使用此歌词", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f),
+                            ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
+                        setOnClickListener {
+                            dismiss()
+                            lyricsDialog?.dismiss()
+                            lyrics.applyCandidate(title, artist, duration, candidate, { result ->
+                                if (currentItem?.uri != item.uri) return@applyCandidate
+                                result.onSuccess { lyricsView.setLyrics(it) }
+                                    .onFailure { toast(it.message ?: "歌词获取失败") }
+                            })
+                        }
+                    })
+                })
+            }
+            setContentView(body)
+            window?.setBackgroundDrawable(null)
+            window?.setDimAmount(0.45f)
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setOnShowListener { window?.setLayout(ThemeUi.dp(this@MainActivity, 320f), ViewGroup.LayoutParams.WRAP_CONTENT) }
+        }
+        preview.show()
+        previewView?.text = "正在获取歌词预览…"
+        lyrics.previewCandidate(title, artist, duration, candidate, { result ->
+            result.onSuccess { previewResult ->
+                previewView?.text = if (previewResult.lines.isNotEmpty())
+                    previewResult.lines.take(12).joinToString("\n") { it.text }
+                else previewResult.plainLyrics.ifBlank { "暂无歌词内容" }
+            }.onFailure {
+                previewView?.text = "预览失败：${it.message}"
+            }
+        })
+    }
+
+    private inner class LyricsCandidateRow(
+        private val candidate: LyricsCandidate,
+        private val onClick: () -> Unit
+    ) : TextView(this@MainActivity) {
+        init {
+            text = "${candidate.trackName}  ·  ${candidate.artistName}  ·  ${candidate.source}" +
+                (if (candidate.durationSeconds > 0) "  ·  ${time(candidate.durationSeconds)}" else "")
+            textSize = 13f
+            setTextColor(palette.text)
+            setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f),
+                ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f))
+            background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 8f)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+                bottomMargin = ThemeUi.dp(this@MainActivity, 6f)
+            }
+            isClickable = true
+            setOnClickListener { onClick() }
+        }
     }
 
     private fun nowPlayingBar(): LinearLayout {
@@ -1742,6 +1867,26 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
             }
         }
         meta.addView(radioRefreshButton)
+        favoriteButton = ImageButton(this).apply {
+            setImageDrawable(jiangyi.spatial8d.ui.HeartDrawable(false, palette.controlText))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            imageTintList = null
+            background = null
+            setPadding(ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f), 0)
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 34f), ThemeUi.dp(this@MainActivity, 30f))
+            contentDescription = "收藏"
+            setOnClickListener {
+                val item = currentItem ?: return@setOnClickListener
+                if (isLive || item.uri.isBlank() || item.uri.startsWith("http")) return@setOnClickListener
+                musicStore.toggleFavorite(item.id)
+                playbackStatus = if (musicStore.isFavorite(item.id)) "已加入收藏" else "已取消收藏"
+                queue = musicStore.view(songs)
+                if (musicStore.playlistIndex == jiangyi.spatial8d.data.FAVORITES_INDEX) currentQueue = queue
+                refreshPlayback()
+                if (playlistDialog?.isShowing() == true) playlistDialog?.refreshContent()
+            }
+        }
+        meta.addView(favoriteButton)
         exportButton = ThemeUi.button(this, palette, "导出", ThemeUi.ROLE_ACCENT, minHeightDp = 30f).apply {
             background = ThemeUi.bgDrawable(this@MainActivity, if (dark) 0xff263e55.toInt() else 0xffe3efff.toInt(), 8f)
             textSize = 11f
@@ -1829,31 +1974,14 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         controls.addView(LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.RIGHT
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.RIGHT
-                favoriteButton = iconControl(0) {
-                    val item = currentItem ?: return@iconControl
-                    if (isLive || item.uri.isBlank() || item.uri.startsWith("http")) return@iconControl
-                    musicStore.toggleFavorite(item.id)
-                    playbackStatus = if (musicStore.isFavorite(item.id)) "已加入收藏" else "已取消收藏"
-                    queue = musicStore.view(songs)
-                    if (musicStore.playlistIndex == jiangyi.spatial8d.data.FAVORITES_INDEX) currentQueue = queue
-                    refreshPlayback()
-                    if (playlistDialog?.isShowing() == true) playlistDialog?.refreshContent()
-                }
-                addView(favoriteButton)
-                addView(iconControl(jiangyi.spatial8d.R.drawable.ic_list) { togglePlaylist() }.apply {
-                    (layoutParams as LinearLayout.LayoutParams).leftMargin = ThemeUi.dp(this@MainActivity, 6f)
-                })
-            })
+            addView(iconControl(jiangyi.spatial8d.R.drawable.ic_list) { togglePlaylist() })
         })
         bar.addView(controls)
         return bar
     }
 
     private fun iconControl(icon: Int, big: Boolean = false, action: () -> Unit): ImageButton = ImageButton(this).apply {
-        if (icon != 0) setImageResource(icon)
+        setImageResource(icon)
         scaleType = ImageView.ScaleType.CENTER_INSIDE
         imageTintList = ColorStateList.valueOf(if (big) 0xffffffff.toInt() else palette.controlText)
         tag = if (big) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
@@ -1940,6 +2068,19 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         ?.let { formatPitchLabel(it.name, it.semi) }
         ?: "自定义 · ${if (transform.semi > 0) "+" else ""}${transform.semi.toInt()} 半音"
 
+    /** 用户点击“退出”时彻底停掉音频链路，否则前台服务会让应用继续驻留后台。 */
+    private fun shutdownForExit() {
+        service?.player?.stopRecording()
+        service?.radio?.stopRecording()
+        service?.radio?.stop()
+        service?.stopLocal()
+        try {
+            stopService(Intent(this, PlaybackService::class.java))
+        } catch (_: Exception) {}
+        service = null
+        bound = false
+    }
+
     /** 返回键没有其它弹层可关闭时，明确由用户选择后台保留或彻底退出。 */
     private fun showExitDialog() {
         if (exitDialog?.isShowing == true) return
@@ -1966,7 +2107,11 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                     setTextColor(0xffff7070.toInt())
                     setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f),
                         ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
-                    setOnClickListener { exitDialog?.dismiss(); finishAndRemoveTask() }
+                    setOnClickListener {
+                        exitDialog?.dismiss()
+                        shutdownForExit()
+                        finishAndRemoveTask()
+                    }
                 })
             })
         }
@@ -2136,7 +2281,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         }
     }
 
-    /** 选择器保持单行横向滚动，长目录不会挤压播放列表的可视区域。 */
+    /** 所有页签单行等宽铺满，文字缩小后仍保持完整可点区域。 */
     private fun tabRow(labels: List<String>, selected: Int, compact: Boolean = false,
         action: (Int) -> Unit): LinearLayout =
         ThemeUi.row(this).apply {
@@ -2157,7 +2302,8 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                         action(i)
                     }.apply {
                     if (i == selected) setTextColor(palette.accent) else setTextColor(palette.sub)
-                    if (compact) {
+                    if (compact || labels.size > 4) {
+                        textSize = if (compact) 12f else 10f
                         minHeight = 0
                         minimumHeight = 0
                         setPadding(0, 0, 0, 0)
@@ -2440,7 +2586,7 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
     private fun playRadio(station: RadioStation) {
         if (recordingKind.isNotEmpty()) { toast("请先停止当前录音，再切换音源"); return }
         ++loadGeneration
-        service?.player?.stop()
+        service?.stopLocal()
         currentItem = MusicItem(-1, station.name, "")
         currentUri = null
         isLive = true

@@ -44,8 +44,12 @@ D:\temp\tools\gradle-8.14.3\bin\gradle.bat :app:assembleDebug --no-daemon
 - [x] `binaural.uts`、`reverb.uts`、`engine.uts`。
 - [x] `dsp/wsola.uts`、`dsp/resample.uts`。
 - [x] Android 生成 3 秒 8D 测试音并播放的 MVP。
-- [ ] 系统文件选择 + MediaCodec 解码真实音频 + AudioTrack 播放。
-- [ ] 预处理/导出/播放列表/Compose UI。
+- [x] 系统文件选择 + MediaCodec 解码真实音频 + AudioTrack 播放。
+- [x] 预处理/导出/播放列表（保持原生 View，不强制迁移 Compose）。
+- [x] 在线音源、FM、歌词、可视化、收藏、后台媒体服务。
+- [ ] 当前工作区的完整双机功能与音频质量回归。
+
+当前详细功能清单、历史 Bug 状态和验证证据统一维护在 `SESSION-REQUIREMENTS-AND-VERIFICATION.md` 第 9 节。
 
 ## 对拍策略
 

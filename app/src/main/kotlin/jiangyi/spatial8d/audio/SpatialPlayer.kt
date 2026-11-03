@@ -601,6 +601,6 @@ class SpatialPlayer(context: Context) {
         const val START_FRAMES = 3072
         internal fun shouldRestartOutput(own: Int, currentGeneration: Int, prepared: Boolean,
             paused: Boolean, hasLiveOutput: Boolean) =
-            own == currentGeneration && prepared && !paused && !hasLiveOutput
+            own <= currentGeneration && prepared && !paused && !hasLiveOutput
     }
 }

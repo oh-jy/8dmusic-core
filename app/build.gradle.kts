@@ -15,7 +15,7 @@ android {
             commandLine("powershell", "-NoProfile", "-Command", "Get-Date -Format yyMMddHHmm")
         // 保留发布时间十位格式；Android Int 上限内按位保留低 31 位，仍随时间递增。
         }.standardOutput.asText.get().trim().toLong().and(Int.MAX_VALUE.toLong()).toInt()
-        versionName = "1.1.7"
+        versionName = "1.2.3"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -35,8 +35,11 @@ dependencies {
     implementation(project(":core"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
-    testImplementation(kotlin("test"))
+    testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.0")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
+
+tasks.withType<Test>().configureEach { useJUnitPlatform() }
 
 android {
     signingConfigs {

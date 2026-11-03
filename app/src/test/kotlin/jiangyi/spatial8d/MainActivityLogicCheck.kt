@@ -5,7 +5,9 @@ import jiangyi.spatial8d.core.PITCH_PRESETS
 import jiangyi.spatial8d.MainActivity.Companion.interleavedPitchOptions
 import jiangyi.spatial8d.MainActivity.Companion.matchingPresetOrDefault
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
+import jiangyi.spatial8d.audio.PlaybackQueue
 import jiangyi.spatial8d.data.MusicItem
+import jiangyi.spatial8d.data.PlayMode
 import kotlin.test.Test
 
 /** 不启动 Android 设备的纯逻辑回归。 */
@@ -24,9 +26,9 @@ class MainActivityLogicCheck {
         check(options.count { it.semi != 0.0 } == PITCH_PRESETS.size - 1)
     }
 
-    @Test fun onlyCurrentGenerationRestartsOutput() {
-        // 旧代退出不能另起无效线程；当前代异常退出且没有接管者时才重启。
-        check(!shouldRestartOutput(1, 2, prepared = true, paused = false, hasLiveOutput = false))
+    @Test fun supersededOutputThreadHandsOffToLatestGeneration() {
+        // 切参淘汰了旧线程，但退出时仍必须接管最新代，不能留下假播放状态。
+        check(shouldRestartOutput(1, 2, prepared = true, paused = false, hasLiveOutput = false))
         check(!shouldRestartOutput(2, 2, prepared = true, paused = false, hasLiveOutput = true))
         check(shouldRestartOutput(2, 2, prepared = true, paused = false, hasLiveOutput = false))
         check(!shouldRestartOutput(2, 2, prepared = true, paused = true, hasLiveOutput = false))
@@ -42,5 +44,16 @@ class MainActivityLogicCheck {
         val sorted = items.sortedWith(compareBy({ it.addedAt }, { it.modifiedAt }))
         check(sorted.map { it.id } == listOf(2L, 1L, 4L, 3L))
         check(sorted.reversed().map { it.id } == listOf(3L, 4L, 1L, 2L))
+    }
+
+    @Test fun serviceQueueContinuesWithoutActivityCallback() {
+        val items = listOf(MusicItem(1, "a", "u1"), MusicItem(2, "b", "u2"), MusicItem(3, "c", "u3"))
+        check(PlaybackQueue(items, PlayMode.LOOP_LIST).next("u1", auto = true)?.id == 2L)
+        check(PlaybackQueue(items, PlayMode.LOOP_LIST).next("u3", auto = true)?.id == 1L)
+        check(PlaybackQueue(items, PlayMode.LOOP_ONE).next("u1", auto = true) == null)
+        check(PlaybackQueue(items, PlayMode.SHUFFLE) { 0 }.next("u1", auto = true)?.id == 2L)
+        check(PlaybackQueue(emptyList(), PlayMode.LOOP_LIST).next("u1", auto = true) == null)
+        check(PlaybackQueue(items, PlayMode.LOOP_LIST).previous("u1")?.id == 3L)
+        check(PlaybackQueue(items, PlayMode.LOOP_LIST).next("removed", auto = true) == null)
     }
 }
