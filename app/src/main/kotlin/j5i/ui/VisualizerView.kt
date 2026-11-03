@@ -220,10 +220,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var correlation = .0
         private var phase = 0f
         private val spectrum = DoubleArray(256)
-        private val spectrogram = IntArray(128 * 64)
-        private var spectrogramRow = 0
-        private var spectrogramOffset = 0f
-        private var lastSpectrogramDrawNs = 0L
+        private val spectrogram = IntArray(128 * 128)
+        private var spectrogramHead = 0
+        private var spectrogramAccumulator = 0.0
+        private var lastSpectrogramFrameNs = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
@@ -357,7 +357,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val normalized = ((db + 70) / 70).coerceIn(0.0, 1.0)
                 spectrum[band] = sqrt(normalized)
             }
-            val row = spectrogramRow * 128
+            val row = spectrogramHead * 128
             for (x in 0 until 128) {
                 val level = spectrum[x * 2].toFloat()
                 spectrogram[row + x] = Color.HSVToColor(floatArrayOf((240f - level * 240f), .85f, .12f + level * .88f))
@@ -475,29 +475,23 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private fun drawSpectrogram(c: Canvas) {
             label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
             val now = System.nanoTime()
-            val dt = if (lastSpectrogramDrawNs == 0L) 1f / 60f else (now - lastSpectrogramDrawNs) / 1_000_000_000f
-            lastSpectrogramDrawNs = now
-            spectrogramOffset += dt.coerceIn(0f, .1f) * 24f
-            if (spectrogramOffset >= 1f) {
-                val advance = spectrogramOffset.toInt()
-                spectrogramRow = (spectrogramRow + advance) % 64
-                spectrogramOffset -= advance
+            val dt = if (lastSpectrogramFrameNs == 0L) 1.0 / 60.0 else (now - lastSpectrogramFrameNs) / 1_000_000_000.0
+            lastSpectrogramFrameNs = now
+            spectrogramAccumulator += dt.coerceIn(0.0, 0.12) * 32.0
+            if (spectrogramAccumulator >= 1.0) {
+                val advance = spectrogramAccumulator.toInt()
+                spectrogramHead = (spectrogramHead + advance) % 128
+                spectrogramAccumulator -= advance
             }
             val top = dp(30f)
             val cellW = width / 128f
-            val cellH = (height - top) / 64f
-            c.save()
-            c.translate(0f, spectrogramOffset * cellH)
-            for (y in 0 until 64) for (x in 0 until 128) {
-                paint.color = spectrogram[((spectrogramRow + y) % 64) * 128 + x]
+            val cellH = (height - top) / 96f
+            // 历史窗口按行序号连续展开，不引入独立平移偏移，杜绝槽位错位与黑带。
+            for (y in 0 until 96) for (x in 0 until 128) {
+                val row = (spectrogramHead + y) % 128
+                paint.color = spectrogram[row * 128 + x]
                 c.drawRect(x * cellW, top + y * cellH, (x + 1) * cellW + 1, top + (y + 1) * cellH + 1, paint)
             }
-            // 平移时补绘顶部一行，避免上一帧移走后露出黑色断带。
-            for (x in 0 until 128) {
-                paint.color = spectrogram[((spectrogramRow + 63) % 64) * 128 + x]
-                c.drawRect(x * cellW, top - cellH, (x + 1) * cellW + 1, top, paint)
-            }
-            c.restore()
         }
 
         private fun drawParticles(c: Canvas) {

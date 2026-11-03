@@ -13,6 +13,7 @@ import android.widget.TextView
 import j5i.spatial8d.audio.LyricsResult
 import j5i.spatial8d.data.MusicItem
 import android.util.Log
+import android.os.SystemClock
 import kotlin.math.abs
 
 /** 驾驶模式复用当前可视化，播放器仍由原服务控制。 */
@@ -33,6 +34,17 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
     private var lastLoggedIndex = -2
+    private var lastPlaying = false
+    private var clockBaseMs = 0L
+    private var clockAtMs = 0L
+    private val ticker = object : Runnable {
+        override fun run() {
+            if (!isAttachedToWindow) return
+            val currentPosition = if (lastPlaying) clockBaseMs + (SystemClock.elapsedRealtime() - clockAtMs) else clockBaseMs
+            renderLyrics(currentPosition)
+            postDelayed(this, 200)
+        }
+    }
     private var downX = 0f
 
     init {
@@ -77,14 +89,35 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         play.text = if (playing) "⏸" else "▶"
         lyrics = result
         positionMs = position
-        val current = result?.lines?.indexOfLast { it.timeMs <= positionMs } ?: -1
+        if (lastPlaying != playing || kotlin.math.abs(positionMs - position) > 800) {
+            clockBaseMs = positionMs
+            clockAtMs = SystemClock.elapsedRealtime()
+        }
+        lastPlaying = playing
+        renderLyrics(positionMs)
+    }
+
+    private fun renderLyrics(position: Long) {
+        val result = lyrics
+        val current = result?.lines?.indexOfLast { it.timeMs <= position } ?: -1
         if (current != lastLoggedIndex) {
             lastLoggedIndex = current
-            Log.i("8DDriveLyrics", "index=$current positionMs=$positionMs lines=${result?.lines?.size ?: 0}")
+            Log.i("8DDriveLyrics", "index=$current positionMs=$position lines=${result?.lines?.size ?: 0}")
         }
         lines.forEachIndexed { index, view ->
             view.text = result?.lines?.getOrNull(current - 1 + index)?.text.orEmpty()
         }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        removeCallbacks(ticker)
+        post(ticker)
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(ticker)
+        super.onDetachedFromWindow()
     }
 
     @SuppressLint("ClickableViewAccessibility")
