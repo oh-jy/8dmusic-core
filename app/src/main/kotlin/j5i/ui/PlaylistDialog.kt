@@ -263,8 +263,11 @@ class PlaylistDialog(
             Toast.makeText(context, "当前歌曲不在此列表或筛选结果中", Toast.LENGTH_SHORT).show()
             return
         }
-        // Match the existing open-list target: current row at one third of the viewport.
-        listScroll.post { listScroll.smoothScrollTo(0, (active * dp(54) - listScroll.height / 3).coerceAtLeast(0)) }
+        listScroll.post {
+            val target = list.getChildAt(active) ?: return@post
+            val center = target.top + target.height / 2
+            listScroll.smoothScrollTo(0, (center - listScroll.height / 2).coerceAtLeast(0))
+        }
     }
 
     private fun locateButton(localPlaying: Boolean): TextView =

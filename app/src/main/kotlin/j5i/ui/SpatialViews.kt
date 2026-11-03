@@ -120,6 +120,9 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     }
     private var energy = 0.0
     private var smoothEnergy = 0.0
+    private var energyBaseline = 0.025
+    private var energyPeak = 0.05
+    private var lastStarMoveAt = 0L
     private val meteors = mutableListOf<Meteor>()
     private var nextMeteorAt = 0L
     private var lastMeteorAt = 0L
@@ -136,6 +139,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         }
         energy = if (count > 0) sqrt(sum / count) else 0.0
         smoothEnergy = smoothEnergy * 0.82 + energy * 0.18
+        energyBaseline = energyBaseline * 0.985 + energy * 0.015
+        energyPeak = maxOf(energyPeak * 0.995, energy)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -197,18 +202,29 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.style = Paint.Style.FILL
         paint.strokeWidth = 1f
         val starColor = if (dark) 0xffb8d7ff.toInt() else 0xff5b83aa.toInt()
-        val intensity = (smoothEnergy * 9.0).coerceIn(0.0, 1.0)
-        val visibleStars = 60 + (intensity * 120).toInt()
-        stars.take(visibleStars).forEach { star ->
-            val twinkle = (sin(now * star[4] + star[3]) + 1.0) * 0.5
-            paint.color = starColor
-            paint.alpha = ((0.22 + twinkle * 0.58 + intensity * 0.22) * 255).toInt().coerceAtMost(255)
-            c.drawCircle(star[0] * w, star[1] * h, star[2], paint)
-        }
+        val dynamicRange = (energyPeak - energyBaseline).coerceAtLeast(0.015)
+        val intensity = ((smoothEnergy - energyBaseline) / dynamicRange).coerceIn(0.0, 1.0)
+        val visibleStars = 36 + (intensity * 144).toInt()
         val nowMs = SystemClock.uptimeMillis()
-        val meteorLimit = if (energy > 0.075) 3 else 1
+        // 高潮时星点随机换位并快速闪烁；低音时仅缓慢漂移，保留稳定空间感。
+        if (intensity > 0.35 && nowMs - lastStarMoveAt > (900L - (intensity * 650L).toLong())) {
+            stars.take(visibleStars).forEach { star ->
+                star[0] = random.nextFloat()
+                star[1] = random.nextFloat()
+            }
+            lastStarMoveAt = nowMs
+        }
+        stars.take(visibleStars).forEach { star ->
+            val twinkle = (sin(now * star[4] * (1.0 + intensity * 2.5) + star[3]) + 1.0) * 0.5
+            paint.color = starColor
+            paint.alpha = ((0.16 + twinkle * 0.52 + intensity * 0.42) * 255).toInt().coerceAtMost(255)
+            val driftX = sin(now * (0.12 + intensity * 0.8) + star[3]) * (1.5f + intensity * 5f)
+            val driftY = cos(now * (0.10 + intensity * 0.6) + star[3]) * (1.5f + intensity * 4f)
+            c.drawCircle(star[0] * w + driftX, star[1] * h + driftY, star[2] * (1f + intensity * 0.5f), paint)
+        }
+        val meteorLimit = if (intensity > 0.82) 2 else 1
         if (playing && meteors.size < meteorLimit &&
-            (nowMs >= nextMeteorAt || energy > 0.075 && nowMs - lastMeteorAt > 550L)) {
+            (nowMs >= nextMeteorAt || intensity > 0.88 && nowMs - lastMeteorAt > 2_500L)) {
             val startX = random.nextFloat() * w * 0.78f
             val startY = random.nextFloat() * h * 0.64f
             val angle = random.nextDouble(0.0, Math.PI * 2)
@@ -217,7 +233,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
                 (sin(angle) * length * 0.65).toFloat(), nowMs,
                 1_100L + random.nextLong(800L))
             lastMeteorAt = nowMs
-            nextMeteorAt = nowMs + 4_000L + random.nextLong(5_000L)
+            nextMeteorAt = nowMs + 7_000L + random.nextLong(9_000L)
         }
         meteors.removeAll { nowMs - it.startedAt >= it.durationMs }
         meteors.forEach { current ->

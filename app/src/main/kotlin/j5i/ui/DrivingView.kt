@@ -74,7 +74,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
             ThemeUi.ROLE_ACCENT_FILL, minHeightDp = 48f).apply {
             setOnClickListener { onClose?.invoke() }
         }, LayoutParams(-2, dp(48), Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(34); rightMargin = dp(72)
+            topMargin = dp(34); rightMargin = dp(36)
         })
     }
 
