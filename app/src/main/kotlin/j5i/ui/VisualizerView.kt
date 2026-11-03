@@ -231,9 +231,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var phase = 0f
         private val spectrum = DoubleArray(256)
         private val spectrogram = IntArray(128 * 128)
-        private var spectrogramHead = 0
-        private var spectrogramAccumulator = 0.0
-        private var lastSpectrogramFrameNs = 0L
+        private var spectrogramReady = false
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val travelHeads = Array(4) { Path() }
@@ -367,11 +365,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val normalized = ((db + 70) / 70).coerceIn(0.0, 1.0)
                 spectrum[band] = sqrt(normalized)
             }
-            val row = spectrogramHead * 128
-            for (x in 0 until 128) {
-                val level = spectrum[x * 2].toFloat()
-                spectrogram[row + x] = Color.HSVToColor(floatArrayOf((240f - level * 240f), .85f, .12f + level * .88f))
-            }
+            // 声谱在绘制线程消费最新频谱，不在 PCM 回调里移动历史槽位。
         }
 
         override fun onDraw(c: Canvas) {
@@ -484,22 +478,24 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         private fun drawSpectrogram(c: Canvas) {
             label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
-            val now = System.nanoTime()
-            val dt = if (lastSpectrogramFrameNs == 0L) 1.0 / 60.0 else (now - lastSpectrogramFrameNs) / 1_000_000_000.0
-            lastSpectrogramFrameNs = now
-            spectrogramAccumulator += dt.coerceIn(0.0, 0.12) * 32.0
-            if (spectrogramAccumulator >= 1.0) {
-                val advance = spectrogramAccumulator.toInt()
-                spectrogramHead = (spectrogramHead + advance) % 128
-                spectrogramAccumulator -= advance
+            // 当前频谱铺满首屏；之后只复制完整历史行，窗口内永远没有空槽。
+            if (!spectrogramReady) {
+                for (y in spectrogram.indices) {
+                    val level = spectrum[(y % 128) * 2].toFloat()
+                    spectrogram[y] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
+                }
+                spectrogramReady = true
+            }
+            spectrogram.copyInto(spectrogram, 128, 0, spectrogram.size - 128)
+            for (x in 0 until 128) {
+                val level = spectrum[x * 2].toFloat()
+                spectrogram[x] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
             }
             val top = dp(30f)
             val cellW = width / 128f
             val cellH = (height - top) / 96f
-            // 历史窗口按行序号连续展开，不引入独立平移偏移，杜绝槽位错位与黑带。
             for (y in 0 until 96) for (x in 0 until 128) {
-                val row = (spectrogramHead + y) % 128
-                paint.color = spectrogram[row * 128 + x]
+                paint.color = spectrogram[y * 128 + x]
                 c.drawRect(x * cellW, top + y * cellH, (x + 1) * cellW + 1, top + (y + 1) * cellH + 1, paint)
             }
         }
