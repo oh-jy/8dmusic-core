@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.SystemClock
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -32,6 +34,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         set(value) { field = value; canvas.dark = value; restyle() }
     private val canvas = AudioCanvas(context)
     private val graphView = WaveformView(context)
+    private val lyricOverlay = LyricOverlay(context)
     private var exclusive = false
     private var visualMode = 0
     private val layerButtons = mutableListOf<Button>()
@@ -47,6 +50,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         addView(stage, LayoutParams(-1, 0, 1f))
         stage.addView(canvas, FrameLayout.LayoutParams(-1, -1))
         stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, -1))
         stage.addView(layerRow, FrameLayout.LayoutParams(-1, dp(28f)).apply {
             leftMargin = dp(4f); rightMargin = dp(4f); topMargin = dp(2f)
         })
@@ -72,21 +76,61 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         // 输出线程只生成不可变 PCM 快照；主线程永远只消费最新一包，不排队积压。
         val chunk = data.copyOf(bytes)
         pendingPcm.set(chunk)
-        if (!isAttachedToWindow || renderPosted.getAndSet(true)) return
-        post {
-            renderPosted.set(false)
-            val latest = pendingPcm.getAndSet(null) ?: return@post
-            if (!isAttachedToWindow) return@post
-            canvas.accept(latest, latest.size)
-            graphView.accept(latest, latest.size)
-        }
+        receivedPcm++
+        schedulePcm()
     }
     private val pendingPcm = java.util.concurrent.atomic.AtomicReference<ByteArray?>(null)
     private val renderPosted = java.util.concurrent.atomic.AtomicBoolean(false)
+    private var receivedPcm = 0L
+    private var consumedPcm = 0L
+    private var lastDiagnosticAt = 0L
+    private val consumePcm = object : Runnable {
+        override fun run() {
+            renderPosted.set(false)
+            val latest = pendingPcm.getAndSet(null)
+            if (latest != null && isAttachedToWindow) {
+                canvas.accept(latest, latest.size)
+                graphView.accept(latest, latest.size)
+                consumedPcm++
+            }
+            diagnoseRender()
+            // 消费期间到达的新包必须重新排队，不能因旧标记而永久滞留。
+            if (pendingPcm.get() != null) schedulePcm()
+        }
+    }
+
+    private fun schedulePcm() {
+        if (!isAttachedToWindow || renderPosted.getAndSet(true)) return
+        post(consumePcm)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        schedulePcm()
+    }
+
+    override fun onDetachedFromWindow() {
+        removeCallbacks(consumePcm)
+        renderPosted.set(false)
+        pendingPcm.set(null)
+        super.onDetachedFromWindow()
+    }
+
+    private fun diagnoseRender() {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastDiagnosticAt < 3_000) return
+        lastDiagnosticAt = now
+        Log.i("8DVisual", "view=$width x $height shown=$isShown attached=$isAttachedToWindow " +
+            "canvas=${canvas.visibility}/${canvas.width}x${canvas.height} draws=${canvas.drawCount} " +
+            "graph=${graphView.visibility}/${graphView.width}x${graphView.height} pcm=$receivedPcm/$consumedPcm")
+    }
 
     /** 当前歌曲歌词与播放位置，用于在穿梭模式中叠加逐行歌词字幕。 */
-    fun setLyrics(result: LyricsResult?) = canvas.setLyrics(result)
-    fun setPosition(positionMs: Long) = canvas.setPosition(positionMs)
+    fun setLyrics(result: LyricsResult?) {
+        lyricOverlay.setLyrics(result)
+        updateMode()
+    }
+    fun setPosition(positionMs: Long) = lyricOverlay.setPosition(positionMs)
 
     private fun updateMode() {
         canvas.mode = if (!exclusive) 0 else visualMode
@@ -94,6 +138,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         graphView.dark = dark
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        lyricOverlay.dark = dark
+        lyricOverlay.visibility = if (exclusive) View.VISIBLE else View.GONE
+        if (exclusive) lyricOverlay.bringToFront()
         layerButtons.forEachIndexed { i, button -> button.isSelected = layers[i] && !exclusive }
         exclusiveButtons.forEachIndexed { i, button -> button.isSelected = exclusive && visualMode == listOf(1, 4, 2, 3)[i] }
         restyle()
@@ -156,22 +203,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var smoothRms = 0f
         private var smoothPeak = 0f
         private var lastDrawNs = 0L
-        // 歌词字幕状态：当前行索引、键入开始时间（纳秒），用于逐字键入 + 淡出动画。
-        private var lyricLines: List<LyricLine> = emptyList()
-        private var lyricPositionMs = 0L
-        private var activeLyricIndex = -1
-        private var lyricLineStartedAtNs = 0L
         private val analysisLock = Any()
-
-        fun setLyrics(result: LyricsResult?) {
-            lyricLines = result?.lines ?: emptyList()
-            activeLyricIndex = -1
-            lyricLineStartedAtNs = 0L
-        }
-
-        fun setPosition(positionMs: Long) {
-            lyricPositionMs = positionMs.coerceAtLeast(0)
-        }
+        var drawCount = 0L
+            private set
 
         fun accept(data: ByteArray, bytes: Int) {
             synchronized(analysisLock) {
@@ -299,6 +333,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
+            drawCount++
             synchronized(analysisLock) {
                 consumeDelayedSamples()
                 // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
@@ -442,8 +477,6 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 paint.style = Paint.Style.FILL
                 c.drawPath(particlePaths[group], paint)
             }
-            paint.alpha = 255
-            drawLyricLine(c)
         }
 
         /** 始终由远及近穿梭，亮度沿尾迹渐变，不再随相位相关突然反向。 */
@@ -513,50 +546,72 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 c.drawPath(travelHeads[group], paint)
             }
             paint.alpha = 255
-            // 穿梭模式叠加逐行歌词：键入 → 停驻 → 淡出，随播放位置切换。
-            drawLyricLine(c)
-        }
-
-        /** 逐字键入 + 停驻 + 淡出的歌词字幕，叠加在穿梭视图下半区。 */
-        private fun drawLyricLine(c: Canvas) {
-            if (lyricLines.isEmpty()) return
-            val index = lyricLines.indexOfLast { it.timeMs <= lyricPositionMs }
-            if (index < 0) return
-            if (index != activeLyricIndex) {
-                activeLyricIndex = index
-                lyricLineStartedAtNs = System.nanoTime()
-            }
-            val line = lyricLines[index]
-            val elapsedMs = (System.nanoTime() - lyricLineStartedAtNs) / 1_000_000
-            val typeDuration = 900L
-            val fadeDuration = 500L
-            // 当前行剩余时长（到下一行的时间），末尾段触发淡出。
-            val remainingMs = lyricLines.getOrNull(index + 1)?.let { it.timeMs - lyricPositionMs } ?: Long.MAX_VALUE
-            val fadeProgress = if (remainingMs < fadeDuration) 1f - remainingMs.toFloat() / fadeDuration else 0f
-            val visibleChars = if (elapsedMs >= typeDuration) line.text.length
-            else (line.text.length * (elapsedMs.toFloat() / typeDuration)).toInt().coerceAtLeast(0)
-            val text = line.text.take(visibleChars)
-            if (text.isEmpty()) return
-            val oldSize = paint.textSize
-            val oldAlign = paint.textAlign
-            val oldAlpha = paint.alpha
-            paint.textSize = dp(16f)
-            paint.textAlign = Paint.Align.CENTER
-            paint.alpha = ((1f - fadeProgress) * 255).toInt().coerceIn(0, 255)
-            paint.color = if (dark) 0xffe8f4ff.toInt() else 0xff102a43.toInt()
-            paint.style = Paint.Style.FILL
-            val y = height - dp(28f)
-            c.drawText(text, width / 2f, y, paint)
-            // 光标保留到本行淡出，键入完成后也不消失。
-            if ((System.nanoTime() / 300_000_000) % 2 == 0L) {
-                val cursorX = width / 2f + paint.measureText(text) / 2 + dp(2f)
-                c.drawRect(cursorX, y - dp(14f), cursorX + dp(2f), y, paint)
-            }
-            paint.textSize = oldSize
-            paint.textAlign = oldAlign
-            paint.alpha = oldAlpha
         }
 
         private fun dp(value: Float) = value * resources.displayMetrics.density
+    }
+
+    /** 所有独占模式共用的歌词顶层，独立背景确保粒子、图谱与彗尾不会遮住文字。 */
+    private class LyricOverlay(context: Context) : View(context) {
+        var dark = true
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var lines: List<LyricLine> = emptyList()
+        private var positionMs = 0L
+        private var activeIndex = -1
+        private var lineStartedAtNs = 0L
+
+        fun setLyrics(result: LyricsResult?) {
+            lines = result?.lines ?: emptyList()
+            activeIndex = -1
+            lineStartedAtNs = 0L
+            invalidate()
+        }
+
+        fun setPosition(value: Long) {
+            positionMs = value.coerceAtLeast(0)
+            postInvalidateOnAnimation()
+        }
+
+        override fun onDraw(c: Canvas) {
+            super.onDraw(c)
+            if (lines.isEmpty()) return
+            val index = lines.indexOfLast { it.timeMs <= positionMs }
+            if (index < 0) return
+            if (index != activeIndex) {
+                activeIndex = index
+                lineStartedAtNs = System.nanoTime()
+            }
+            val line = lines[index]
+            val elapsedMs = (System.nanoTime() - lineStartedAtNs) / 1_000_000
+            val typeDuration = 900L
+            val fadeDuration = 500L
+            val remainingMs = lines.getOrNull(index + 1)?.let { it.timeMs - positionMs } ?: Long.MAX_VALUE
+            val fade = if (remainingMs < fadeDuration) 1f - remainingMs.toFloat() / fadeDuration else 0f
+            val visibleChars = if (elapsedMs >= typeDuration) line.text.length
+            else (line.text.length * elapsedMs.toFloat() / typeDuration).toInt().coerceAtLeast(0)
+            val text = line.text.take(visibleChars)
+            if (text.isEmpty()) return
+            val density = resources.displayMetrics.density
+            paint.textSize = 16f * density
+            paint.textAlign = Paint.Align.CENTER
+            paint.style = Paint.Style.FILL
+            paint.typeface = android.graphics.Typeface.DEFAULT
+            val baseline = height - 18f * density
+            val metrics = paint.fontMetrics
+            paint.color = ThemeUi.palette(dark).surface
+            paint.alpha = 238
+            c.drawRect(0f, baseline + metrics.top - 8f * density, width.toFloat(), height.toFloat(), paint)
+            paint.alpha = ((1f - fade) * 255).toInt().coerceIn(0, 255)
+            paint.color = if (dark) 0xffe8f4ff.toInt() else 0xff102a43.toInt()
+            c.drawText(text, width / 2f, baseline, paint)
+            if ((System.nanoTime() / 300_000_000) % 2 == 0L) {
+                val cursorX = width / 2f + paint.measureText(text) / 2 + 2f * density
+                // 输入法式光标略高于文字上下两端。
+                c.drawRect(cursorX, baseline + metrics.top - 3f * density,
+                    cursorX + 2f * density, baseline + metrics.bottom + 3f * density, paint)
+            }
+            paint.alpha = 255
+            postInvalidateOnAnimation()
+        }
     }
 }
