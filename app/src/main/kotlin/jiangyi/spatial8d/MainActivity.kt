@@ -2288,10 +2288,12 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
         fun LinearLayout.section(title: String, content: String) {
             lateinit var desc: TextView
             addView(ThemeUi.text(this@MainActivity, title, 14f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
-                setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 10f),
-                    ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 8f))
-                background = ThemeUi.bgDrawable(this@MainActivity, palette.surfaceAlt, 6f)
-                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = ThemeUi.dp(this@MainActivity, 6f) }
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, 0, 0, 0)
+                background = null
+                minHeight = 0
+                minimumHeight = 0
+                layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 30f))
                 setOnClickListener {
                     val opening = !expandedSections.remove(title)
                     if (opening) expandedSections += title
@@ -2299,15 +2301,32 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 }
             })
             desc = ThemeUi.text(this@MainActivity, content, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 8f),
-                    ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
+                setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 4f),
+                    ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 6f))
                 visibility = if (title in expandedSections) View.VISIBLE else View.GONE
             }
             addView(desc)
         }
-        infoDialog = ThemeUi.showSheet(this, palette, "说明", fullHeight = true) {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ThemeUi.dp(this@MainActivity, 16f), 0, ThemeUi.dp(this@MainActivity, 16f), ThemeUi.dp(this@MainActivity, 12f))
+            ThemeUi.bg(this, palette.surface, 18f)
+        }
+        val header = ThemeUi.row(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 48f))
+            addView(ThemeUi.text(this@MainActivity, "说明", 16f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+            addView(ThemeUi.text(this@MainActivity, "关闭", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 56f), -1)
+                setOnClickListener { infoDialog?.dismiss() }
+            })
+        }
+        content.addView(header)
+        content.addView(ThemeUi.divider(this, palette))
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             addView(ThemeUi.text(this@MainActivity, "应用说明", 16f, palette, bold = true).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 4f))
+                setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
             addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             listOf(
@@ -2317,22 +2336,34 @@ private var popupVisualizer: jiangyi.spatial8d.ui.VisualizerView? = null
                 "导出与录音" to "本地歌曲可导出 WAV / MP3；FM 电台可录制最终 8D 输出。"
             ).forEach { (title, content) -> section(title, content) }
             addView(ThemeUi.text(this@MainActivity, "参数说明", 16f, palette, bold = true).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 18f), 0, ThemeUi.dp(this@MainActivity, 4f))
+                setPadding(0, ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
             addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             PARAM_INFO.forEach { info ->
                 section(info.label, info.desc)
             }
             addView(ThemeUi.text(this@MainActivity, "曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", 12f, palette, role = ThemeUi.ROLE_SUB).apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 24f))
+                setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 12f))
             })
         }
-        infoDialog?.show()
-        (infoDialog?.window?.decorView?.findViewWithTag<View>("sheetBody")?.parent as? android.widget.ScrollView)?.apply {
+        val scroll = ScrollView(this).apply {
+            tag = "infoScroll"
+            contentDescription = "说明滚动区"
             isFillViewport = true
             isVerticalScrollBarEnabled = true
-            // 展开内容不能反过来撑高滚动容器；固定剩余高度，全部展开后仍可滚到底部。
-            post { layoutParams = layoutParams.apply { height = (parent as? View)?.height ?: height } }
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(ThemeUi.dp(this@MainActivity, 12f))
+            addView(body, ViewGroup.LayoutParams(-1, -2))
+        }
+        content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        infoDialog = Dialog(this).apply {
+            setContentView(content, ViewGroup.LayoutParams(-1, -1))
+            window?.setBackgroundDrawable(null)
+            window?.setDimAmount(0.45f)
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            window?.setGravity(Gravity.BOTTOM)
+            show()
+            ThemeUi.layoutSheet(this, true)
         }
     }
 
