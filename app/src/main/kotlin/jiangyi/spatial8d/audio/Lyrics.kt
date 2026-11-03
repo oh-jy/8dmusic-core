@@ -1,6 +1,7 @@
 package jiangyi.spatial8d.audio
 
 import android.content.Context
+import android.icu.text.Transliterator
 import android.text.Html
 import android.util.Log
 import org.json.JSONArray
@@ -363,7 +364,7 @@ class Lyrics(context: Context) {
         val synced = lyric.optString("lyric")
         val lines = parseLrc(synced)
         if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
-        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, synced)
+        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, toSimplified(synced))
         if (persist) writeCache(cacheFile(title, knownArtist(artist), duration), result.toRow(duration))
         return result
     }
@@ -382,7 +383,7 @@ class Lyrics(context: Context) {
         val synced = String(Base64.getDecoder().decode(lyric.optString("content")), Charsets.UTF_8)
         val lines = parseLrc(synced)
         if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
-        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, synced)
+        val result = LyricsResult(candidate.trackName, candidate.artistName, lines, toSimplified(synced))
         if (persist) writeCache(cacheFile(title, knownArtist(artist), 0.0), result.toRow(candidate.durationSeconds))
         return result
     }
@@ -480,7 +481,7 @@ class Lyrics(context: Context) {
         val artists = best.optJSONArray("singer") ?: JSONArray()
         return LyricsResult(decode(best.optString("songname")),
             (0 until artists.length()).joinToString(" / ") { decode(artists.getJSONObject(it).optString("name")) },
-            lines, synced).also { writeCache(cacheFile(title, knownArtist(artist), duration), best, it) }
+            lines, toSimplified(synced)).also { writeCache(cacheFile(title, knownArtist(artist), duration), best, it) }
     }
 
     /** 后台串行预取整个曲库；仅自动任务受失败次数限制，手动搜索始终可用。 */
@@ -553,7 +554,7 @@ class Lyrics(context: Context) {
         val synced = String(Base64.getDecoder().decode(lyric.optString("content")), Charsets.UTF_8)
         val lines = parseLrc(synced)
         if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("酷狗无匹配歌词")
-        return LyricsResult(best.optString("song"), best.optString("singer"), lines, synced)
+        return LyricsResult(best.optString("song"), best.optString("singer"), lines, toSimplified(synced))
             .also { writeCache(cacheFile(title, artist, duration), best, it) }
     }
 
@@ -570,7 +571,7 @@ class Lyrics(context: Context) {
             row.optString("trackName", row.optString("name")),
             row.optString("artistName"),
             parseLrc(synced),
-            row.optString("plainLyrics"),
+            toSimplified(row.optString("plainLyrics")),
             row.optBoolean("instrumental")
         )
     }
@@ -636,7 +637,13 @@ class Lyrics(context: Context) {
             connectTimeout = 8_000
             readTimeout = 12_000
             setRequestProperty("Accept", "application/json")
-            setRequestProperty("User-Agent", "8dmusic-kt/1.0")
+            if (URL(url).host == "c.y.qq.com") {
+                // QQ 歌词接口会对自定义 UA 返回 -1310，搜索接口则不受此限制。
+                setRequestProperty("User-Agent", "Mozilla/5.0")
+                setRequestProperty("Referer", "https://y.qq.com/")
+            } else {
+                setRequestProperty("User-Agent", "8dmusic-kt/1.0")
+            }
         }
         return try {
             when (val status = connection.responseCode) {
@@ -655,6 +662,12 @@ class Lyrics(context: Context) {
     private class NotFoundException : IOException()
 
     companion object {
+        private val traditionalToSimplified by lazy {
+            Transliterator.getInstance("Traditional-Simplified")
+        }
+
+        private fun toSimplified(value: String) = traditionalToSimplified.transliterate(value)
+
         /** 支持 [mm:ss.xx]、[mm:ss:xx]、小时及同一行多个时间戳；标签和空行会忽略。 */
         fun parseLrc(lrc: String): List<LyricLine> {
             val timestamp = Regex("\\[(\\d{1,3}):(\\d{1,2})(?:[.:](\\d{1,3}))?]")
@@ -675,7 +688,7 @@ class Lyrics(context: Context) {
                         3 -> fraction.toLong()
                         else -> 0L
                     }
-                    lines += LyricLine((minutes * 60 + seconds) * 1000 + millis, text)
+                    lines += LyricLine((minutes * 60 + seconds) * 1000 + millis, toSimplified(text))
                 }
             }
             return lines.sortedBy { it.timeMs }

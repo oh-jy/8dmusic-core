@@ -53,7 +53,18 @@ class SpatialPlayer(context: Context) {
             if (changed) invalidate(position)
         }
     var reverse = false
-        set(value) { if (field != value) { field = value; invalidate(position) } }
+        set(value) {
+            if (field == value) return
+            field = value
+            // 切换方向以当前声像位置为锚点：正向向前播到曲尾，反向向曲首播到开头。
+            val source = decoded
+            val target = if (value) {
+                if (playPos <= 0) source?.frames ?: 0 else playPos
+            } else {
+                if (source != null && playPos >= source.frames) 0 else playPos
+            }
+            invalidate(target.toDouble() / sampleRate)
+        }
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onPcm: ((ByteArray, Int) -> Unit)? = null
@@ -124,7 +135,10 @@ class SpatialPlayer(context: Context) {
         decoded = source
         remoteDurationSec = knownDurationSec.coerceAtLeast(0.0)
         sampleRate = source.sampleRate
-        cacheStart.set(0)
+        cacheStart.set(if (reverse) source.frames.toLong() else 0L)
+        playPos = if (reverse) source.frames else 0
+        headBase = playPos
+        pausedHead = playPos
         trackStarted = false
         endMarkerArmed = false
         drainStartedAt = 0L
@@ -136,7 +150,7 @@ class SpatialPlayer(context: Context) {
     fun play(): Boolean = synchronized(lock) {
         if (!prepared || !paused) return@synchronized prepared
         val source = decoded ?: return@synchronized false
-        if (playPos >= source.frames) { playPos = 0; headBase = 0 }
+        if (playPos >= source.frames) { playPos = if (reverse) source.frames else 0; headBase = playPos }
         try {
             paused = false
             playedOnce = true
@@ -333,7 +347,8 @@ class SpatialPlayer(context: Context) {
                 // 在最终 8D PCM 写出后 tee 一份，录音与耳机听到的效果完全一致。
                 recorder?.write(output, 0, count * 4)
                 current.consumed += count
-                playPos = current.startFrame + current.consumed
+                playPos = if (reverse) (current.startFrame - current.consumed).coerceAtLeast(0)
+                    else current.startFrame + current.consumed
                 // 先写入短预滚再 play，兼顾起播延迟和 AudioTrack 不欠载。
                 if (!trackStarted && current.consumed >= min(START_FRAMES, current.produced.get())) {
                     trackStarted = true
@@ -388,7 +403,7 @@ class SpatialPlayer(context: Context) {
     private fun createCache(own: Int, epoch: Long): RenderCache? {
         val source = decoded ?: return null
         val start = cacheStart.get().toInt().coerceIn(0, source.frames)
-        if (start >= source.frames && !source.decodeDone) return null
+        if ((!reverse && start >= source.frames || reverse && start <= 0) && !source.decodeDone) return null
         val p = preset
         val native = NativeSpatialPlayer.create(sampleRate.toDouble(), p.raw, p.period, p.elev,
             p.depth, p.phase, p.direction, p.width, p.room, p.rt60, p.wet, transform.denoiseLevel)
@@ -404,12 +419,12 @@ class SpatialPlayer(context: Context) {
         try {
             while (own == generation && cache === current && !current.done.get()) {
                 val source = decoded ?: break
-                val start = current.startFrame + current.produced.get()
-                if (start >= source.frames) {
+                val start = current.startFrame + if (reverse) -current.produced.get() else current.produced.get()
+                if ((!reverse && start >= source.frames) || (reverse && start <= 0)) {
                     if (source.decodeDone) current.finish() else Thread.sleep(8)
                     continue
                 }
-                val count = min(CHUNK, source.frames - start)
+                val count = min(CHUNK, if (reverse) start else source.frames - start)
                 val input = source.copyFrames(start, count)
                 val rendered = current.render {
                     // 每块使用稳定快照：解码扩容后仍读取新 PCM，不持有旧数组。
@@ -433,7 +448,9 @@ class SpatialPlayer(context: Context) {
 
     private fun drainAndFinish(own: Int, current: RenderCache): Boolean {
         val source = decoded ?: return false
-        if (!source.decodeDone || current.startFrame + current.produced.get() < source.frames) return false
+        if (!source.decodeDone) return false
+        if ((!reverse && current.startFrame + current.produced.get() < source.frames) ||
+            (reverse && current.startFrame - current.produced.get() > 0)) return false
         if (own != generation) return true
         if (!trackStarted) return false
         val marker = playPos
@@ -659,6 +676,7 @@ class SpatialPlayer(context: Context) {
             trackStarted && marker > 0 && heardFrames >= marker
         internal fun endDrainTimedOut(elapsedMs: Long, remainingMs: Long, speed: Double) =
             elapsedMs >= remainingMs / speed.coerceIn(0.5, 2.0) + 2_000L
+        internal fun reverseSourceStart(startFrame: Int, produced: Int) = startFrame - produced
         internal fun shouldRestartOutput(own: Int, currentGeneration: Int, prepared: Boolean,
             paused: Boolean, hasLiveOutput: Boolean) =
             own <= currentGeneration && prepared && !paused && !hasLiveOutput

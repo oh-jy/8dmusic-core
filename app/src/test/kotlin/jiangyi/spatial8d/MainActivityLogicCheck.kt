@@ -7,6 +7,7 @@ import jiangyi.spatial8d.MainActivity.Companion.matchingPresetOrDefault
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
 import jiangyi.spatial8d.audio.SpatialPlayer.Companion.endDrainTimedOut
+import jiangyi.spatial8d.audio.SpatialPlayer.Companion.reverseSourceStart
 import jiangyi.spatial8d.audio.PlaybackQueue
 import jiangyi.spatial8d.data.MusicItem
 import jiangyi.spatial8d.data.PlayMode
@@ -48,6 +49,12 @@ class MainActivityLogicCheck {
         check(endDrainTimedOut(4_000, 2_000, speed = 1.0))
         check(!endDrainTimedOut(2_999, 2_000, speed = 2.0))
         check(endDrainTimedOut(3_000, 2_000, speed = 2.0))
+    }
+
+    @Test fun reverseReadsFromTailTowardHead() {
+        check(reverseSourceStart(startFrame = 10_000, produced = 0) == 10_000)
+        check(reverseSourceStart(startFrame = 10_000, produced = 4_096) == 5_904)
+        check(reverseSourceStart(startFrame = 2_000, produced = 2_000) == 0)
     }
 
     @Test fun timeSortUsesAddedThenModified() {
