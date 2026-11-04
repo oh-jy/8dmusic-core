@@ -23,6 +23,7 @@ import j5i.spatial8d.core.earGains
 import j5i.spatial8d.core.earRange
 import j5i.spatial8d.core.frameAt
 import kotlin.math.abs
+import kotlin.math.pow
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
@@ -98,6 +99,7 @@ private class Clock {
 
 /** 原生 Canvas 版空间舞台，轨迹直接复用 core 的 frameAt，不另写一套运动公式。 */
 class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
+    lateinit var pcmClock: PcmVisualClock
     private fun t(key: String) = AppLanguage.text(context, key)
     var preset: SpacePreset? = null
         set(value) { field = value; clock.sync(clock.seconds); invalidate() }
@@ -116,13 +118,13 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     private val random = Random(8_108)
     private val stars = Array(180) {
         floatArrayOf(random.nextFloat(), random.nextFloat(), 0.5f + random.nextFloat() * 0.9f,
-            random.nextFloat() * 6.283f, 0.5f + random.nextFloat() * 1.5f)
+            random.nextFloat() * 6.283f, 0.5f + random.nextFloat() * 1.5f,
+            random.nextFloat() * 6.283f, 0.006f + random.nextFloat() * 0.014f,
+            random.nextFloat(), 4f + random.nextFloat() * 7f)
     }
-    private var energy = 0.0
     private var smoothEnergy = 0.0
     private var energyBaseline = 0.025
     private var energyPeak = 0.05
-    private var lastStarMoveAt = 0L
     private var lastPcmAt = 0L
     private val meteors = mutableListOf<Meteor>()
     private var nextMeteorAt = 0L
@@ -130,19 +132,12 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
 
     /** 复用最终 8D PCM，响度达到高潮阈值时允许提前触发流星。 */
     fun acceptPcm(data: ByteArray, bytes: Int) {
-        val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-        var sum = 0.0
-        var count = 0
-        while (input.hasRemaining()) {
-            val sample = input.get() / 32768.0
-            sum += sample * sample
-            count++
-        }
-        energy = if (count > 0) sqrt(sum / count) else 0.0
         val now = SystemClock.uptimeMillis()
         val dt = if (lastPcmAt == 0L) 0.08 else
             ((now - lastPcmAt).coerceAtMost(250L) / 1000.0)
         lastPcmAt = now
+        pcmClock.consume()
+        val energy = pcmClock.rms
         // 快攻慢放，峰值按实际时间衰减，避免高潮后的旧阈值压住后续响度。
         smoothEnergy = if (energy > smoothEnergy) energy * 0.7 + smoothEnergy * 0.3
         else smoothEnergy * kotlin.math.exp(-dt / 0.18) + energy * (1.0 - kotlin.math.exp(-dt / 0.18))
@@ -211,27 +206,22 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         val starColor = if (dark) 0xffb8d7ff.toInt() else 0xff5b83aa.toInt()
         val dynamicRange = (energyPeak - energyBaseline).coerceAtLeast(0.015)
         val intensity = ((smoothEnergy - energyBaseline) / dynamicRange).coerceIn(0.0, 1.0)
-        val visibleStars = 36 + (intensity * 144).toInt()
         val nowMs = SystemClock.uptimeMillis()
-        // 高潮时星点随机换位并快速闪烁；低音时仅缓慢漂移，保留稳定空间感。
-        if (intensity > 0.35 && nowMs - lastStarMoveAt > (900L - (intensity * 650L).toLong())) {
-            stars.take(visibleStars).forEach { star ->
-                star[0] = random.nextFloat()
-                star[1] = random.nextFloat()
-            }
-            lastStarMoveAt = nowMs
-        }
-        stars.take(visibleStars).forEach { star ->
-            val twinkle = (sin(now * star[4] * (1.0 + intensity * 2.5) + star[3]) + 1.0) * 0.5
+        stars.forEachIndexed { index, star ->
+            // 每颗星的生灭周期和相位独立，不使用整片星空的统一随机换位或闪烁阈值。
+            val age = (now / star[8].toDouble() + star[7].toDouble()) % 1.0
+            val envelope = sin(age * Math.PI).pow(1.8)
+            val twinkle = (sin(now * star[4] * (1.0 + intensity) + star[3]) + 1.0) * 0.5
             paint.color = starColor
-            paint.alpha = ((0.16 + twinkle * 0.52 + intensity * 0.42) * 255).toInt().coerceAtMost(255)
-            val driftX = sin(now * (0.12 + intensity * 0.8) + star[3]) * (1.5f + intensity * 5f)
-            val driftY = cos(now * (0.10 + intensity * 0.6) + star[3]) * (1.5f + intensity * 4f)
-            c.drawCircle((star[0] * w + driftX).toFloat(), (star[1] * h + driftY).toFloat(),
+            paint.alpha = (envelope * (45 + twinkle * 100 + intensity * 70)).toInt().coerceAtMost(210)
+            val travel = (now * star[6] + star[7]) % 1.0
+            val x = ((star[0] + travel) % 1f) * w
+            val y = ((star[1] + travel * 0.37f + sin(now * 0.23 + star[5]) * 0.035f) % 1f) * h
+            c.drawCircle(x.toFloat(), y.toFloat(),
                 (star[2] * (1f + intensity * 0.5f)).toFloat(), paint)
         }
-        val meteorLimit = if (intensity > 0.82) 2 else 1
-        val beatMeteor = intensity > 0.82 && nowMs - lastMeteorAt > 900L
+        val meteorLimit = 1
+        val beatMeteor = intensity > 0.90 && nowMs - lastMeteorAt > 2_500L
         if (playing && meteors.size < meteorLimit && (nowMs >= nextMeteorAt || beatMeteor)) {
             val startX = random.nextFloat() * w * 0.78f
             val startY = random.nextFloat() * h * 0.64f

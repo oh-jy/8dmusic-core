@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
+import j5i.spatial8d.data.FAVORITES_INDEX
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.io.File
@@ -41,7 +42,6 @@ class MusicStore(private val context: Context) {
         )?.use { cursor ->
             while (cursor.moveToNext() && result.size < 300) {
                 val duration = cursor.getLong(3)
-                if (duration > 30 * 60 * 1000) continue
                 val id = cursor.getLong(0)
                 result.add(MusicItem(
                     id, cursor.getString(1) ?: "track_$id",
@@ -204,7 +204,7 @@ class MusicStore(private val context: Context) {
         val favoritesView = playlistIndex == FAVORITES_INDEX
         val q = sanitizeQuery(query).trim().lowercase()
         val filtered = songs.filter { song ->
-            song.duration <= 30 * 60 * 1000 && song.id !in hidden &&
+            song.id !in hidden &&
                 (if (favoritesView) song.id in favorites
                     else playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
                 (q.isEmpty() || matches(song, q))

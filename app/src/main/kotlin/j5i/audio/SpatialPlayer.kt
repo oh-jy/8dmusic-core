@@ -19,8 +19,8 @@ import com.j5i.spatial8d.PcmWavRecorder
 import j5i.spatial8d.core.PcmBuffer
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
+import j5i.spatial8d.visual.PerfTrace
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicInteger
@@ -32,10 +32,17 @@ import kotlin.math.roundToInt
 
 /**
  * 原生 Android 播放链路，对应 UTS 的 platform/android-player.uts。
- * 后台线程做 HRTF/混响预渲染，音频线程只读磁盘 PCM 并写 AudioTrack，
+ * 后台线程做 HRTF/混响预渲染，音频线程读取内存 PCM 并写 AudioTrack，
  * 避免音频回调同时承担重 DSP 导致欠载、咔哒声和播放拖慢。
  */
 class SpatialPlayer(context: Context) {
+    // 播放 PCM 全部保存在内存；这里只清理旧版本遗留的临时文件。
+    private val cacheDir by lazy {
+        context.cacheDir.also { dir ->
+            dir.listFiles { file -> file.name.startsWith("spatial-render-") && file.name.endsWith(".pcm") }
+                ?.forEach { it.delete() }
+        }
+    }
     var preset = SpacePreset("标准绕头 · 默认", "", 8.0, 35.0, 45.0, 10.0, 18.0, 1.2, 0.0, 1.0)
         set(value) {
             if (field == value) return
@@ -327,6 +334,7 @@ class SpatialPlayer(context: Context) {
                 val produced = current.produced.get()
                 if (produced <= current.consumed) {
                     if (current.done.get() && drainAndFinish(own, current)) break
+                    PerfTrace.bump("local.underrun")
                     Thread.sleep(4)
                     continue
                 }
@@ -343,7 +351,8 @@ class SpatialPlayer(context: Context) {
                     written += n
                 }
                 if (own != generation || paused) continue
-                onPcm?.invoke(output, count * 4)
+                PerfTrace.interval("local.pcmGap")
+                PerfTrace.timed("local.onPcmNs") { onPcm?.invoke(output, count * 4) }
                 // 在最终 8D PCM 写出后 tee 一份，录音与耳机听到的效果完全一致。
                 recorder?.write(output, 0, count * 4)
                 current.consumed += count
@@ -363,7 +372,10 @@ class SpatialPlayer(context: Context) {
                 if (current.done.get() && current.consumed >= current.produced.get() && drainAndFinish(own, current)) break
             }
         } catch (e: Exception) {
-            if (own == generation) report("渲染播放失败: ${e.message}")
+            if (own == generation) {
+                generation++
+                report("渲染播放失败: ${e.message}")
+            }
         } finally {
             // 旧线程退出时不能清掉已经启动的新一代输出线程。
             val restart = synchronized(lock) {
@@ -408,8 +420,7 @@ class SpatialPlayer(context: Context) {
         val native = NativeSpatialPlayer.create(sampleRate.toDouble(), p.raw, p.period, p.elev,
             p.depth, p.phase, p.direction, p.width, p.room, p.rt60, p.wet, transform.denoiseLevel)
         if (native == 0L) return null
-        val file = File.createTempFile("spatial-render-", ".pcm")
-        val result = RenderCache(epoch, start, file, native)
+        val result = RenderCache(epoch, start, native)
         Thread({ prerollLoop(own, result) }, "spatial-preroll").start()
         return result
     }
@@ -432,12 +443,10 @@ class SpatialPlayer(context: Context) {
                         source.bytesPerFrame, source.channels, source.floatingPoint, 0, count, reverse,
                         source.frames.toLong(), current.startFrame.toLong(), current.produced.get())
                 }
-                current.output.write(rendered)
-                // 写完文件再发布水位，输出线程绝不会读到尚未生成的 PCM。
-                current.produced.addAndGet(count)
+                if (!current.write(rendered)) { Thread.sleep(8); continue }
                 val lead = current.produced.get() - current.consumed
-                // 只领先约 2 秒，避免后台一次算完整轨并与音频线程抢 CPU。
-                if (lead > sampleRate * 2) Thread.sleep((count * 800L / sampleRate).coerceIn(8, 250))
+                // 保持约 8 秒预滚；环形缓存写满后由背压暂停渲染。
+                if (lead > sampleRate * PREROLL_SECONDS) Thread.sleep((count * 800L / sampleRate).coerceIn(8, 250))
             }
         } catch (e: Exception) {
             if (own == generation) report("后台渲染失败: ${e.message}")
@@ -509,8 +518,7 @@ class SpatialPlayer(context: Context) {
     private fun closeCache() {
         val old = cache ?: return
         cache = null
-        old.closeInput()
-        // 活跃写入线程完成当前块后自行关流删文件，主线程不能与其竞争。
+        // 释放旧代内存；native 仍由当前渲染块结束后安全回收。
         old.discardWhenIdle()
     }
 
@@ -597,7 +605,7 @@ class SpatialPlayer(context: Context) {
                     bpf = 2; channels = 1; floating = false; frames = pcm.size / 2
                 }
                 onProgress(50)
-                temp = File.createTempFile("8d-render-", ".wav")
+                temp = File.createTempFile("8d-render-", ".wav", cacheDir)
                 NativeSpatialExport.render(pcm, bpf, channels, floating, frames.toLong(), sr.toDouble(), rev,
                     p.raw, p.period, p.elev, p.depth, p.phase, p.direction, p.width, p.room,
                     p.rt60, p.wet, tr.denoiseLevel, temp.absolutePath)
@@ -620,41 +628,55 @@ class SpatialPlayer(context: Context) {
         }.start()
     }
 
-    private class RenderCache(val epoch: Long, val startFrame: Int, val file: File,
-        val native: Long) {
-        // produced/consumed 均以帧计，磁盘布局固定为 16bit 立体声交错。
-        private var input: FileInputStream? = null
-        val output = FileOutputStream(file, true)
+    internal class RenderCache(val epoch: Long, @Volatile var startFrame: Int, val native: Long,
+        capacityBytes: Int = RENDER_CACHE_BYTES) {
+        // produced/consumed 均以帧计，环形布局固定为 16bit 立体声交错。
+        private var buffer: ByteArray? = ByteArray(capacityBytes / 4 * 4)
+        private var readPosition = 0
+        private var writePosition = 0
         private val nativeLock = Any()
         @Volatile private var released = false
-        @Volatile private var discard = false
         private var writerActive = true
         val produced = AtomicInteger()
         val done = java.util.concurrent.atomic.AtomicBoolean()
         @Volatile var consumed = 0
+        private val bufferLock = Any()
         fun finish() { done.set(true); closeOutput() }
-        @Synchronized fun closeOutput() {
+        fun closeOutput() = synchronized(bufferLock) {
             if (!writerActive && released) return
             releaseNative()
-            try { output.close() } catch (_: Exception) {}
             writerActive = false
-            if (discard) file.delete()
         }
         fun writerFinished() = closeOutput()
-        fun closeInput() = try { input?.close(); input = null } catch (_: Exception) {}
-        @Synchronized fun discardWhenIdle() { discard = true; if (!writerActive) file.delete() }
-        fun read(dst: ByteArray, bytes: Int): Boolean {
-            val stream = input ?: FileInputStream(file).also {
-                it.channel.position(consumed * 4L)
-                input = it
+        @Synchronized fun discardWhenIdle() = synchronized(bufferLock) {
+            buffer = null
+            if (!writerActive) releaseNative()
+        }
+        fun write(bytes: ByteArray): Boolean = synchronized(bufferLock) {
+            val data = buffer ?: return false
+            if ((produced.get() - consumed) * 4L + bytes.size > data.size) return false
+            var offset = 0
+            while (offset < bytes.size) {
+                val count = min(bytes.size - offset, data.size - writePosition)
+                bytes.copyInto(data, writePosition, offset, offset + count)
+                writePosition = (writePosition + count) % data.size
+                offset += count
             }
+            // 写完环形缓冲区再发布水位，输出线程绝不会读到尚未生成的 PCM。
+            produced.addAndGet(bytes.size / 4)
+            true
+        }
+        fun read(dst: ByteArray, bytes: Int): Boolean = synchronized(bufferLock) {
+            val data = buffer ?: return false
+            if (bytes < 0 || bytes > dst.size || bytes > data.size || (produced.get() - consumed) * 4L < bytes) return false
             var offset = 0
             while (offset < bytes) {
-                val n = stream.read(dst, offset, bytes - offset)
-                if (n < 0) return false
-                offset += n
+                val count = min(bytes - offset, data.size - readPosition)
+                data.copyInto(dst, offset, readPosition, readPosition + count)
+                readPosition = (readPosition + count) % data.size
+                offset += count
             }
-            return true
+            true
         }
         fun render(block: () -> ByteArray): ByteArray = synchronized(nativeLock) {
             if (released) error("渲染缓存已关闭")
@@ -662,7 +684,7 @@ class SpatialPlayer(context: Context) {
         }
         fun releaseNative() = synchronized(nativeLock) {
             // JNI 渲染器只在当前 render 返回后释放，防止并发 use-after-free。
-            if (!released) { NativeSpatialPlayer.release(native); released = true }
+            if (!released) { if (native != 0L) NativeSpatialPlayer.release(native); released = true }
         }
     }
 
@@ -672,6 +694,9 @@ class SpatialPlayer(context: Context) {
         const val SEEK_RESUME_DELAY_MS = 120L
         // 与 UTS 一致：三个输出块约 70ms，避免首个缓冲未填满就起播造成欠载。
         const val START_FRAMES = 3072
+        // 48 MiB 在 48kHz 双声道下约 256 秒；写满暂停预渲染，消费后复用环形空间。
+        internal const val RENDER_CACHE_BYTES = 48 * 1024 * 1024
+        internal const val PREROLL_SECONDS = 8
         internal fun hasReachedEndMarker(trackStarted: Boolean, marker: Int, heardFrames: Int) =
             trackStarted && marker > 0 && heardFrames >= marker
         internal fun endDrainTimedOut(elapsedMs: Long, remainingMs: Long, speed: Double) =

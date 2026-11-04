@@ -50,6 +50,7 @@ import j5i.spatial8d.audio.OnlineTrack
 import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.audio.LyricsCandidate
 import j5i.spatial8d.audio.LyricsResult
+import j5i.spatial8d.visual.PerfTrace
 import j5i.spatial8d.ui.LyricsView
 import j5i.spatial8d.ui.WaveformView
 import j5i.spatial8d.ui.VisualizerView
@@ -159,6 +160,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost {
     private val sliderValues = mutableMapOf<String, TextView>()
     private val sliderControls = mutableMapOf<String, SeekBar>()
     private var updatingControls = false
+    private var draggingControl = false
     private lateinit var durationHint: TextView
 private var infoDialog: Dialog? = null
 private var exportDialog: Dialog? = null
@@ -183,6 +185,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private var radioSources = listOf<j5i.spatial8d.core.RadioSource>()
     private var radioSourceIndex = -1
     private var radioGeneration = 0
+    private var radioProbes = listOf<j5i.spatial8d.audio.RadioPlayer>()
     private var sourceRegion = "全部"
     private var sourceCity = "全部"
     private var sourceType = "全部"
@@ -282,6 +285,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         restorePlaybackState()
         palette = ThemeUi.palette(dark)
         buildUi()
+        visualization.pcmClock = visualizerView.pcmClock
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (exitDialog?.isShowing == true) { exitDialog?.dismiss(); return }
@@ -323,6 +327,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         service?.onPlaybackError = null
         service?.onPlaybackChanged = null
         service?.player?.onPcm = null
+        service?.radio?.onPcm = null
+        radioProbes.forEach { it.stop() }
+        radioProbes = emptyList()
         if (bound) unbindService(connection)
         super.onDestroy()
     }
@@ -382,6 +389,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun refreshAll() {
         updatingControls = true
         palette = ThemeUi.palette(dark)
+        // Styling changes SeekBar padding/thumb bounds. Apply it before progress writes,
+        // so opening a panel never leaves a deferred visual correction until the first touch.
+        refreshControls()
         // 下拉、展开控件、方向、曲线共用 preset，任何入口修改后都从这里统一回灌。
         presetPicker.text = preset.name
         val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
@@ -456,10 +466,18 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             denoiseSlider.progress = transform.denoiseLevel
         }
         updatingControls = false
-        refreshControls()
         rebuildTransport()
         refreshCardState()
         refreshPlayback()
+    }
+
+    private fun refreshPresetSummary() {
+        presetPicker.text = preset.name
+        val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
+        if (presetIndex >= 0) {
+            presetPicker.text = AppLanguage.preset(this, presetIndex)
+            presetNote.text = AppLanguage.preset(this, presetIndex, note = true)
+        }
     }
 
     private fun refreshControls() {
@@ -613,7 +631,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         status.text = effectiveStatus
         // 歌词只允许出现在一个位置：同步歌词，或可视化的图谱/粒子/穿梭及其弹窗。
         val visualLyrics = curvePanel == 1 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
-        val statusLine = if (curvePanel != 2 && !visualLyrics) {
+        val statusLine = if (isLive) {
+            "● LIVE · 流媒体实时处理 · $effectiveStatus"
+        } else if (curvePanel != 2 && !visualLyrics) {
             val lines = currentLyrics?.lines
             val currentLine = lines?.let { ls ->
                 val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
@@ -629,9 +649,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             seek.visibility = if (isLive) View.GONE else View.VISIBLE
             currentTime.visibility = if (isLive) View.GONE else View.VISIBLE
             durationTime.visibility = if (isLive) View.GONE else View.VISIBLE
-            liveTimeline.visibility = if (isLive) View.VISIBLE else View.GONE
-            (liveTimeline.getChildAt(0) as TextView).setTextColor(0xffff5d5d.toInt())
-            (liveTimeline.getChildAt(1) as TextView).setTextColor(0xffff8a80.toInt())
+            liveTimeline.visibility = View.GONE
         }
         if (::exportButton.isInitialized) {
             exportButton.background = ThemeUi.bgDrawable(this,
@@ -658,7 +676,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (!seeking) seek.progress = if (player?.duration ?: 0.0 > 0)
             (player!!.position / player.duration * 1000).toInt() else 0
         durationHint.text = if (player?.duration ?: 0.0 > 0) time(player!!.duration / transform.speed) else "--:--"
-        (liveTimeline.findViewWithTag<TextView>("liveStatus"))?.text = playbackStatus
         service?.updateMedia(currentItem?.name ?: "8D 空间音频",
             if (isLive) "电台直播 · 8D 实时处理" else currentItem?.artist ?: playbackStatus,
             playing, if (isLive) 0.0 else player?.position ?: 0.0, if (isLive) 0.0 else player?.duration ?: 0.0)
@@ -683,12 +700,12 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         refreshAll()
     }
 
-    private fun applyTransform() {
+    private fun applyTransform(syncControls: Boolean = true) {
         if (isLive) {
             // 直播时间轴不可变速或倒放；与 UTS 一致，只把半音映射到 AudioTrack pitch。
             service?.radio?.semi = transform.semi.roundToInt()
             playbackStatus = if (transform.semi == 0.0) "电台已恢复原声" else "电台变声已更新（${transform.semi.toInt()}半音）"
-            refreshAll()
+            if (syncControls) refreshAll()
             return
         }
         service?.player?.transform = transform
@@ -700,7 +717,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             else "已恢复原始速度"
         savePlaybackState()
         // 所有滑块、快捷标签、下拉和实际 transform 共用同一次回写，避免只改引擎不改文字。
-        refreshAll()
+        if (syncControls) refreshAll()
     }
 
     private fun updateParameter(key: String, value: Double) {
@@ -728,7 +745,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         service?.radio?.preset = preset
         service?.radio?.denoise = transform.denoiseLevel
         savePlaybackState()
-        refreshAll()
+        if (!draggingControl) refreshAll()
     }
 
     private fun parameter(key: String): Double = when (key) {
@@ -803,6 +820,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
         val generation = ++loadGeneration
         ++radioGeneration
+        radioProbes.forEach { it.stop() }
+        radioProbes = emptyList()
         isLive = false
         stationIndex = -1
         currentStationId = ""
@@ -1287,10 +1306,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         override fun run() {
             if (!pageActive) return
             refreshPlayback()
-            service?.player?.let {
-                visualization.position = it.position
-                curve.position = it.position
-            }
+            val playbackPosition = (if (isLive) service?.radio?.position else service?.player?.position) ?: 0.0
+            visualization.position = playbackPosition
+            curve.position = playbackPosition
             if (SystemClock.uptimeMillis() - lastStateSavedAt >= 5000) savePlaybackState()
             main.postDelayed(this, 200)
         }
@@ -1323,6 +1341,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         })
         fun navButton(label: String, action: () -> Unit) = ThemeUi.button(this, palette, label, minHeightDp = 30f).apply {
             textSize = 11f
+            setPadding(ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 8f), 0)
             setOnClickListener { action() }
         }
         fmButton = navButton("FM") { showSourceSheet(false) }.apply {
@@ -1558,22 +1577,29 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             row.addView(ThemeUi.text(this, t("slider.${definition.key}"), 12f, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
-            sliderValues[definition.key] = ThemeUi.text(this, "", 12f, palette, role = ThemeUi.ROLE_ACCENT)
+            val initialValue = parameter(definition.key)
+            sliderValues[definition.key] = ThemeUi.text(this, "", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                text = formatValue(definition.key, initialValue)
+            }
             row.addView(sliderValues[definition.key])
             group.addView(row)
             val slider = SeekBar(this).apply {
-                max = 1000
-                // 与上方参数名左缘对齐，不使用系统默认的大拇指留白。
-                setPadding(ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 12f), 0)
+                ThemeUi.configureSeekBar(this, palette)
+                max = ((definition.max - definition.min) * 10.0.pow(definition.digits)).roundToInt()
+                progress = ((initialValue - definition.min) * 10.0.pow(definition.digits)).roundToInt()
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser && !updatingControls) {
                             val value = definition.min + progress / 10.0.pow(definition.digits)
                             updateParameter(definition.key, clampSlider(definition.key, value))
+                            sliderValues[definition.key]?.text = formatValue(definition.key, value)
                         }
                     }
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { draggingControl = true }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) {
+                        draggingControl = false
+                        refreshPresetSummary()
+                    }
                 })
             }
             sliderControls[definition.key] = slider
@@ -1648,21 +1674,25 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             pitchRow.addView(pitchLabel)
             transformBody.addView(pitchRow)
             pitchSlider = SeekBar(this@MainActivity).apply {
+                ThemeUi.configureSeekBar(this, palette)
                 max = 24
-                progress = 12
-                setPadding(ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 12f), 0)
+                progress = (transform.semi.roundToInt() + 12).coerceIn(0, 24)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser) {
                             val semi = progress - 12
                             if (semi != transform.semi.toInt()) {
                                 transform = transform.copy(semi = semi.toDouble())
-                                applyTransform()
+                                applyTransform(syncControls = false)
+                                pitchLabel.text = if (semi == 0) t("original") else "$semi ${t("semitone")}"
                             }
                         }
                     }
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { draggingControl = true }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) {
+                        draggingControl = false
+                        if (::pitchPicker.isInitialized) pitchPicker.text = pitchPickerLabel()
+                    }
                 })
             }
             transformBody.addView(pitchSlider)
@@ -1701,19 +1731,20 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 addView(speedLabel)
             })
             speedSlider = SeekBar(this@MainActivity).apply {
+                ThemeUi.configureSeekBar(this, palette)
                 max = 30
-                progress = 10
-                setPadding(0, 0, 0, 0)
+                progress = ((transform.speed - 0.5) / 0.05).roundToInt()
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser) {
                             val speed = 0.5 + progress * 0.05
                             transform = transform.copy(speed = speed.toDouble())
-                            applyTransform()
+                            applyTransform(syncControls = false)
+                            speedLabel.text = String.format(Locale.US, "%.2f×", speed)
                         }
                     }
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { draggingControl = true }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) { draggingControl = false }
                 })
             }
             speedSlider.tag = "localOnly"
@@ -1726,18 +1757,19 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 addView(denoiseLabel)
             })
             denoiseSlider = SeekBar(this@MainActivity).apply {
+                ThemeUi.configureSeekBar(this, palette)
                 max = 100
                 progress = transform.denoiseLevel
-                setPadding(0, 0, 0, 0)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser && progress != transform.denoiseLevel) {
                             transform = transform.copy(denoise = progress)
-                            applyTransform()
+                            applyTransform(syncControls = false)
+                            denoiseLabel.text = if (progress == 0) t("off") else "$progress%"
                         }
                     }
-                    override fun onStartTrackingTouch(seekBar: SeekBar) {}
-                    override fun onStopTrackingTouch(seekBar: SeekBar) {}
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { draggingControl = true }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) { draggingControl = false }
                 })
             }
             transformBody.addView(denoiseSlider)
@@ -1856,12 +1888,17 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
     private fun installPcmRenderer() {
-        service?.player?.onPcm = { data, bytes ->
+        val render: (ByteArray, Int) -> Unit = { data, bytes ->
+            val startedAt = System.nanoTime()
+            visualizerView.pcmClock.accept(data, bytes)
             if (::visualization.isInitialized) visualization.acceptPcm(data, bytes)
             if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
             if (drivingDialog?.isShowing == true) visualizerView.accept(data, bytes)
             popupVisualizer?.accept(data, bytes)
+        PerfTrace.sample("visual.fanoutNs", System.nanoTime() - startedAt)
         }
+        service?.player?.onPcm = render
+        service?.radio?.onPcm = render
     }
 
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */
@@ -2228,20 +2265,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         durationTime.gravity = Gravity.CENTER
         timeline.addView(durationTime)
         bar.addView(timeline)
-        liveTimeline = ThemeUi.row(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 28f)).apply { topMargin = ThemeUi.dp(this@MainActivity, 8f) }
-            addView(ThemeUi.text(this@MainActivity, "●", 9f, palette).apply { setTextColor(0xffff5d5d.toInt()) })
-            addView(ThemeUi.text(this@MainActivity, "LIVE · 流媒体实时处理", 10f, palette).apply {
-                setTextColor(0xffff8a80.toInt()); setPadding(ThemeUi.dp(this@MainActivity, 5f), 0, 0, 0)
-            })
-            visibility = View.GONE
-        }
-        bar.addView(liveTimeline)
-        liveTimeline.addView(ThemeUi.text(this, "", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
-            tag = "liveStatus"
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = ThemeUi.dp(this@MainActivity, 10f) }
-            ThemeUi.hideOverflow(this)
-        })
+        liveTimeline = LinearLayout(this).apply { visibility = View.GONE }
         val controls = ThemeUi.row(this, gravity = Gravity.CENTER).apply {
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 62f)).apply { topMargin = ThemeUi.dp(this@MainActivity, 4f) }
         }
@@ -2289,11 +2313,13 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun toggleParameterOpen() {
         parameterOpen = !parameterOpen
         refreshCardState()
+        if (parameterOpen) refreshAll()
     }
 
     private fun toggleTransformOpen() {
         transformOpen = !transformOpen
         refreshCardState()
+        if (transformOpen) refreshAll()
     }
 
     private fun refreshCardState() {
@@ -2469,7 +2495,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 t("info.quick") to t("info.quick.body"),
                 t("info.lyrics") to t("info.lyrics.body"),
                 t("info.visualizer") to t("info.visualizer.body"),
-                t("info.export") to t("info.export.body")
+                t("info.export") to t("info.export.body"),
+                t("info.privacy") to t("info.privacy.body")
             ).forEach { (title, content) -> section(title, content) }
             addView(ThemeUi.text(this@MainActivity, t("info.params"), 16f, palette, bold = true).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 3f))
@@ -2929,6 +2956,12 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun playRadio(station: RadioStation) {
         if (recordingKind.isNotEmpty()) { toast("请先停止当前录音，再切换音源"); return }
         ++loadGeneration
+        radioProbes.forEach { it.stop() }
+        radioProbes = emptyList()
+        ++lyricsGeneration
+        currentLyrics = null
+        if (::lyricsView.isInitialized) lyricsView.clear()
+        pushLyricsToVisualizer()
         service?.stopLocal()
         currentItem = MusicItem(-1, station.name, "")
         currentUri = null
@@ -2940,8 +2973,47 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         val preferredUrl = preferences.getString("radioSource:${station.id}", null)
         val preferred = radioSources.indexOfFirst { it.url == preferredUrl }.coerceAtLeast(0)
         stationIndex = RadioCatalog.filter(false).indexOfFirst { it.id == station.id }
-        tryRadioSource(preferred, generation)
+        raceRadioSources(preferred, generation)
         dismissSource()
+    }
+
+    /** 同一频道多路并行探测；正式解码失败时仍回退其他源。 */
+    private fun raceRadioSources(preferred: Int, generation: Int) {
+        val allIndices = listOf(preferred) + radioSources.indices.filterNot { it == preferred }
+        val indices = allIndices.take(3)
+        playbackStatus = "并行连接 ${indices.size} 路音源…"
+        var selected = false
+        var failed = 0
+        val probes = indices.map { index ->
+            val source = radioSources[index]
+            j5i.spatial8d.audio.RadioPlayer(probe = true).also { probe ->
+                probe.preset = preset
+                probe.semi = transform.semi.roundToInt()
+                probe.onReady = { main.post {
+                    if (generation != radioGeneration || selected) return@post
+                    selected = true
+                    radioSourceIndex = index
+                    preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
+                    radioProbes.forEach { it.stop() }
+                    radioProbes = emptyList()
+                    radioSources = listOf(source) + radioSources.filterIndexed { i, _ -> i != index }
+                    tryRadioSource(0, generation)
+                } }
+                probe.onError = { main.post {
+                    if (generation == radioGeneration && !selected && ++failed == indices.size) {
+                        selected = true
+                        radioProbes.forEach { it.stop() }
+                        radioProbes = emptyList()
+                        radioSources = allIndices.drop(indices.size).map { radioSources[it] }
+                        tryRadioSource(0, generation)
+                    }
+                } }
+            }
+        }
+        radioProbes = probes
+        requestPlaybackFocus()
+        indices.forEachIndexed { i, index -> probes[i].load(radioSources[index].url) }
+        refreshAll()
     }
 
     /** 单台内部按顺序回退；失败不跳到另一台，避免用户选择了 A 却听到 B。 */
@@ -2958,6 +3030,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         val name = currentItem?.name ?: "电台"
         playbackStatus = "连接 ${index + 1}/${radioSources.size} · ${source.label}"
         service?.radio?.preset = preset
+        service?.radio?.denoise = transform.denoiseLevel
         service?.radio?.semi = transform.semi.roundToInt()
         service?.radio?.onReady = { main.post {
             if (generation == radioGeneration) preferences.edit().putString("radioSource:$currentStationId", source.url).apply()

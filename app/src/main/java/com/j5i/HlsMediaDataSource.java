@@ -25,18 +25,21 @@ public final class HlsMediaDataSource extends MediaDataSource {
     private final LinkedHashSet<String> seen = new LinkedHashSet<>();
 
     private String playlistUrl;
-    private HttpURLConnection connection;
-    private byte[] segment;
-    private int segmentOffset;
+    private final boolean playlist;
+    private boolean directOpened;
+    private volatile HttpURLConnection connection;
+    private volatile InputStream segmentInput;
+    private int segmentBytes;
     private long cacheStart;
     private int cacheLength;
     private long targetDurationMs = 5000;
     private boolean started;
     private boolean eof;
-    private boolean closed;
+    private volatile boolean closed;
 
     public HlsMediaDataSource(String url) {
         this.playlistUrl = url;
+        this.playlist = url.split("\\?", 2)[0].toLowerCase().endsWith(".m3u8");
     }
 
     @Override
@@ -59,7 +62,7 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     @Override
-    public synchronized void close() {
+    public void close() {
         closed = true;
         closeConnection();
     }
@@ -68,8 +71,7 @@ public final class HlsMediaDataSource extends MediaDataSource {
         closeConnection();
         cacheStart = 0;
         cacheLength = 0;
-        segment = null;
-        segmentOffset = 0;
+        segmentBytes = 0;
         pending.clear();
         seen.clear();
         eof = false;
@@ -81,14 +83,15 @@ public final class HlsMediaDataSource extends MediaDataSource {
             if (cacheLength == cache.length) {
                 compact();
             }
-            if (segment != null && segmentOffset < segment.length) {
-                int count = Math.min(segment.length - segmentOffset, cache.length - cacheLength);
-                System.arraycopy(segment, segmentOffset, cache, cacheLength, count);
-                cacheLength += count;
-                segmentOffset += count;
-                if (segmentOffset == segment.length) {
-                    segment = null;
-                    segmentOffset = 0;
+            InputStream input = segmentInput;
+            if (input != null) {
+                int count = input.read(cache, cacheLength, cache.length - cacheLength);
+                if (count < 0) {
+                    closeConnection();
+                    if (segmentBytes == 0) throw new IOException("empty HLS segment");
+                } else if (count > 0) {
+                    cacheLength += count;
+                    segmentBytes += count;
                 }
                 continue;
             }
@@ -97,7 +100,14 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     private void loadNextSegment() throws IOException {
-        android.util.Log.i("8DStream", "HLS next pending=" + pending.size());
+        if (!playlist) {
+            if (directOpened) {
+                eof = true;
+                return;
+            }
+            directOpened = true;
+            pending.addLast(playlistUrl);
+        }
         if (pending.isEmpty()) refreshPlaylist(0);
         String url = pending.pollFirst();
         if (url == null) {
@@ -105,9 +115,14 @@ public final class HlsMediaDataSource extends MediaDataSource {
             sleep(targetDurationMs);
             return;
         }
-        segment = download(url);
-        if (segment.length == 0) throw new IOException("empty HLS segment");
-        segmentOffset = 0;
+        HttpURLConnection c = open(url);
+        try {
+            segmentInput = c.getInputStream();
+            segmentBytes = 0;
+        } catch (IOException e) {
+            closeConnection();
+            throw e;
+        }
     }
 
     private void refreshPlaylist(int depth) throws IOException {
@@ -152,8 +167,23 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     private byte[] download(String url) throws IOException {
-        android.util.Log.i("8DStream", "GET " + url);
-        closeConnection();
+        HttpURLConnection c = open(url);
+        try (InputStream in = c.getInputStream()) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buffer = new byte[16384];
+            while (!closed) {
+                int n = in.read(buffer);
+                if (n < 0) break;
+                out.write(buffer, 0, n);
+            }
+            return out.toByteArray();
+        } finally {
+            closeConnection();
+        }
+    }
+
+    private HttpURLConnection open(String url) throws IOException {
+        if (closed) throw new IOException("data source closed");
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         connection = c;
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -163,22 +193,12 @@ public final class HlsMediaDataSource extends MediaDataSource {
         c.setRequestProperty("Accept", "*/*");
         try {
             int code = c.getResponseCode();
-            android.util.Log.i("8DStream", "HTTP " + code + " " + url);
             if (code != HttpURLConnection.HTTP_OK) throw new IOException("HTTP " + code);
-            InputStream in = c.getInputStream();
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buffer = new byte[16384];
-            while (!closed) {
-                int n = in.read(buffer);
-                if (n < 0) break;
-                out.write(buffer, 0, n);
-            }
-            in.close();
-            byte[] bytes = out.toByteArray();
-            android.util.Log.i("8DStream", "bytes=" + bytes.length + " " + url);
-            return bytes;
-        } finally {
+            if (closed) throw new IOException("data source closed");
+            return c;
+        } catch (IOException e) {
             closeConnection();
+            throw e;
         }
     }
 
@@ -191,10 +211,10 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     private void closeConnection() {
-        if (connection != null) {
-            connection.disconnect();
-            connection = null;
-        }
+        HttpURLConnection c = connection;
+        connection = null;
+        segmentInput = null;
+        if (c != null) c.disconnect();
     }
 
     private static String resolve(String base, String child) throws IOException {

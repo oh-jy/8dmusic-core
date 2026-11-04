@@ -36,6 +36,13 @@ D:\temp\tools\gradle-8.14.3\bin\gradle.bat :app:assembleDebug --no-daemon
 
 也可直接运行 `build.ps1`，自动设置 JDK/SDK 环境并编译；Gradle/Kotlin 工程缓存也写入 `build/`。
 
+日常增量构建、正式签名包、缓存清理后全量重建及 ADB 覆盖安装见 `docs/BUILD.md`：
+
+```powershell
+.\build.ps1 -Test
+.\build.ps1 -Configuration Release -Clean -Test
+```
+
 ## 迁移进度
 
 - [x] Gradle 工程 + Android 最小启动页。
@@ -52,6 +59,16 @@ D:\temp\tools\gradle-8.14.3\bin\gradle.bat :app:assembleDebug --no-daemon
 当前详细功能清单、历史 Bug 状态和验证证据统一维护在 `SESSION-REQUIREMENTS-AND-VERIFICATION.md` 第 9 节。
 
 计划公开发布前请先阅读 `OPEN-SOURCE-RELEASE-ASSESSMENT.md`。当前第三方音源、内置 FM、在线导出/录音和原生依赖许可证链尚未达到直接公开发布条件。
+
+## 完整版与 Core 版边界
+
+本 `master` 是完整功能开发版，包含本地音乐、聚合在线音源、第三方登录、更多 FM 目录、在线歌词和录音/导出。`opensource-core` 才是公开 Core 基线；`LICENSE`、`NOTICE`、`PRIVACY.md`、`TERMS.md`、`SECURITY.md` 和 `THIRD-PARTY-*` 的 Core 描述不能被解释为完整版已获得第三方内容、账号、直播或录音授权。
+
+完整版公开分发前仍需逐项核对音源和歌词服务条款、账号数据告知、电台来源与录音权利、LAME/MPGLIB 对应源码和许可证义务。应用说明只展示普通用户需要的版本、基本操作、联网数据、录音与第三方服务边界；完整许可证和发布审查保留在仓库文档，不堆进首页。
+
+## 权限最小化
+
+完整版仅声明本地媒体读取、联网、用户主动麦克风录音、后台媒体播放、媒体通知和播放防休眠所需权限。SAF 文件选择和应用自有 MediaStore 导出不需要写入外部存储权限，因此不声明 `WRITE_EXTERNAL_STORAGE`、`MANAGE_EXTERNAL_STORAGE`，也不申请定位、蓝牙、联系人或设备标识权限。
 
 ## 对拍策略
 

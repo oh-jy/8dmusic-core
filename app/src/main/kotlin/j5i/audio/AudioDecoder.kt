@@ -49,7 +49,6 @@ class AudioDecoder(private val context: Context) {
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("音频格式不可识别")
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION))
                 format.getLong(MediaFormat.KEY_DURATION) else 0L
-            if (durationUs > 30L * 60L * 1_000_000L) error("音频超过 30 分钟")
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()

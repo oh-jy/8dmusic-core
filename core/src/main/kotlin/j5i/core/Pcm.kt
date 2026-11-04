@@ -65,9 +65,9 @@ class PcmBuffer(val sampleRate: Int, val channels: Int, val floatingPoint: Boole
     private val durationUs: Long = 0L) {
     private val initialCapacity = if (durationUs > 0)
         ((durationUs / 1_000_000.0 * sampleRate + sampleRate / 2).toLong() * bytesPerFrame)
-            .coerceAtMost(30L * 60 * sampleRate * bytesPerFrame).toInt() else 0
-    // 首块只预留两秒，避免长歌尚未出声就先分配并清零整段 PCM。
-    private var data = ByteArray(min(initialCapacity, sampleRate * 2 * bytesPerFrame))
+            .coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else 0
+    // 首块只预留两秒，长歌曲由后续 PCM 块按需增长，不一次性申请整轨内存。
+    private var data = ByteArray(minOf(initialCapacity, sampleRate * 2 * bytesPerFrame))
     @Volatile var bytes = 0
         private set
     val bytesPerSample get() = if (floatingPoint) 4 else 2
@@ -80,7 +80,12 @@ class PcmBuffer(val sampleRate: Int, val channels: Int, val floatingPoint: Boole
     @Synchronized
     fun append(source: ByteArray, size: Int = source.size) {
         // 容器时长只是估算，实际输出更长时按需扩容。
-        if (bytes + size > data.size) data = data.copyOf(maxOf(bytes + size, data.size * 2))
+        if (bytes + size > data.size) {
+            val doubled = if (data.size > Int.MAX_VALUE / 2) Int.MAX_VALUE else data.size * 2
+            val capacity = maxOf(bytes + size, doubled)
+            require(capacity >= bytes + size) { "PCM 缓冲超出 Android 数组上限" }
+            data = data.copyOf(capacity)
+        }
         source.copyInto(data, bytes, 0, size)
         bytes += size
     }

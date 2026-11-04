@@ -4,6 +4,8 @@ import j5i.spatial8d.core.dsp.Resampler
 import j5i.spatial8d.core.dsp.Wsola
 import kotlin.math.sin
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class CoreSmokeTest {
@@ -45,5 +47,19 @@ class CoreSmokeTest {
         val outR = DoubleArray(65536)
         val r1 = rs.process(input, n, outR, 1.2)
         assertTrue(r1 > 0 && r1 < n, "Resampler should resample input")
+    }
+
+    @Test
+    fun `long track pcm grows by decoded chunks instead of duration cap`() {
+        val pcm = PcmBuffer(48_000, 2, false, 4_145_368_000L)
+        val twoSeconds = ByteArray(48_000 * 2 * 4) { (it % 251).toByte() }
+        val nextFrame = byteArrayOf(1, 2, 3, 4)
+
+        pcm.append(twoSeconds)
+        pcm.append(nextFrame)
+
+        assertEquals(96_001, pcm.frames)
+        assertEquals(4_145.368, pcm.estimatedDurationSec, 0.001)
+        assertContentEquals(nextFrame, pcm.copyFrames(96_000, 1))
     }
 }

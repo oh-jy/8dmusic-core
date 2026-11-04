@@ -9,15 +9,52 @@ import j5i.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
 import j5i.spatial8d.audio.SpatialPlayer.Companion.endDrainTimedOut
 import j5i.spatial8d.audio.SpatialPlayer.Companion.reverseSourceStart
 import j5i.spatial8d.audio.RadioPlayer.Companion.shouldStartTrack
+import j5i.spatial8d.audio.SpatialPlayer.Companion.PREROLL_SECONDS
+import j5i.spatial8d.audio.SpatialPlayer.Companion.RENDER_CACHE_BYTES
 import j5i.spatial8d.audio.PlaybackQueue
 import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.data.MusicItem
 import j5i.spatial8d.data.PlayMode
 import com.j5i.spatial8d.TsAdtsMediaDataSource
+import j5i.spatial8d.audio.SpatialPlayer.RenderCache
+import java.io.File
 import kotlin.test.Test
 
 /** 不启动 Android 设备的纯逻辑回归。 */
 class MainActivityLogicCheck {
+    @Test fun sliderTouchReleaseNeverRefreshesOtherSeekBars() {
+        val source = File("src/main/kotlin/j5i/MainActivity.kt").readText()
+        val releaseBlocks = Regex("onStopTrackingTouch\\(seekBar: SeekBar\\) \\{([\\s\\S]*?)\\n\\s{16}\\}")
+            .findAll(source)
+            .map { it.groupValues[1] }
+            .toList()
+        check(releaseBlocks.size >= 4) { "expected parameter/playback SeekBar listeners" }
+        check(releaseBlocks.none { "refreshAll(" in it }) {
+            "SeekBar release must not run the global UI refresh, otherwise other sliders visually jump"
+        }
+    }
+
+    @Test fun renderMemoryCacheWrapsWithoutMovingOrGrowingData() {
+        check(RENDER_CACHE_BYTES == 48 * 1024 * 1024)
+        check(PREROLL_SECONDS == 8)
+        val cache = RenderCache(1, 0, 0, capacityBytes = 4096)
+        val first = ByteArray(3000) { (it % 251).toByte() }
+        check(cache.write(first))
+        check(!cache.write(ByteArray(2048))) { "full ring must apply backpressure" }
+        val head = ByteArray(3000)
+        check(cache.read(head, head.size) && head.contentEquals(first))
+        cache.consumed += head.size / 4
+        val wrapped = ByteArray(2048) { (255 - it % 251).toByte() }
+        check(cache.write(wrapped))
+        val actual = ByteArray(wrapped.size)
+        check(cache.read(actual, actual.size) && actual.contentEquals(wrapped))
+        check(cache.produced.get() == (first.size + wrapped.size) / 4)
+        cache.discardWhenIdle()
+        check(!cache.write(ByteArray(4)))
+        check(!cache.read(ByteArray(4), 4))
+        cache.writerFinished()
+    }
+
     @Test fun hlsRawAacIsNotDiscardedAsTs() {
         check(TsAdtsMediaDataSource.isAdts(byteArrayOf(0xff.toByte(), 0xf1.toByte()), 2))
         check(!TsAdtsMediaDataSource.isAdts(byteArrayOf(0x47, 0x40), 2))

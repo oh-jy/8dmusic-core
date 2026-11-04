@@ -7,8 +7,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Properties
 
-val buildHour = SimpleDateFormat("yyMMddHH").format(Date())
-val versionCounterFile = rootDir.resolve("build/signing/version-code.properties")
+val buildHour = SimpleDateFormat("yyDDDHH").format(Date())
+val versionCounterFile = rootDir.resolve("docs/signing/version-code.properties")
 val versionCounter = Properties().apply {
     versionCounterFile.takeIf { it.isFile }?.inputStream()?.use { load(it) }
 }
@@ -22,19 +22,21 @@ if (releaseBuild) {
     versionCounter.setProperty("count", buildNumber.toString())
     versionCounterFile.outputStream().use { versionCounter.store(it, null) }
 }
-val hourlyVersionCode = (buildHour + if (releaseBuild) buildNumber else versionCounter.getProperty("count", "1")).toInt()
+val versionSequence = if (releaseBuild) buildNumber else versionCounter.getProperty("count", "1").toInt()
+val hourlyVersionCode = (buildHour + "%02d".format(versionSequence)).toInt()
 
 android {
     namespace = "j5i.spatial8d"
     compileSdk = 34
+    buildFeatures { buildConfig = true }
 
     defaultConfig {
         applicationId = "j5i.spatial8d.native"
         minSdk = 24
         targetSdk = 34
-        // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
+        // yy + 年内日序 + 小时 + 当小时发布序号，例如 263081304；始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.3.8"
+        versionName = "2.6.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
@@ -63,7 +65,7 @@ tasks.withType<Test>().configureEach { useJUnitPlatform() }
 android {
     signingConfigs {
         create("release") {
-            storeFile = file("${rootDir}/build/signing/8dmusic-native-release.jks")
+            storeFile = file("${rootDir}/docs/signing/8dmusic-native-release.jks")
             storePassword = releaseStorePassword.orNull
             keyAlias = "spatial8d"
             keyPassword = releaseStorePassword.orNull

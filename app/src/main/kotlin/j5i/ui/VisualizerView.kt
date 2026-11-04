@@ -23,6 +23,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import j5i.spatial8d.audio.LyricsResult
 import j5i.spatial8d.audio.LyricLine
+import j5i.spatial8d.visual.PerfTrace
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -34,11 +35,12 @@ import kotlin.math.sqrt
 
 /** 本地 PCM 可视化，不增加原生依赖；组合图表与独占动效共用同一份输出样本。 */
 class VisualizerView(context: Context) : LinearLayout(context) {
+    val pcmClock = PcmVisualClock()
     private fun t(key: String) = AppLanguage.text(context, key)
     var onExpand: (() -> Unit)? = null
     var dark = true
         set(value) { field = value; canvas.dark = value; restyle() }
-    private val canvas = AudioCanvas(context)
+    private val canvas = AudioCanvas(context, pcmClock)
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDoubleTap(e: MotionEvent): Boolean {
             onExpand?.invoke()
@@ -220,7 +222,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
     private fun dp(value: Float) = ThemeUi.dp(context, value)
 
-    private class AudioCanvas(context: Context) : View(context) {
+    private class AudioCanvas(context: Context, private val pcmClock: PcmVisualClock) : View(context) {
         var dark = true
         var mode = 0
         var layers = BooleanArray(4) { true }
@@ -236,8 +238,14 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val spectrogramRows = ArrayDeque<IntArray>()
         private var spectrogramLastNs = 0L
         private val particlePaths = Array(4) { Path() }
+        private val particleSeeds = Array(320) { index ->
+            val random = java.util.Random(index * 7919L + 17L)
+            floatArrayOf(random.nextFloat(), random.nextFloat(), random.nextFloat(), random.nextFloat())
+        }
         private val travelPaths = Array(4) { Path() }
         private val travelFireworkPaths = Array(4) { Path() }
+        private data class TravelBurst(val x: Float, val y: Float, val radius: Float, val startedAt: Long)
+        private val travelBursts = mutableMapOf<Int, TravelBurst>()
         private val sphereBounds = RectF()
         // PCM 写出比实际听感提前约 80ms；每帧只消费已到时间的样本，不能反复读取队首。
         private val visualQueue = ArrayDeque<Pair<Long, ByteArray>>()
@@ -265,13 +273,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun consumeDelayedSamples() {
-            val now = System.nanoTime()
-            while (visualQueue.firstOrNull()?.first?.let { it <= now } == true) {
-                visualQueue.removeFirst().second.let(::analyzeDelayed)
-            }
+            pcmClock.consume()
+            delayedRms = pcmClock.rms.toFloat()
+            delayedPeak = pcmClock.peak.toFloat()
         }
 
         private fun analyzeImmediate(data: ByteArray, bytes: Int) {
+            val startedAt = System.nanoTime()
             val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
             var energy = .0
             var loudest = .0
@@ -305,9 +313,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             analyze()
             postInvalidateOnAnimation()
+            PerfTrace.sample("visual.analyzeImmediateNs", System.nanoTime() - startedAt)
         }
 
         private fun analyzeDelayed(data: ByteArray) {
+            val startedAt = System.nanoTime()
             val input = ByteBuffer.wrap(data).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
             val samples = ShortArray(input.remaining())
             input.get(samples)
@@ -329,6 +339,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             delayedRms = sqrt(samples.sumOf { val v = it / 32768.0; v * v } / samples.size).toFloat()
             delayedPeak = samples.maxOf { abs(it.toInt()) } / 32768f
+            PerfTrace.sample("visual.analyzeDelayedNs", System.nanoTime() - startedAt)
         }
 
         /** 计算自上次绘制以来的真实秒数（首次或长时间挂起时给一帧保守值）。 */
@@ -505,26 +516,22 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             // 整体强度由响度驱动：安静时几乎静止，起伏时粒子立刻反应。
             val drive = (delayedRms * 9f + delayedPeak * 1.5f).coerceIn(0f, 1f)
             phase += frameDeltaSeconds() * (.12f + drive * .9f)
-            val cx = width / 2f
-            val cy = height / 2f
-            val radiusUnit = min(width, height) / 220f
             particlePaths.forEach(Path::rewind)
             for (i in 0 until 320) {
-                val angle = i * 2.399963f + phase
+                val seed = particleSeeds[i]
                 val band = sqrt(delayedSpectrum[i % delayedSpectrum.size].toFloat())
-                val baseRadius = (12 + i % 100) * radiusUnit
-                // 半径随频带能量扩张，叠加整体响度驱动；静默时收缩到内核。
-                val radius = baseRadius * (.35f + drive * .45f + band * (0.6f + drive * 1.3f))
-                val x = cx + cos(angle) * radius
-                val jump = sin(phase * (2.2f + i % 5 * .12f) + i * .71f) * radiusUnit * (1f + band * (8f + drive * 36f))
-                val y = cy + sin(angle) * radius * .65f + jump
+                // 独立全屏坐标，音频只驱动局部跳动，不收缩为中心星云。
+                val x = (seed[0] * width + sin(phase * (1.1f + seed[2]) + i) * width * .045f * (band + drive))
+                    .coerceIn(0f, width.toFloat())
+                val y = (seed[1] * height + cos(phase * (1.3f + seed[3]) + i) * height * .09f * (band + drive))
+                    .coerceIn(0f, height.toFloat())
                 val group = i % particlePaths.size
-                val size = dp(.2f + band * (1f + drive * 2.5f))
+                val size = dp(2.0f + band * (4.0f + drive * 6.0f))
                 particlePaths[group].addCircle(x, y, size, Path.Direction.CW)
             }
             particlePaths.indices.forEach { group ->
                 paint.color = Color.HSVToColor(floatArrayOf((group * 70f + phase * 25f) % 360, .72f, .95f))
-                paint.alpha = (60 + (drive * 195).toInt()).coerceIn(60, 255)
+                paint.alpha = (25 + (drive * 230).toInt()).coerceIn(25, 255)
                 paint.style = Paint.Style.FILL
                 c.drawPath(particlePaths[group], paint)
             }
@@ -540,22 +547,25 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             val cy = height * .46f
             travelPaths.forEach(Path::rewind)
             travelFireworkPaths.forEach(Path::rewind)
-            for (i in 0 until 180) {
+            val activeIndices = HashSet<Int>(180)
+            for (i in 0 until 80) {
+                activeIndices += i
                 val progress = (i * .6180339f + phase * .24f) % 1f
                 val z = progress
                 val depth = .04f + z * z * .96f
                 val energy = delayedSpectrum[i % delayedSpectrum.size].toFloat()
+                // 保留原始透视穿梭射线：小球从远处迎面飞来，不做环形旋转。
                 val rayX = sin(i * 12.37f) * width * .58f
                 val rayY = cos(i * 8.73f) * height * .55f
                 val x = cx + rayX * depth
                 val y = cy + rayY * depth
                 // 频带能量越大尾迹越长、粒子越大，直接反映音频起伏。
                 // 更短的彗尾：随能量伸长，但始终比旧版收窄。
-                val tailStretch = .008f + depth * (.025f + energy * .10f + drive * .04f)
+                val tailStretch = .012f + depth * (.035f + energy * .12f + drive * .05f)
                 val tailDepth = (depth - tailStretch).coerceAtLeast(.015f)
                 val tailX = cx + rayX * tailDepth
                 val tailY = cy + rayY * tailDepth
-                val size = dp(.2f + depth * (.45f + energy * (1.0f + drive * 1.8f)))
+                val size = dp(.65f + depth * (1.1f + energy * (1.8f + drive * 2.2f)))
                 val dx = x - tailX
                 val dy = y - tailY
                 val length = max(dp(.01f), sqrt(dx * dx + dy * dy))
@@ -584,22 +594,31 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     tail.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
                 }
                 tail.close()
-                travelPaths[group].addPath(tail)
                 if (progress <= .88f) travelPaths[group].addPath(tail)
-                // 生命周期最后 12% 将穿梭小球展开为短暂烟花，避免接近边缘时突然消失。
-                if (progress > .88f) {
-                    val burst = (progress - .88f) / .12f
-                    val fireworkRadius = size * (1.5f + burst * 5f)
-                    for (ray in 0 until 8) {
-                        val angle = ray * PI.toFloat() / 4f + i * .37f
-                        val dx = cos(angle)
-                        val dy = sin(angle)
-                        val inner = fireworkRadius * (.25f + burst * .25f)
-                        travelFireworkPaths[group].moveTo(x + dx * inner, y + dy * inner)
-                        travelFireworkPaths[group].lineTo(x + dx * fireworkRadius, y + dy * fireworkRadius)
-                    }
-                } else {
+                if (progress < .94f) {
+                    travelBursts.remove(i)
                     drawSphere(c, x, y, size, group, drive)
+                } else {
+                    // 仅本颗小球寿命的最后阶段允许出现一次烟花，锚点取它的实际位置。
+                    travelBursts.getOrPut(i) { TravelBurst(x, y, size, SystemClock.uptimeMillis()) }
+                }
+            }
+            val nowMs = SystemClock.uptimeMillis()
+            travelBursts.entries.removeAll { it.value.startedAt + 650L <= nowMs || it.key !in activeIndices }
+            travelBursts.forEach { (index, burst) ->
+                val group = index % 4
+                val progress = (nowMs - burst.startedAt) / 650f
+                for (ray in 0 until 8) {
+                    val angle = ray * PI.toFloat() / 4f + index * .37f
+                    val dx = cos(angle); val dy = sin(angle)
+                    val length = burst.radius * (2f + ((index + ray * 7) % 9) * .45f) * (.4f + progress)
+                    val inner = burst.radius * .8f
+                    val startX = burst.x + dx * inner; val startY = burst.y + dy * inner
+                    val endX = burst.x + dx * length; val endY = burst.y + dy * length
+                    val bend = sin(index * 1.7f + ray) * burst.radius * progress
+                    travelFireworkPaths[group].moveTo(startX, startY)
+                    travelFireworkPaths[group].quadTo((startX + endX) / 2 - dy * bend,
+                        (startY + endY) / 2 + dx * bend, endX, endY)
                 }
             }
             travelPaths.indices.forEach { group ->

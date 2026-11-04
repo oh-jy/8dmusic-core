@@ -17,6 +17,7 @@ import com.j5i.spatial8d.PcmWavRecorder
 import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.SpaceEngine
 import j5i.spatial8d.core.SpacePreset
+import j5i.spatial8d.visual.PerfTrace
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.exp
@@ -28,7 +29,7 @@ import kotlin.math.roundToInt
  * 电台复用本地播放器的 JNI 空间渲染器，但不保留整轨 PCM。
  * HTTP/ICY -> MediaExtractor/MediaCodec -> 8D -> AudioTrack；直播没有 seek 和导出。
  */
-class RadioPlayer {
+class RadioPlayer(private val probe: Boolean = false) {
     var preset: SpacePreset = DEFAULT_SPACE_PRESET
         set(value) {
             if (field == value) return
@@ -86,7 +87,38 @@ class RadioPlayer {
         running = true
         paused = false
         playedFrames = 0
-        Thread({ run(url, own) }, "spatial-radio").start()
+        if (probe) {
+            Thread({ probeSession(url, own) }, "spatial-radio-probe").start()
+        } else {
+            Thread({ run(url, own) }, "spatial-radio").start()
+        }
+    }
+
+    /** Probe 只验证 HTTP 连通性和首个 TS 分片可读，不跑 MediaExtractor/MediaCodec。 */
+    private fun probeSession(url: String, own: Int) {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_LESS_FAVORABLE)
+        val tag = "8DRadio"
+        val stream = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
+            com.j5i.spatial8d.HlsMediaDataSource(url) else HttpMediaDataSource(url)
+        source = stream
+        try {
+            val start = android.os.SystemClock.elapsedRealtime()
+            val buf = ByteArray(1024)
+            if (stream.readAt(0, buf, 0, buf.size) <= 0) error("probe: 首片无数据")
+            android.util.Log.i(tag, "probe ready +${android.os.SystemClock.elapsedRealtime() - start}ms")
+            if (own == generation && running) {
+                main.post { if (own == generation) onReady?.invoke() }
+            }
+        } catch (e: Exception) {
+            android.util.Log.i(tag, "probe failed: ${e.message}")
+            if (own == generation && running) {
+                main.post { if (own == generation) onError?.invoke("连接失败：${e.message}") }
+            }
+        } finally {
+            try { stream.close() } catch (_: Exception) {}
+            if (own == generation) running = false
+            if (source === stream) source = null
+        }
     }
     @Volatile var denoise = 65
         set(value) { field = value.coerceIn(0, 100) }
@@ -169,14 +201,18 @@ class RadioPlayer {
     }
 
     private fun session(url: String, own: Int): Boolean {
+        val sessionStarted = android.os.SystemClock.elapsedRealtime()
+        android.util.Log.i("8DRadio", "session start")
         val stream = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
             TsAdtsMediaDataSource(url) else HttpMediaDataSource(url)
+        if (stream is TsAdtsMediaDataSource) return aacSession(stream, own, sessionStarted)
         source = stream
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var ready = false
         try {
             extractor.setDataSource(stream)
+            android.util.Log.i("8DRadio", "extractor ready +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms")
             // MediaExtractor 探测直播时没有可靠的系统超时，到期关闭数据源打断建链。
             main.postDelayed({
                 if (!ready && own == generation && running && source === stream) stream.close()
@@ -192,8 +228,8 @@ class RadioPlayer {
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
+            android.util.Log.i("8DRadio", "codec ready +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms")
             buildTrack(own)
-            ready = true
             val info = MediaCodec.BufferInfo()
             var floating = false
             var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
@@ -218,6 +254,14 @@ class RadioPlayer {
                     channels = changed.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                     floating = changed.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
                         changed.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                    val outputRate = changed.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    android.util.Log.i("8DRadio", "output format rate=$outputRate trackRate=$sampleRate channels=$channels raw=${preset.raw}")
+                    if (outputRate != sampleRate) {
+                        sampleRate = outputRate
+                        resetRenderer()
+                        resetNoiseReducer()
+                        buildTrack(own)
+                    }
                 } else if (output >= 0) {
                     val buffer = codec.getOutputBuffer(output)
                     if (buffer != null && info.size > 0) {
@@ -227,6 +271,7 @@ class RadioPlayer {
                         buffer.get(bytes)
                         renderAndWrite(bytes, channels, floating, own)
                         if (!notifiedReady && playedFrames > 0 && own == generation) {
+                            android.util.Log.i("8DRadio", "first pcm +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms rate=$sampleRate channels=$channels")
                             notifiedReady = true
                             ready = true
                             main.post { if (own == generation) onReady?.invoke() }
@@ -247,6 +292,74 @@ class RadioPlayer {
         }
     }
 
+    private fun aacSession(stream: TsAdtsMediaDataSource, own: Int, sessionStarted: Long): Boolean {
+        source = stream
+        var codec: MediaCodec? = null
+        var ready = false
+        try {
+            val first = stream.nextFrame() ?: error("直播流没有 AAC 帧")
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
+                stream.sampleRate, stream.channels.coerceAtLeast(1))
+            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            codec.configure(format, null, null, 0)
+            codec.start()
+            android.util.Log.i("8DRadio", "aac codec ready +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms rate=${stream.sampleRate}")
+            sampleRate = stream.sampleRate
+            buildTrack(own)
+            var notifiedReady = false
+            var channels = stream.channels.coerceAtLeast(1)
+            var floating = false
+            var pending: ByteArray? = first
+            val info = MediaCodec.BufferInfo()
+            while (own == generation && running) {
+                val input = codec.dequeueInputBuffer(10_000)
+                if (input >= 0 && pending != null) {
+                    val buffer = codec.getInputBuffer(input)!!
+                    val frame = pending!!
+                    buffer.put(frame)
+                    codec.queueInputBuffer(input, 0, frame.size, 0, 0)
+                    pending = null
+                }
+                val output = codec.dequeueOutputBuffer(info, 10_000)
+                if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val changed = codec.outputFormat
+                    channels = changed.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    val outputRate = changed.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                    floating = changed.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
+                        changed.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                    if (outputRate != sampleRate) {
+                        sampleRate = outputRate
+                        resetRenderer()
+                        resetNoiseReducer()
+                        buildTrack(own)
+                    }
+                } else if (output >= 0) {
+                    val buffer = codec.getOutputBuffer(output)
+                    if (buffer != null && info.size > 0) {
+                        buffer.position(info.offset); buffer.limit(info.offset + info.size)
+                        buffer.order(ByteOrder.LITTLE_ENDIAN)
+                        val bytes = ByteArray(info.size)
+                        buffer.get(bytes)
+                        renderAndWrite(bytes, channels, floating, own)
+                        if (!notifiedReady && playedFrames > 0 && own == generation) {
+                            android.util.Log.i("8DRadio", "first pcm +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms rate=$sampleRate")
+                            main.post { if (own == generation) onReady?.invoke() }
+                            notifiedReady = true
+                        }
+                    }
+                    codec.releaseOutputBuffer(output, false)
+                }
+                if (pending == null) pending = stream.nextFrame() ?: break
+            }
+            return true
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            if (source === stream) source = null
+            stream.close()
+        }
+    }
+
     private fun renderAndWrite(pcm: ByteArray, channels: Int, floating: Boolean, own: Int) {
         val bpf = channels * if (floating) 4 else 2
         var offset = 0
@@ -256,6 +369,7 @@ class RadioPlayer {
             val frames = minOf(CHUNK, (pcm.size - offset) / bpf)
             val chunk = if (offset == 0 && frames * bpf == pcm.size) pcm else pcm.copyOfRange(offset, offset + frames * bpf)
             val output = synchronized(rendererLock) { renderChunk(chunk, bpf, channels, floating, frames) }
+            if (playedFrames == 0L) android.util.Log.i("8DRadio", "dsp first chunk frames=$frames")
             val audio = track ?: return
             var written = 0
             while (written < output.size && own == generation && running && !paused) {
@@ -268,7 +382,8 @@ class RadioPlayer {
                 written += n
             }
             if (own != generation || !running || paused) return
-            onPcm?.invoke(output, output.size)
+            PerfTrace.interval("radio.pcmGap")
+            PerfTrace.timed("radio.onPcmNs") { onPcm?.invoke(output, output.size) }
             recorder?.write(output, 0, output.size)
             playedFrames += frames
             if (shouldStartTrack(trackStarted, playedFrames)) {
@@ -388,6 +503,7 @@ class RadioPlayer {
         try {
             track.playbackParams = PlaybackParams().setSpeed(1.0f)
                 .setPitch(2.0.pow(semi / 12.0).toFloat())
+            android.util.Log.i("8DRadio", "params speed=${track.playbackParams.speed} pitch=${track.playbackParams.pitch} semi=$semi")
         } catch (e: Exception) {
             main.post { onError?.invoke("电台变声设置失败：${e.message}") }
         }
