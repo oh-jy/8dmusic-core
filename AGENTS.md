@@ -2,7 +2,7 @@
 
 ## 发布版本
 
-- `versionCode` 在发布构建时按本机时间 `yyMMddHHmm` 生成，例如 `2611021006`，不得手工固定旧时间戳。Android 只接受 32 位整数，因此实际入包值为该时间戳按位保留低 31 位（仍随时间递增），不得直接 `toInt()` 溢出。
+- `versionCode` 在发布构建时按本机时间 `yyMMddHH` 加当小时发布序号生成，例如 `261104101`，同小时依次累计 1、2、3；序号保存在本机 `build/signing/version-code.properties`，九位数始终在 Android 32 位整数范围内。
 - 每一轮并行修复完成后将 `versionName` 的 patch 加 1；patch 满 10 时进位到 minor，并将 patch 归零，例如 `1.0.9 -> 1.1.0`。
 
 ## 排查证据

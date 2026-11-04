@@ -2459,6 +2459,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             addView(ThemeUi.text(this@MainActivity, t("info.app"), 16f, palette, bold = true).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
+            val version = packageManager.getPackageInfo(packageName, 0)
+            addView(ThemeUi.text(this@MainActivity, "${t("app.name")}  v${version.versionName}  ·  Version Code ${version.longVersionCode}",
+                12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 4f))
+            })
             addView(ThemeUi.divider(this@MainActivity, palette, 2f))
             listOf(
                 t("info.quick") to t("info.quick.body"),

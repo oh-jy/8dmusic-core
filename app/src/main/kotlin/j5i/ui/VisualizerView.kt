@@ -6,7 +6,9 @@ import android.graphics.Color
 import android.graphics.Bitmap
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.SystemClock
 import android.util.Log
 import android.view.Gravity
@@ -235,10 +237,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var spectrogramLastNs = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
-        private val travelHeads = Array(4) { Path() }
-        // PCM 到达比实际听感提前约 80ms；按绘制时间消费延迟样本，避免缓冲越积越多。
-        private val visualQueue = ArrayDeque<ByteArray>()
-        private var delayedSamplesRead = false
+        private val travelFireworkPaths = Array(4) { Path() }
+        private val sphereBounds = RectF()
+        // PCM 写出比实际听感提前约 80ms；每帧只消费已到时间的样本，不能反复读取队首。
+        private val visualQueue = ArrayDeque<Pair<Long, ByteArray>>()
         private val delayedSpectrum = DoubleArray(256)
         private var delayedRms = 0f
         private var delayedPeak = 0f
@@ -252,24 +254,20 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         fun accept(data: ByteArray, bytes: Int) {
             synchronized(analysisLock) {
-                val chunk = data.copyOf(bytes)
-                visualQueue.addLast(chunk)
+                visualQueue.addLast(System.nanoTime() + VISUAL_DELAY_NS to data.copyOf(bytes))
                 val targetFrames = 44100 * 80 / 1000
                 while (visualQueue.size > 1 &&
-                    visualQueue.sumOf { it.size / 4 } - visualQueue.first().size / 4 > targetFrames) {
+                    visualQueue.sumOf { it.second.size / 4 } > targetFrames * 2) {
                     visualQueue.removeFirst()
-                    delayedSamplesRead = false
                 }
-                consumeDelayedSamples()
                 analyzeImmediate(data, bytes)
             }
         }
 
         private fun consumeDelayedSamples() {
-            // 80ms 窗口里的首个完整 PCM 包直接用于粒子与穿梭；即时图表仍走原数据。
-            if (!delayedSamplesRead) visualQueue.firstOrNull()?.let {
-                analyzeDelayed(it)
-                delayedSamplesRead = true
+            val now = System.nanoTime()
+            while (visualQueue.firstOrNull()?.first?.let { it <= now } == true) {
+                visualQueue.removeFirst().second.let(::analyzeDelayed)
             }
         }
 
@@ -541,7 +539,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             val cx = width / 2f
             val cy = height * .46f
             travelPaths.forEach(Path::rewind)
-            travelHeads.forEach(Path::rewind)
+            travelFireworkPaths.forEach(Path::rewind)
             for (i in 0 until 180) {
                 val progress = (i * .6180339f + phase * .24f) % 1f
                 val z = progress
@@ -553,11 +551,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val y = cy + rayY * depth
                 // 频带能量越大尾迹越长、粒子越大，直接反映音频起伏。
                 // 更短的彗尾：随能量伸长，但始终比旧版收窄。
-                val tailStretch = .015f + depth * (.045f + energy * .28f + drive * .10f)
+                val tailStretch = .008f + depth * (.025f + energy * .10f + drive * .04f)
                 val tailDepth = (depth - tailStretch).coerceAtLeast(.015f)
                 val tailX = cx + rayX * tailDepth
                 val tailY = cy + rayY * tailDepth
-                val size = dp(.2f + depth * (.5f + energy * (1.5f + drive * 4f)))
+                val size = dp(.2f + depth * (.45f + energy * (1.0f + drive * 1.8f)))
                 val dx = x - tailX
                 val dy = y - tailY
                 val length = max(dp(.01f), sqrt(dx * dx + dy * dy))
@@ -587,7 +585,22 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 }
                 tail.close()
                 travelPaths[group].addPath(tail)
-                travelHeads[group].addCircle(x, y, size, Path.Direction.CW)
+                if (progress <= .88f) travelPaths[group].addPath(tail)
+                // 生命周期最后 12% 将穿梭小球展开为短暂烟花，避免接近边缘时突然消失。
+                if (progress > .88f) {
+                    val burst = (progress - .88f) / .12f
+                    val fireworkRadius = size * (1.5f + burst * 5f)
+                    for (ray in 0 until 8) {
+                        val angle = ray * PI.toFloat() / 4f + i * .37f
+                        val dx = cos(angle)
+                        val dy = sin(angle)
+                        val inner = fireworkRadius * (.25f + burst * .25f)
+                        travelFireworkPaths[group].moveTo(x + dx * inner, y + dy * inner)
+                        travelFireworkPaths[group].lineTo(x + dx * fireworkRadius, y + dy * fireworkRadius)
+                    }
+                } else {
+                    drawSphere(c, x, y, size, group, drive)
+                }
             }
             travelPaths.indices.forEach { group ->
                 // 在原有蓝绿黄基础上补充橙、淡紫、淡红和淡青，保持柔和不发白。
@@ -595,16 +608,45 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     27f to .68f, 270f to .38f, 350f to .42f, 178f to .48f)
                 val colorIndex = (group + (phase * .35f).toInt() % colors.size + colors.size) % colors.size
                 val (hue, saturation) = colors[colorIndex]
-                paint.color = Color.HSVToColor(floatArrayOf(hue, saturation, .95f))
                 paint.alpha = (10 + group * 8 + (drive * 40).toInt()).coerceIn(0, 255)
+                paint.color = Color.HSVToColor(floatArrayOf(hue, saturation, .95f))
                 c.drawPath(travelPaths[group], paint)
-                paint.alpha = (60 + group * 25 + (drive * 150).toInt()).coerceIn(0, 255)
-                c.drawPath(travelHeads[group], paint)
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = dp(.7f)
+                paint.strokeCap = Paint.Cap.ROUND
+                paint.alpha = (65 + drive * 140f).toInt().coerceIn(0, 255)
+                c.drawPath(travelFireworkPaths[group], paint)
             }
+            paint.strokeCap = Paint.Cap.BUTT
+            paint.style = Paint.Style.FILL
+            paint.shader = null
             paint.alpha = 255
         }
 
+        private fun drawSphere(c: Canvas, x: Float, y: Float, radius: Float, group: Int, drive: Float) {
+            if (radius < dp(.25f)) return
+            val hue = (205f + group * 35f + phase * 10f) % 360f
+            val color = Color.HSVToColor(floatArrayOf(hue, .48f, .98f))
+            // 左上方高光、右下方暗部形成球面明暗，不使用资源贴图或逐帧对象集合。
+            paint.shader = RadialGradient(x - radius * .35f, y - radius * .4f, radius * 1.45f,
+                intArrayOf(Color.WHITE, color, Color.rgb(24, 43, 68)), floatArrayOf(0f, .35f, 1f), Shader.TileMode.CLAMP)
+            paint.alpha = (65 + group * 25 + drive * 145f).toInt().coerceIn(0, 255)
+            paint.style = Paint.Style.FILL
+            sphereBounds.set(x - radius, y - radius, x + radius, y + radius)
+            c.drawOval(sphereBounds, paint)
+            paint.shader = null
+            if (radius > dp(1f)) {
+                paint.color = Color.WHITE
+                paint.alpha = (90 + drive * 100f).toInt().coerceIn(0, 255)
+                c.drawCircle(x - radius * .33f, y - radius * .36f, radius * .14f, paint)
+            }
+        }
+
         private fun dp(value: Float) = value * resources.displayMetrics.density
+
+        private companion object {
+            const val VISUAL_DELAY_NS = 80_000_000L
+        }
     }
 
     /** 所有独占模式共用的歌词顶层，独立背景确保粒子、图谱与彗尾不会遮住文字。 */

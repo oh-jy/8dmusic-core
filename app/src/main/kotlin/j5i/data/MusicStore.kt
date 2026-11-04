@@ -77,6 +77,10 @@ class MusicStore(private val context: Context) {
      * 按歌曲 id 缓存到应用私有目录，解码器后续只读这份稳定副本，绝不改源文件。
      */
     fun readableUri(item: MusicItem): Uri {
+        val cached = File(context.filesDir, "picked").listFiles()?.firstOrNull {
+            it.name.startsWith("music_${item.id}.") && it.length() > 1024
+        }
+        if (cached != null) return Uri.fromFile(cached)
         // MediaStore 本地音频可被 MediaExtractor 直接随机读取，切歌不再复制整首文件。
         // 手动 SAF 文件仍使用私有副本，保证授权 Uri 重复打开时的稳定性。
         if (item.uri.startsWith("content://media/")) return Uri.parse(item.uri)
@@ -100,9 +104,17 @@ class MusicStore(private val context: Context) {
     /** 仅修改可写歌曲的标签；保持源 URI 与播放队列不变，并同步应用内索引。 */
     fun updateMetadata(item: MusicItem, title: String, artist: String, album: String): MusicItem {
         require(title.isNotBlank()) { "歌名不能为空" }
-        val uri = readableUri(item)
-        val path = uri.path ?: error("当前文件不可写")
         val extension = item.name.substringAfterLast('.', "").lowercase()
+        // content Uri 的 path 是媒体库逻辑路径，不能交给 RandomAccessFile。
+        // 标签写入应用私有副本，源文件无需 SAF/MediaStore 写权限。
+        val target = File(File(context.filesDir, "picked").apply { mkdirs() }, "music_${item.id}.$extension")
+        if (!target.exists() || target.length() <= 1024) {
+            context.contentResolver.openInputStream(Uri.parse(item.uri)).use { input ->
+                requireNotNull(input) { "打不开音频流" }
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        val path = target.absolutePath
         when (extension) {
             "mp3" -> writeId3(path, title.trim(), artist.trim(), album.trim())
             "flac" -> writeFlac(path, title.trim(), artist.trim(), album.trim())

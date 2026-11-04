@@ -141,5 +141,11 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         val index = modes.indexOf(current).coerceAtLeast(0)
         return modes[(index + if (forward) 1 else -1).mod(modes.size)]
     }
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) downX = event.x
+        return event.actionMasked == MotionEvent.ACTION_MOVE && abs(event.x - downX) > dp(24)
+    }
+
     private fun dp(value: Int) = ThemeUi.dp(context, value.toFloat())
 }

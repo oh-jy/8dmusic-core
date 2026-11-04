@@ -190,8 +190,8 @@ class LyricsView(context: Context) : ScrollView(context) {
 
     private fun updatePadding() {
         val compact = rows.isEmpty()
-        // 自动跟随时，第一行是已播放、第二行是当前行，而不是把当前行居中。
-        topPadding = if (compact) dp(8f) else rows.first().height + dp(6f)
+        // 首行需要占据第一行；后续滚动由 scrollToLine 给当前行保留上一行。
+        topPadding = if (compact) dp(8f) else 0
         bottomPadding = if (compact) dp(8f) else (height - rows.last().height * 2 - dp(12f)).coerceAtLeast(dp(24f))
         content.setPadding(0, topPadding, 0, bottomPadding)
     }
@@ -199,7 +199,8 @@ class LyricsView(context: Context) : ScrollView(context) {
     private fun scrollToLine(index: Int, animated: Boolean = true) {
         val target = if (index < 0) 0 else rows.getOrNull(index)?.let {
             val previous = rows.getOrNull(index - 1)
-            (it.top + topPadding - (previous?.height ?: it.height) - dp(6f)).coerceAtLeast(0)
+            // it.top 已包含 content 的顶部 padding，不能再次叠加。
+            (it.top - (previous?.height ?: it.height)).coerceAtLeast(0)
         } ?: 0
         if (abs(scrollY - target) < 2) return
         if (animated) smoothScrollTo(0, target) else scrollTo(0, target)

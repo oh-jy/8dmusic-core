@@ -11,7 +11,7 @@ import java.util.Arrays;
 public final class TsAdtsMediaDataSource extends MediaDataSource {
     private static final int PACKET = 188;
     private static final int BUFFER = 4 * 1024 * 1024;
-    private static final int SNIFF_BUFFER = 128 * 1024;
+    private static final int SNIFF_BUFFER = 16 * 1024;
 
     private final HlsMediaDataSource hls;
     private final ArrayDeque<byte[]> frames = new ArrayDeque<>();
@@ -29,6 +29,7 @@ public final class TsAdtsMediaDataSource extends MediaDataSource {
     private int streamType;
     private boolean closed;
     private boolean sniffing = true;
+    private boolean rawAdts;
 
     public TsAdtsMediaDataSource(String url) {
         hls = new HlsMediaDataSource(url);
@@ -64,6 +65,15 @@ public final class TsAdtsMediaDataSource extends MediaDataSource {
 
     private boolean readFrame() throws IOException {
         while (!closed) {
+            if (rawAdts) {
+                int n = hls.readAt(inputPosition, packet, 0, PACKET);
+                if (n < 0) return false;
+                if (n == 0) continue;
+                inputPosition += n;
+                out.write(packet, 0, n);
+                compact();
+                return true;
+            }
             if (!frames.isEmpty()) {
                 byte[] frame = frames.removeFirst();
                 if (streamType == 0x0f) {
@@ -83,6 +93,11 @@ public final class TsAdtsMediaDataSource extends MediaDataSource {
     private boolean readPacket() throws IOException {
         int got = readFully(packet, 0, PACKET);
         if (got < PACKET) return false;
+        if (isAdts(packet, got)) {
+            rawAdts = true;
+            out.write(packet, 0, got);
+            return true;
+        }
         if ((packet[0] & 0xff) != 0x47) return true;
         boolean start = (packet[1] & 0x40) != 0;
         int pid = ((packet[1] & 0x1f) << 8) | (packet[2] & 0xff);
@@ -194,5 +209,9 @@ public final class TsAdtsMediaDataSource extends MediaDataSource {
         return ((long) (p[i] >> 1 & 7) << 30) | ((long) (p[i + 1] & 0xff) << 22)
                 | ((long) (p[i + 2] >> 1 & 0x7f) << 15) | ((long) (p[i + 3] & 0xff) << 7)
                 | (p[i + 4] >> 1 & 0x7f);
+    }
+
+    public static boolean isAdts(byte[] data, int length) {
+        return length >= 2 && (data[0] & 0xff) == 0xff && (data[1] & 0xf6) == 0xf0;
     }
 }

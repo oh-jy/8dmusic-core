@@ -50,6 +50,7 @@ class PlaylistDialog(
     private lateinit var status: TextView
     private lateinit var sortRow: LinearLayout
     private lateinit var search: EditText
+    private lateinit var saveButton: View
     private var songs = emptyList<MusicItem>()
     private var dragging = -1
     private var dragTarget = -1
@@ -134,7 +135,8 @@ class PlaylistDialog(
                 addView(tabs)
                 layoutParams = LinearLayout.LayoutParams(0, dp(40), 1f)
             })
-            addView(button(if (saveOpen) t("playlist.collapse") else t("playlist.save")) { toggleSave() })
+            saveButton = button(t("playlist.save")) { toggleSave() }
+            addView(saveButton)
         })
         search = ThemeUi.input(c, p, t("playlist.filter")).apply {
             setText(store.query)
@@ -203,6 +205,7 @@ class PlaylistDialog(
     private fun refresh() {
         if (!::list.isInitialized) return
         songs = store.view(source)
+        saveButton.visibility = if (store.query.isNotBlank() && songs.isNotEmpty()) View.VISIBLE else View.GONE
         count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
         tabs.removeAllViews()
         tabs.addView(chip(t("playlist.all"), store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })

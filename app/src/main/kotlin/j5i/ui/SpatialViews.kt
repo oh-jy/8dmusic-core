@@ -123,6 +123,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     private var energyBaseline = 0.025
     private var energyPeak = 0.05
     private var lastStarMoveAt = 0L
+    private var lastPcmAt = 0L
     private val meteors = mutableListOf<Meteor>()
     private var nextMeteorAt = 0L
     private var lastMeteorAt = 0L
@@ -138,9 +139,15 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
             count++
         }
         energy = if (count > 0) sqrt(sum / count) else 0.0
-        smoothEnergy = smoothEnergy * 0.82 + energy * 0.18
-        energyBaseline = energyBaseline * 0.985 + energy * 0.015
-        energyPeak = maxOf(energyPeak * 0.995, energy)
+        val now = SystemClock.uptimeMillis()
+        val dt = if (lastPcmAt == 0L) 0.08 else
+            ((now - lastPcmAt).coerceAtMost(250L) / 1000.0)
+        lastPcmAt = now
+        // 快攻慢放，峰值按实际时间衰减，避免高潮后的旧阈值压住后续响度。
+        smoothEnergy = if (energy > smoothEnergy) energy * 0.7 + smoothEnergy * 0.3
+        else smoothEnergy * kotlin.math.exp(-dt / 0.18) + energy * (1.0 - kotlin.math.exp(-dt / 0.18))
+        energyBaseline += (energy - energyBaseline) * (1.0 - kotlin.math.exp(-dt / 5.0))
+        energyPeak = maxOf(energyPeak * kotlin.math.exp(-dt / 0.8), energy)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -224,8 +231,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
                 (star[2] * (1f + intensity * 0.5f)).toFloat(), paint)
         }
         val meteorLimit = if (intensity > 0.82) 2 else 1
-        if (playing && meteors.size < meteorLimit &&
-            (nowMs >= nextMeteorAt || intensity > 0.88 && nowMs - lastMeteorAt > 2_500L)) {
+        val beatMeteor = intensity > 0.82 && nowMs - lastMeteorAt > 900L
+        if (playing && meteors.size < meteorLimit && (nowMs >= nextMeteorAt || beatMeteor)) {
             val startX = random.nextFloat() * w * 0.78f
             val startY = random.nextFloat() * h * 0.64f
             val angle = random.nextDouble(0.0, Math.PI * 2)

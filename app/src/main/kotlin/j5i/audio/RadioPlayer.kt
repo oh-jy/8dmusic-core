@@ -44,6 +44,7 @@ class RadioPlayer {
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onReconnecting: ((String) -> Unit)? = null
+    var onPcm: ((ByteArray, Int) -> Unit)? = null
     val isPlaying get() = running && !paused
     val position get() = playedFrames.toDouble() / sampleRate
     private val main = Handler(Looper.getMainLooper())
@@ -54,6 +55,7 @@ class RadioPlayer {
     @Volatile private var playedFrames = 0L
     private var source: android.media.MediaDataSource? = null
     private var track: AudioTrack? = null
+    @Volatile private var trackStarted = false
     // 解码线程写轨道时，UI 线程不能同时 pause/release；代际标记只负责废弃旧任务。
     private val trackLock = Any()
     private var renderer = 0L
@@ -94,6 +96,7 @@ class RadioPlayer {
         try {
             synchronized(trackLock) {
                 track?.play()
+                if (track != null) trackStarted = true
                 track?.let(::applyPitch)
             }
         } catch (_: Exception) { return false }
@@ -132,7 +135,7 @@ class RadioPlayer {
     }
 
     private fun run(url: String, own: Int) {
-        Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+        Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         var failures = 0
         while (own == generation && running) {
             var producedAudio = false
@@ -177,7 +180,7 @@ class RadioPlayer {
             // MediaExtractor 探测直播时没有可靠的系统超时，到期关闭数据源打断建链。
             main.postDelayed({
                 if (!ready && own == generation && running && source === stream) stream.close()
-            }, if (url.contains(".m3u8")) 20_000 else 8_000)
+            }, if (url.contains(".m3u8")) 5_000 else 3_000)
             val index = (0 until extractor.trackCount).firstOrNull {
                 extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
             } ?: error("流里没有音频轨")
@@ -191,12 +194,12 @@ class RadioPlayer {
             codec.start()
             buildTrack(own)
             ready = true
-            main.post { if (own == generation) onReady?.invoke() }
             val info = MediaCodec.BufferInfo()
             var floating = false
             var channels = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT))
                 format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
             var eos = false
+            var notifiedReady = false
             while (own == generation && running && !eos) {
                 if (paused) { Thread.sleep(15); continue }
                 val input = codec.dequeueInputBuffer(10_000)
@@ -223,7 +226,11 @@ class RadioPlayer {
                         val bytes = ByteArray(info.size)
                         buffer.get(bytes)
                         renderAndWrite(bytes, channels, floating, own)
-                        ready = true
+                        if (!notifiedReady && playedFrames > 0 && own == generation) {
+                            notifiedReady = true
+                            ready = true
+                            main.post { if (own == generation) onReady?.invoke() }
+                        }
                     }
                     codec.releaseOutputBuffer(output, false)
                     eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
@@ -261,8 +268,15 @@ class RadioPlayer {
                 written += n
             }
             if (own != generation || !running || paused) return
+            onPcm?.invoke(output, output.size)
             recorder?.write(output, 0, output.size)
             playedFrames += frames
+            if (shouldStartTrack(trackStarted, playedFrames)) {
+                synchronized(trackLock) {
+                    if (own == generation && track === audio && running && !paused) audio.play()
+                }
+                trackStarted = true
+            }
             offset += frames * bpf
         }
     }
@@ -360,10 +374,10 @@ class RadioPlayer {
                 .setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setBufferSizeInBytes(maxOf(min * 2, CHUNK * 16)).setTransferMode(AudioTrack.MODE_STREAM).build().also {
+            .setBufferSizeInBytes(maxOf(min, CHUNK * 8)).setTransferMode(AudioTrack.MODE_STREAM).build().also {
                     check(it.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
                     if (running && !paused && own == generation) {
-                        it.play()
+                        trackStarted = false
                         applyPitch(it)
                     }
                 }
@@ -384,7 +398,12 @@ class RadioPlayer {
         track = null
         try { old.pause(); old.flush(); old.stop() } catch (_: Exception) {}
         old.release()
+        trackStarted = false
     }
 
-    private companion object { const val CHUNK = 4096 }
+    internal companion object {
+        const val CHUNK = 4096
+        /** 播放首包而不是预填满 AudioTrack，避免解码完成后仍等待约一秒才出声。 */
+        internal fun shouldStartTrack(started: Boolean, writtenFrames: Long) = !started && writtenFrames > 0
+    }
 }

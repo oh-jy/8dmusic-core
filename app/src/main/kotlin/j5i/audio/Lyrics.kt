@@ -718,6 +718,8 @@ class Lyrics(context: Context) {
         /** 常见文件名为“歌手 - 歌名”；只调整展示和检索，不修改原始文件名。 */
         fun searchTitle(fileName: String, artist: String): String {
             val name = displayTitle(fileName)
+            // 在线曲库使用“歌名 · 歌手”，先拆分避免只剩歌手参与检索。
+            name.substringBefore(" · ").takeIf { artist.isNotBlank() && name.endsWith(" · $artist") }?.let { return it.trim() }
             // 歌手元数据常缺失，但本地文件普遍按“歌手 - 歌名”命名，不能把整段当作歌名。
             val withoutArtist = if (artist.isNotBlank() && name.startsWith(artist, ignoreCase = true))
                 name.substring(artist.length).trimStart('-', '–', '—', '·', ' ') else name

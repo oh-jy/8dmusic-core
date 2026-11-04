@@ -8,13 +8,25 @@ import j5i.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
 import j5i.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
 import j5i.spatial8d.audio.SpatialPlayer.Companion.endDrainTimedOut
 import j5i.spatial8d.audio.SpatialPlayer.Companion.reverseSourceStart
+import j5i.spatial8d.audio.RadioPlayer.Companion.shouldStartTrack
 import j5i.spatial8d.audio.PlaybackQueue
+import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.data.MusicItem
 import j5i.spatial8d.data.PlayMode
+import com.j5i.spatial8d.TsAdtsMediaDataSource
 import kotlin.test.Test
 
 /** 不启动 Android 设备的纯逻辑回归。 */
 class MainActivityLogicCheck {
+    @Test fun hlsRawAacIsNotDiscardedAsTs() {
+        check(TsAdtsMediaDataSource.isAdts(byteArrayOf(0xff.toByte(), 0xf1.toByte()), 2))
+        check(!TsAdtsMediaDataSource.isAdts(byteArrayOf(0x47, 0x40), 2))
+    }
+
+    @Test fun onlineTrackTitleDoesNotBecomeArtistName() {
+        check(Lyrics.searchTitle("夜曲 · 周杰伦", "周杰伦") == "夜曲")
+    }
+
     @Test fun presetAndPitchRules() {
         val custom = DEFAULT_SPACE_PRESET.copy(name = "合法自定义", period = 9.0)
         check(matchingPresetOrDefault(custom, listOf(custom)) == custom)
@@ -55,6 +67,12 @@ class MainActivityLogicCheck {
         check(reverseSourceStart(startFrame = 10_000, produced = 0) == 10_000)
         check(reverseSourceStart(startFrame = 10_000, produced = 4_096) == 5_904)
         check(reverseSourceStart(startFrame = 2_000, produced = 2_000) == 0)
+    }
+
+    @Test fun radioStartsOutputAfterFirstPcmChunk() {
+        check(!shouldStartTrack(started = false, writtenFrames = 0))
+        check(shouldStartTrack(started = false, writtenFrames = 1))
+        check(!shouldStartTrack(started = true, writtenFrames = 4096))
     }
 
     @Test fun timeSortUsesAddedThenModified() {

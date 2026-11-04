@@ -3,6 +3,27 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Properties
+
+val buildHour = SimpleDateFormat("yyMMddHH").format(Date())
+val versionCounterFile = rootDir.resolve("build/signing/version-code.properties")
+val versionCounter = Properties().apply {
+    versionCounterFile.takeIf { it.isFile }?.inputStream()?.use { load(it) }
+}
+val sameHour = versionCounter.getProperty("hour") == buildHour
+val buildNumber = if (sameHour) versionCounter.getProperty("count", "0").toInt() + 1 else 1
+// 仅正式发布累计次数；同小时测试/debug 构建复用当前序号，不消耗打包次数。
+val releaseBuild = gradle.startParameter.taskNames.any { it.contains("assembleRelease") }
+if (releaseBuild) {
+    versionCounterFile.parentFile.mkdirs()
+    versionCounter.setProperty("hour", buildHour)
+    versionCounter.setProperty("count", buildNumber.toString())
+    versionCounterFile.outputStream().use { versionCounter.store(it, null) }
+}
+val hourlyVersionCode = (buildHour + if (releaseBuild) buildNumber else versionCounter.getProperty("count", "1")).toInt()
+
 android {
     namespace = "j5i.spatial8d"
     compileSdk = 34
@@ -11,11 +32,9 @@ android {
         applicationId = "j5i.spatial8d.native"
         minSdk = 24
         targetSdk = 34
-        versionCode = providers.exec {
-            commandLine("powershell", "-NoProfile", "-Command", "Get-Date -Format yyMMddHHmm")
-        // 保留发布时间十位格式；Android Int 上限内按位保留低 31 位，仍随时间递增。
-        }.standardOutput.asText.get().trim().toLong().and(Int.MAX_VALUE.toLong()).toInt()
-        versionName = "2.3.3"
+        // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
+        versionCode = hourlyVersionCode
+        versionName = "2.3.8"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
