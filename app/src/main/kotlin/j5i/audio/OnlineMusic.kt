@@ -11,7 +11,8 @@ import kotlin.concurrent.thread
 
 /** 在线曲库的搜索条目；播放地址只在点按时解析，不长期保存第三方链接。 */
 data class OnlineTrack(val id: String, val title: String, val artist: String,
-    val duration: Double, val provider: String)
+    val duration: Double, val provider: String, val compilation: Boolean = false,
+    val partCount: Int = 0)
 
 /** 0 聚合、1 酷我、2 网易云、3 酷狗、4 QQ、5 Jamendo。 */
 class OnlineMusic(private val activity: Activity) {
@@ -19,9 +20,12 @@ class OnlineMusic(private val activity: Activity) {
         private const val JAMENDO_KEY = "8d_jamendo_client_id"
     }
 
+    private val bili by lazy { BiliMusic(activity) }
+
     val loggedIn: Boolean get() = loggedIn(4)
     fun loggedIn(provider: Int): Boolean =
         if (provider == 5) jamendoClientId().isNotEmpty()
+        else if (provider == 6) bili.loggedIn
         else JSONObject(MusicSourceApi.sessionInfo(activity, providerName(provider))).optBoolean("loggedIn")
 
     /** Jamendo 公开 API 只需 client_id；它不是用户登录凭证，更不是 client_secret。 */
@@ -55,13 +59,13 @@ class OnlineMusic(private val activity: Activity) {
 
     private fun searchOne(provider: Int, query: String, page: Int): List<OnlineTrack> = when (provider) {
         1 -> kuwo(query, page); 4 -> qqSearch(query, page); 2 -> netease(query, page); 3 -> kugou(query, page)
-        5 -> jamendo(query, page)
+        5 -> jamendo(query, page); 6 -> bili.search(query, page)
         else -> throw IllegalArgumentException("未知音乐来源")
     }
 
     private fun aggregate(query: String, page: Int): List<OnlineTrack> {
-        val pool = Executors.newFixedThreadPool(5)
-        val providers = intArrayOf(2, 4, 3, 1, 5)
+        val pool = Executors.newFixedThreadPool(6)
+        val providers = intArrayOf(2, 6, 4, 3, 1, 5)
         val calls = providers.map { provider -> pool.submit<List<OnlineTrack>> { searchOne(provider, query, page) } }
         return try {
             val failures = mutableListOf<String>()
@@ -71,7 +75,7 @@ class OnlineMusic(private val activity: Activity) {
             }
             if (results.all { it.isEmpty() } && failures.size == providers.size) error("在线曲库暂不可用，请稍后重试")
             // 用户希望可播放优先级：网易云、QQ、酷狗、酷我、Jamendo。
-            val providerOrder = listOf("网易云音乐", "QQ音乐", "酷狗音乐", "酷我音乐", "Jamendo")
+            val providerOrder = listOf("网易云音乐", "哔哩哔哩", "QQ音乐", "酷狗音乐", "酷我音乐", "Jamendo")
             val providerBuckets = results.flatten().groupBy { it.provider }
             providerOrder.flatMap { provider -> providerBuckets[provider].orEmpty() }
         } finally { pool.shutdownNow() }
@@ -87,9 +91,13 @@ class OnlineMusic(private val activity: Activity) {
                     "QQ音乐" -> resolveQq(id)
                     "网易云音乐" -> resolveNetease(id)
                     "酷狗音乐" -> resolveKugou(id)
+                    "哔哩哔哩" -> bili.download(track)
                     else -> ""
                 }
-                if (!url.startsWith("https://") && !url.startsWith("http://")) error("当前账号暂无该歌曲播放权限")
+                // B 站解析结果可能是公共下载目录的 MediaStore URI。
+                if (!url.startsWith("https://") && !url.startsWith("http://") && !url.startsWith("file://") &&
+                    !(track.provider == "哔哩哔哩" && url.startsWith("content://media/")))
+                    error("当前账号暂无该歌曲播放权限")
                 deliver(callback, Result.success(url))
             } catch (e: Exception) { deliver(callback, Result.failure(e)) }
         }
@@ -97,11 +105,28 @@ class OnlineMusic(private val activity: Activity) {
 
     fun login(callback: (Result<Unit>) -> Unit) {
         MusicSourceApi.login(activity) { raw ->
-            val r = JSONObject(raw)
-            if (r.optBoolean("ok")) callback(Result.success(Unit))
-            else callback(Result.failure(Exception(r.optString("message", "登录失败"))))
+            completeLogin(raw, callback)
         }
     }
+
+    /** 哔哩哔哩官方页登录：页面内可选扫码或手机号短信，风控由官方页面完成。 */
+    fun biliLogin(callback: (Result<Unit>) -> Unit) = bili.login(callback)
+
+    /** 展开哔哩哔哩分 P 合集；单 P 视频也统一返回单元素列表。 */
+    fun biliParts(track: OnlineTrack, callback: (Result<List<OnlineTrack>>) -> Unit) {
+        thread(name = "online-music-bili-parts") {
+            try { deliver(callback, Result.success(bili.parts(track))) }
+            catch (e: Exception) { deliver(callback, Result.failure(e)) }
+        }
+    }
+
+    fun importCookieFile(callback: (Result<Unit>) -> Unit) {
+        MusicSourceApi.pickCookieFile(activity) { completeLogin(it, callback) }
+    }
+
+    fun saveCookieText(cookie: String, callback: (Result<Unit>) -> Unit) {
+        MusicSourceApi.saveCookieText(activity, cookie) { completeLogin(it, callback) }
+        }
 
     fun sendPhoneCode(provider: Int, phone: String, callback: (Result<Unit>) -> Unit) {
         if (provider != 2) return callback(Result.failure(UnsupportedOperationException("该来源暂无可验证的手机号登录接口")))
@@ -273,8 +298,13 @@ class OnlineMusic(private val activity: Activity) {
     }
 
     private fun <T> deliver(callback: (Result<T>) -> Unit, result: Result<T>) = activity.runOnUiThread { callback(result) }
-    private fun providerName(provider: Int) = when (provider) { 4 -> "qq"; 2 -> "netease"; 3 -> "kugou"; 5 -> "jamendo"; else -> "" }
-    private fun providerLabel(provider: Int) = when (provider) { 1 -> "酷我"; 4 -> "QQ"; 2 -> "网易云"; 3 -> "酷狗"; 5 -> "Jamendo"; else -> "未知来源" }
+    private fun completeLogin(raw: String, callback: (Result<Unit>) -> Unit) {
+        val r = JSONObject(raw)
+        if (r.optBoolean("ok")) callback(Result.success(Unit))
+        else callback(Result.failure(Exception(r.optString("message", "登录失败"))))
+    }
+    private fun providerName(provider: Int) = when (provider) { 4 -> "qq"; 2 -> "netease"; 3 -> "kugou"; 5 -> "jamendo"; 6 -> "bilibili"; else -> "" }
+    private fun providerLabel(provider: Int) = when (provider) { 1 -> "酷我"; 4 -> "QQ"; 2 -> "网易云"; 3 -> "酷狗"; 5 -> "Jamendo"; 6 -> "B站"; else -> "未知来源" }
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8")
     private fun cookieValue(vararg names: String): String? = session().optString("cookie").split(';').map { it.trim() }
         .firstOrNull { item -> names.any { item.startsWith("$it=") } }?.substringAfter('=')

@@ -77,6 +77,8 @@ class MusicStore(private val context: Context) {
      * 按歌曲 id 缓存到应用私有目录，解码器后续只读这份稳定副本，绝不改源文件。
      */
     fun readableUri(item: MusicItem): Uri {
+        // 应用私有目录里已落盘的文件（如哔哩哔哩保存的 m4a）直接读取，无需再复制。
+        if (item.uri.startsWith("file://")) return Uri.parse(item.uri)
         val cached = File(context.filesDir, "picked").listFiles()?.firstOrNull {
             it.name.startsWith("music_${item.id}.") && it.length() > 1024
         }

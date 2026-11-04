@@ -234,6 +234,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             service?.onPlaybackError = { main.post { toast(it) } }
             service?.onPlaybackChanged = { main.post { refreshPlayback() } }
             service?.onTrackChanged = { item -> main.post { adoptServiceTrack(item) } }
+            service?.onReverseUnavailable = { main.post {
+                reverse = false
+                if (::reverseSwitch.isInitialized) reverseSwitch.isChecked = false
+                toast("超长歌曲暂不支持倒放")
+            } }
             installPcmRenderer()
             service?.radio?.onReady = { main.post {
                 playbackStatus = "电台播放中 · ${currentItem?.name ?: "自定义电台"}"
@@ -326,6 +331,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         service?.onTrackChanged = null
         service?.onPlaybackError = null
         service?.onPlaybackChanged = null
+        service?.onReverseUnavailable = null
         service?.player?.onPcm = null
         service?.radio?.onPcm = null
         radioProbes.forEach { it.stop() }
@@ -879,6 +885,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     }
                 }
             } catch (e: Exception) {
+                android.util.Log.w("8DQueue", "local load failed: ${item.name} uri=${item.uri}", e)
                 main.post {
                     if (generation != loadGeneration) return@post
                     if (e.message?.contains("已取消旧音频解码") == true) return@post
@@ -2631,7 +2638,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             body.addView(filters)
             addStationBrowser(body, filters)
         } else {
-            val providers = listOf(t("online.aggregate") to 0, "网易云" to 2, "QQ" to 4, "酷狗" to 3, "酷我" to 1, "Jamendo" to 5)
+            val providers = listOf(t("online.aggregate") to 0, "网易云" to 2, "B站" to 6, "QQ" to 4, "酷狗" to 3, "酷我" to 1, "Jamendo" to 5)
             body.addView(tabRow(providers.map { it.first }, providers.indexOfFirst { it.second == onlineProvider }) {
                 onlineProvider = providers[it].second
                 onlinePage = 1
@@ -2797,6 +2804,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             addView(ThemeUi.button(this@MainActivity, palette, when {
                 onlineProvider == 5 -> "Client ID"
                 authenticated -> t("online.logout")
+                onlineProvider == 4 -> "登录 / 还原"
                 else -> t("online.login")
             }) {
                 if (onlineProvider == 5) showJamendoConfig()
@@ -2824,17 +2832,32 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 8f))
                 addView(LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.VERTICAL
-                    addView(ThemeUi.text(this@MainActivity, track.title, 13f, palette, bold = true))
-                    addView(ThemeUi.text(this@MainActivity, "${track.artist} · ${track.provider}", 11f, palette, role = ThemeUi.ROLE_SUB))
+                    addView(ThemeUi.row(this@MainActivity).apply {
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        if (track.provider == "哔哩哔哩") addView(ThemeUi.text(this@MainActivity,
+                            if (track.compilation) "合集" else "单曲", 10f, palette,
+                            role = if (track.compilation) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_SUB).apply {
+                            background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 6f)
+                            setPadding(ThemeUi.dp(this@MainActivity, 4f), ThemeUi.dp(this@MainActivity, 1f),
+                                ThemeUi.dp(this@MainActivity, 4f), ThemeUi.dp(this@MainActivity, 1f))
+                            val lp = layoutParams as? LinearLayout.LayoutParams
+                            lp?.rightMargin = ThemeUi.dp(this@MainActivity, 6f)
+                        })
+                        addView(ThemeUi.text(this@MainActivity, track.title, 13f, palette, bold = true),
+                            LinearLayout.LayoutParams(0, -2, 1f))
+                    })
+                    addView(ThemeUi.text(this@MainActivity,
+                        when {
+                            track.provider != "哔哩哔哩" -> "${track.artist} · ${track.provider}"
+                            track.compilation -> "${track.artist} · ${track.provider} · 可展开分 P 曲目"
+                            else -> "${track.artist} · ${track.provider} · ${formatTrackDuration(track.duration)}"
+                        }, 11f, palette, role = ThemeUi.ROLE_SUB))
                 }, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(ThemeUi.text(this@MainActivity, t("online.preview"), 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                addView(ThemeUi.text(this@MainActivity,
+                    if (track.provider == "哔哩哔哩" && track.compilation) "展开曲目 › " else t("online.preview"),
+                    12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener {
-                    onlineStatusView?.text = String.format(t("online.address"), track.title)
-                    onlineMusic.resolve(track) { result ->
-                        result.onSuccess { playOnline(track, it) }
-                            .onFailure { if (onlineDialog?.isShowing == true)
-                                onlineStatusView?.text = it.message ?: t("online.address.failed") }
-                    }
+                    if (track.provider == "哔哩哔哩") expandBiliTrack(track) else resolveOnline(track)
                 }
             })
         }
@@ -2848,7 +2871,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     }
 
     private fun openQqLogin() {
-        onlineStatusView?.text = "首次请选择登录文件保存目录，再在微信官方页面完成授权"
+        onlineStatusView?.text = "首次使用请选择登录文件保存目录，再在微信官方页面完成授权"
         onlineMusic.login { result ->
             result.onSuccess { if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) } }
                 .onFailure { if (onlineDialog?.isShowing == true)
@@ -2856,14 +2879,99 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         }
     }
 
+    private fun importQqCookieFile() {
+        onlineStatusView?.text = "请选择之前备份的 qq_cookie.txt…"
+        onlineMusic.importCookieFile { result ->
+            result.onSuccess {
+                if (onlineDialog?.isShowing == true) {
+                    refreshOnlineBody()
+                    loadOnlineTracks(false)
+                    toast("QQ 音乐登录已还原")
+                }
+            }.onFailure {
+                if (onlineDialog?.isShowing == true) onlineStatusView?.text = it.message ?: "登录文件还原失败"
+            }
+        }
+    }
+
+    private fun showQqCookieInput() {
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, "手动输入 QQ Cookie",
+            "粘贴完整 Cookie；仅保存在本机和你选择的备份文件中") {
+            val input = ThemeUi.input(this@MainActivity, palette, "qqmusic_key=...; wxuin=...").apply {
+                minLines = 4
+                gravity = android.view.Gravity.TOP
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            }
+            addView(input, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 104f)))
+            addView(ThemeUi.text(this@MainActivity, "必须包含 qqmusic_key，以及 wxuin 或 uin。",
+                10f, palette, role = ThemeUi.ROLE_FAINT))
+            addView(ThemeUi.button(this@MainActivity, palette, "保存并还原", ThemeUi.ROLE_ACCENT_FILL) {
+                onlineStatusView?.text = "正在保存 Cookie…"
+                onlineMusic.saveCookieText(input.text.toString()) { result ->
+                    result.onSuccess {
+                        dialog.dismiss()
+                        if (onlineDialog?.isShowing == true) {
+                            refreshOnlineBody()
+                            loadOnlineTracks(false)
+                            toast("QQ 音乐登录已还原")
+                        }
+                    }.onFailure {
+                        toast(it.message ?: "Cookie 保存失败")
+                        if (onlineDialog?.isShowing == true) onlineStatusView?.text = it.message ?: "Cookie 保存失败"
+                    }
+                }
+            })
+        }
+        dialog.show()
+    }
+
+    private fun showQqAuthentication() {
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, "QQ 音乐登录",
+            "可微信扫码授权，也可从备份文件或手动 Cookie 还原") {
+            addView(ThemeUi.button(this@MainActivity, palette, "微信扫码登录", ThemeUi.ROLE_ACCENT_FILL) {
+                dialog.dismiss()
+                openQqLogin()
+            })
+            addView(ThemeUi.button(this@MainActivity, palette, "选择登录文件还原") {
+                dialog.dismiss()
+                importQqCookieFile()
+            })
+            addView(ThemeUi.button(this@MainActivity, palette, "手动输入 Cookie") {
+                dialog.dismiss()
+                showQqCookieInput()
+            })
+            addView(ThemeUi.text(this@MainActivity,
+                "重装或清空数据后，选择之前保存目录中的 qq_cookie.txt 即可恢复；Cookie 不会上传到本应用服务器。",
+                10f, palette, role = ThemeUi.ROLE_FAINT))
+        }
+        dialog.show()
+    }
+
     /** 所有来源共用一个认证入口；会话按平台隔离，手机号和验证码不落盘。 */
     private fun showOnlineAuthentication() {
         val provider = onlineProvider
-        if (provider == 0 || provider !in 1..5) {
+        if (provider == 0 || provider !in 1..6) {
             onlineStatusView?.text = "请先选择酷我、网易云、酷狗或 QQ，再管理对应账号"
             return
         }
-        if (provider == 4) { openQqLogin(); return }
+        if (provider == 4) { showQqAuthentication(); return }
+        if (provider == 6) {
+            onlineStatusView?.text = "在哔哩哔哩官方页面可扫码或手机号短信登录；未登录也能搜索公开视频"
+            onlineMusic.biliLogin { result ->
+                result.onSuccess {
+                    if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) }
+                    toast("哔哩哔哩已登录")
+                }.onFailure {
+                    if (onlineDialog?.isShowing == true)
+                        onlineStatusView?.text = it.message ?: "登录失败"
+                }
+            }
+            return
+        }
         if (provider != 2) {
             onlineStatusView?.text = "该平台尚未接入经验证的手机号登录，当前仅支持公开免费内容"
             return
@@ -2932,9 +3040,92 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         else onlineMusic.search(onlineProvider, onlineQuery, onlinePage, callback)
     }
 
+    private fun resolveOnline(track: OnlineTrack) {
+        onlineStatusView?.text =
+            if (track.provider == "哔哩哔哩") "正在缓存音频《${track.title}》，首次需要下载整首，请稍候…"
+            else String.format(t("online.address"), track.title)
+        android.util.Log.i("8DBili", "resolve start ${track.id}")
+        onlineMusic.resolve(track) { result ->
+            result.onSuccess { playOnline(track, it) }
+                .onFailure {
+                    android.util.Log.w("8DBili", "resolve failed: ${it.message}", it)
+                    toast(it.message ?: t("online.address.failed"))
+                    if (onlineDialog?.isShowing == true)
+                        onlineStatusView?.text = it.message ?: t("online.address.failed")
+                }
+        }
+    }
+
+    /** 哔哩哔哩合集视频展开分 P；单 P 直接进入音频缓存与播放。 */
+    private fun expandBiliTrack(track: OnlineTrack) {
+        onlineStatusView?.text = "正在读取《${track.title}》的曲目列表…"
+        onlineMusic.biliParts(track) { result ->
+            result.onSuccess { parts ->
+                if (parts.size == 1) resolveOnline(parts[0])
+                else { onlineStatusView?.text = "合集共 ${parts.size} 首，请选择曲目"; showBiliParts(track, parts) }
+            }.onFailure {
+                if (onlineDialog?.isShowing == true)
+                    onlineStatusView?.text = it.message ?: "曲目列表读取失败"
+            }
+        }
+    }
+
+    private fun showBiliParts(parent: OnlineTrack, parts: List<OnlineTrack>) {
+        lateinit var sheet: Dialog
+        lateinit var status: TextView
+        sheet = ThemeUi.showSheet(this, palette, parent.title.take(24), "共 ${parts.size} 首") {
+            val rows = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            status = ThemeUi.text(this@MainActivity, "", 11f, palette, role = ThemeUi.ROLE_SUB)
+            parts.forEachIndexed { index, part ->
+                rows.addView(ThemeUi.row(this@MainActivity).apply {
+                    setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f))
+                    addView(LinearLayout(this@MainActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        addView(ThemeUi.text(this@MainActivity, "${index + 1}. ${part.title}", 13f, palette, bold = true))
+                        addView(ThemeUi.text(this@MainActivity, formatTrackDuration(part.duration),
+                            11f, palette, role = ThemeUi.ROLE_SUB))
+                    }, LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(ThemeUi.text(this@MainActivity, t("online.preview"), 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                    setOnClickListener {
+                        status.text = "正在缓存《${part.title}》，首次需下载整首音频，请稍候…"
+                        isEnabled = false
+                        onlineMusic.resolve(part) { result ->
+                            result.onSuccess { sheet.dismiss(); playOnline(part, it) }
+                                .onFailure { e ->
+                                    android.util.Log.w("8DBili", "part resolve failed: ${e.message}", e)
+                                    isEnabled = true
+                                    status.text = "《${part.title}》播放失败：${e.message ?: "未知错误"}"
+                                    toast(e.message ?: t("online.address.failed"))
+                                }
+                        }
+                    }
+                })
+            }
+            addView(ScrollView(this@MainActivity).apply { addView(rows) }, LinearLayout.LayoutParams(-1, 0, 1f))
+            addView(status)
+        }
+        sheet.show()
+    }
+
+    private fun formatTrackDuration(seconds: Double): String {
+        val total = seconds.toLong()
+        val h = total / 3600; val m = (total % 3600) / 60; val s = total % 60
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
+    }
+
     private fun playOnline(track: OnlineTrack, url: String) {
+        // 哔哩哔哩只保存音频文件：下载完成后登记进本地曲库，离线也可播放，不保留视频数据。
+        val localFile = if (url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else null
         val item = MusicItem((track.provider + track.id).hashCode().toLong(), "${track.title} · ${track.artist}",
-            url, duration = (track.duration * 1000).toLong(), artist = track.artist)
+            url, size = localFile?.length() ?: 0L,
+            duration = (track.duration * 1000).toLong(), artist = track.artist)
+        if ((localFile != null || (track.provider == "哔哩哔哩" && url.startsWith("content://media/"))) &&
+            musicStore.cached().none { it.uri == item.uri }) {
+            musicStore.remember(item)
+            val merged = (musicStore.cached() + listOf(item)).distinctBy { it.uri }
+            musicStore.saveLibrary(merged)
+            songs = merged.toMutableList()
+        }
         dismissSource()
         load(item)
     }

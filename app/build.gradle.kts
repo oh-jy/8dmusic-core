@@ -7,7 +7,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Properties
 
-val buildHour = SimpleDateFormat("yyDDDHH").format(Date())
+val buildHour = SimpleDateFormat("yyMMddHH").format(Date())
 val versionCounterFile = rootDir.resolve("docs/signing/version-code.properties")
 val versionCounter = Properties().apply {
     versionCounterFile.takeIf { it.isFile }?.inputStream()?.use { load(it) }
@@ -23,7 +23,7 @@ if (releaseBuild) {
     versionCounterFile.outputStream().use { versionCounter.store(it, null) }
 }
 val versionSequence = if (releaseBuild) buildNumber else versionCounter.getProperty("count", "1").toInt()
-val hourlyVersionCode = (buildHour + "%02d".format(versionSequence)).toInt()
+val hourlyVersionCode = (buildHour + versionSequence).toInt()
 
 android {
     namespace = "j5i.spatial8d"
@@ -34,9 +34,9 @@ android {
         applicationId = "j5i.spatial8d.native"
         minSdk = 24
         targetSdk = 34
-        // yy + 年内日序 + 小时 + 当小时发布序号，例如 263081304；始终处于 Int 范围。
+        // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.6.0"
+        versionName = "2.7.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

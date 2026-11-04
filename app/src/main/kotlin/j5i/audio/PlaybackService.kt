@@ -30,6 +30,7 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import j5i.spatial8d.ui.AppLanguage
 
 /** 音频链路的唯一持有者，同时把真实播放状态同步给锁屏与通知栏。 */
@@ -52,6 +53,7 @@ class PlaybackService : Service() {
     var onTrackChanged: ((MusicItem) -> Unit)? = null
     var onPlaybackError: ((String) -> Unit)? = null
     var onPlaybackChanged: (() -> Unit)? = null
+    var onReverseUnavailable: (() -> Unit)? = null
     val currentTrack: MusicItem? get() = currentItem
     val queueSnapshot: List<MusicItem> get() = queue
     private val binder = Binder()
@@ -60,7 +62,7 @@ class PlaybackService : Service() {
     private val decodeExecutor = Executors.newSingleThreadExecutor()
     @Volatile private var queue = listOf<MusicItem>()
     @Volatile private var currentItem: MusicItem? = null
-    private var loadGeneration = 0
+    @Volatile private var loadGeneration = 0
     private var foreground = false
     private var lastAppInForeground = true
     /** Activity 是否在前台。前台播放时不发通知，后台播放才显示以保持服务存活。 */
@@ -122,6 +124,8 @@ class PlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // 上次进程异常退出可能留下整轨 PCM；本进程尚未创建新缓冲。
+        File(cacheDir, "decoded-pcm").listFiles()?.forEach { it.delete() }
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW)
         )
@@ -138,6 +142,16 @@ class PlaybackService : Service() {
         }
         player.onEnd = { if (!pausedByFocus) continueQueue() }
         player.onError = { message -> main.post { onPlaybackError?.invoke(message) } }
+        player.onReverseUnavailable = {
+            controlsReverse = false
+            onReverseUnavailable?.invoke()
+        }
+        player.onSeekOutsideWindow = { position ->
+            main.post {
+                val item = currentItem ?: return@post
+                load(item, queue, autoplay = desiredPlaying || player.isPlaying, resumePosition = position)
+            }
+        }
         registerReceiver(headsetReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_HEADSET_PLUG)
             addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
@@ -156,6 +170,8 @@ class PlaybackService : Service() {
         this.queue = queue.ifEmpty { listOf(item) }
         currentItem = item
         player.stop()
+        player.seekRestartSupported = !item.uri.startsWith("http://", ignoreCase = true) &&
+            !item.uri.startsWith("https://", ignoreCase = true)
         updateMedia(item.name, item.artist, keepForeground, duration = item.duration / 1000.0)
         decodeExecutor.execute {
             val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
@@ -182,7 +198,8 @@ class PlaybackService : Service() {
                     }
                 }
                 if (stream != null) decoder.decode(stream, {}, { own == loadGeneration }, onHead = onHead)
-                else decoder.decode(source!!, {}, { own == loadGeneration }, onHead = onHead)
+                else decoder.decode(source!!, {}, { own == loadGeneration }, onHead = onHead,
+                    startPositionSec = resumePosition)
             } catch (e: Exception) {
                 main.post {
                     if (own == loadGeneration) {

@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.DocumentsContract;
+import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -38,15 +39,19 @@ public final class MusicSourceApi {
     private static final Object LOCK = new Object();
     private static final String PREFS = "qq_music_session";
     private static final String TREE = "persistent_tree";
+    private static final String COOKIE_DOCUMENT = "persistent_cookie_document";
     private static final String COOKIE_FILE = "qq_cookie.txt";
     private static final String SESSION_PREFS = "online_provider_sessions";
     private static final int PICK_TREE = 8142;
+    private static final int PICK_COOKIE_FILE = 8143;
     private static String cookie = "";
     private static final Map<String, String> providerCookies = new HashMap<>();
     private static WebView loginView;
     private static Activity pendingActivity;
     private static Callback pendingCallback;
+    private static Callback pendingImportCallback;
     private static Uri persistentTree;
+    private static Uri persistentCookieDocument;
 
     private MusicSourceApi() {}
 
@@ -78,6 +83,7 @@ public final class MusicSourceApi {
                 if ("netease".equals(provider)) c.setRequestProperty("Referer", "https://music.163.com/");
                 if ("kuwo".equals(provider)) c.setRequestProperty("Referer", "https://www.kuwo.cn/");
                 if ("kugou".equals(provider)) c.setRequestProperty("Referer", "https://www.kugou.com/");
+                if ("bilibili".equals(provider)) c.setRequestProperty("Referer", "https://www.bilibili.com/");
                 if (!sessionCookie.isEmpty()) c.setRequestProperty("Cookie", sessionCookie);
                 if (body != null && !body.isEmpty()) {
                     c.setDoOutput(true);
@@ -119,7 +125,7 @@ public final class MusicSourceApi {
     }
 
     private static void saveResponseCookies(Activity activity, String provider, Map<String, java.util.List<String>> headers) {
-        if (!"netease".equals(provider)) return;
+        if (!"netease".equals(provider) && !"bilibili".equals(provider)) return;
         java.util.List<String> values = headers.get("Set-Cookie");
         if (values == null) values = headers.get("set-cookie");
         if (values == null) return;
@@ -148,7 +154,8 @@ public final class MusicSourceApi {
     public static String sessionInfo(Activity activity, String provider) {
         if ("qq".equals(provider)) return sessionInfo();
         String value = providerCookie(activity, provider);
-        boolean loggedIn = "netease".equals(provider) && value.contains("MUSIC_U=");
+        boolean loggedIn = ("netease".equals(provider) && value.contains("MUSIC_U="))
+                || ("bilibili".equals(provider) && value.contains("SESSDATA="));
         try { return new JSONObject().put("loggedIn", loggedIn).put("provider", provider).toString(); }
         catch (Exception e) { return "{\"loggedIn\":false}"; }
     }
@@ -158,11 +165,75 @@ public final class MusicSourceApi {
         saveProviderCookie(activity, provider, "");
     }
 
+    /** Raw provider cookie for binary downloads (e.g. DASH audio CDN checks). */
+    public static String sessionCookie(Activity activity, String provider) {
+        return providerCookie(activity, provider);
+    }
+
+    /** Persists cookies captured after an official WebView login for a provider. */
+    public static void saveSession(Activity activity, String provider, String cookie) {
+        saveProviderCookie(activity, provider, cookie == null ? "" : cookie);
+    }
+
+    /**
+     * Generic official-page login: scan-code, SMS and password flows all stay inside
+     * the site's own WebView, including its risk-control challenges. Success is
+     * detected solely by the marker cookie appearing; cookie values never reach UI.
+     */
+    public static void loginWeb(Activity activity, String provider, String startUrl,
+                                String cookieDomain, String cookieMarker, Callback callback) {
+        MAIN.post(() -> {
+            try {
+                closeLogin();
+                CookieManager cookies = CookieManager.getInstance();
+                cookies.setAcceptCookie(true);
+                WebView view = new WebView(activity);
+                WebSettings s = view.getSettings();
+                s.setJavaScriptEnabled(true);
+                s.setDomStorageEnabled(true);
+                s.setDatabaseEnabled(true);
+                CookieManager.getInstance().setAcceptThirdPartyCookies(view, true);
+                final boolean[] done = {false};
+                view.setWebChromeClient(new WebChromeClient());
+                view.setWebViewClient(new WebViewClient() {
+                    @Override public void onPageFinished(WebView web, String url) {
+                        String value = CookieManager.getInstance().getCookie(cookieDomain);
+                        if (!done[0] && value != null && value.contains(cookieMarker)) {
+                            done[0] = true;
+                            saveProviderCookie(activity, provider, value);
+                            closeLogin();
+                            callback.done("{\"ok\":true}");
+                        }
+                    }
+                });
+                view.setOnKeyListener((v, keyCode, event) -> {
+                    if (keyCode == KeyEvent.KEYCODE_BACK && event.getAction() == KeyEvent.ACTION_UP) {
+                        if (view.canGoBack()) { view.goBack(); return true; }
+                        if (!done[0]) {
+                            done[0] = true;
+                            closeLogin();
+                            callback.done(error("LOGIN", "已取消登录"));
+                        }
+                        return true;
+                    }
+                    return false;
+                });
+                loginView = view;
+                activity.addContentView(view, new android.view.ViewGroup.LayoutParams(-1, -1));
+                view.loadUrl(startUrl);
+            } catch (Exception e) {
+                closeLogin();
+                callback.done(error("LOGIN", e.getMessage()));
+            }
+        });
+    }
+
     /** WeChat authorizes on its official page; QQ Music then sets its own session cookies. */
     public static void login(Activity activity, Callback callback) {
         MAIN.post(() -> {
             try {
-                if (persistentTree == null && treeUri(activity) == null) {
+                if (persistentTree == null && treeUri(activity) == null
+                        && persistentCookieDocument == null && cookieDocumentUri(activity) == null) {
                     pendingActivity = activity;
                     pendingCallback = callback;
                     activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_TREE);
@@ -181,9 +252,8 @@ public final class MusicSourceApi {
                 loginView.setWebChromeClient(new WebChromeClient());
                 loginView.setWebViewClient(new WebViewClient() {
                     @Override public void onPageFinished(WebView view, String url) {
-                        String value = CookieManager.getInstance().getCookie("https://y.qq.com/");
-                        if (value != null && value.contains("qqmusic_key=")
-                                && (value.contains("wxuin=") || value.contains("uin="))) {
+                        String value = QqCookies.normalize(CookieManager.getInstance().getCookie("https://y.qq.com/"));
+                        if (QqCookies.valid(value)) {
                             synchronized (LOCK) { cookie = value; }
                             saveCookie(activity, value);
                             closeLogin();
@@ -205,13 +275,51 @@ public final class MusicSourceApi {
         });
     }
 
+    /** Restores the plain-text Cookie backup created by a previous install. */
+    public static void pickCookieFile(Activity activity, Callback callback) {
+        MAIN.post(() -> {
+            pendingImportCallback = callback;
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            activity.startActivityForResult(intent, PICK_COOKIE_FILE);
+        });
+    }
+
+    /** Allows restoring a session when the user only has the Cookie string. */
+    public static void saveCookieText(Activity activity, String raw, Callback callback) {
+        new Thread(() -> {
+            try {
+                String value = QqCookies.normalize(raw);
+                if (!QqCookies.valid(value)) throw new IllegalArgumentException("Cookie 缺少 qqmusic_key、wxuin 或 uin");
+                synchronized (LOCK) { cookie = value; }
+                saveCookie(activity, value);
+                MAIN.post(() -> callback.done("{\"ok\":true}"));
+            } catch (Exception e) {
+                MAIN.post(() -> callback.done(error("LOGIN", e.getMessage())));
+            }
+        }).start();
+    }
+
     public static void logout(Activity activity) {
         synchronized (LOCK) { cookie = ""; }
         try { new File(activity.getFilesDir(), COOKIE_FILE).delete(); } catch (Exception ignored) {}
         try {
+            Uri document = persistentCookieDocument != null ? persistentCookieDocument : cookieDocumentUri(activity);
+            if (document != null) {
+                try {
+                    DocumentsContract.deleteDocument(activity.getContentResolver(), document);
+                } finally {
+                    activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(COOKIE_DOCUMENT).apply();
+                }
+                persistentCookieDocument = null;
+            }
+        } catch (Exception ignored) {}
+        try {
             Uri tree = persistentTree != null ? persistentTree : treeUri(activity);
             if (tree != null) {
-                Uri file = persistentDocument(activity);
+                Uri file = treeDocument(activity);
                 if (file != null) DocumentsContract.deleteDocument(activity.getContentResolver(), file);
             }
         } catch (Exception ignored) {}
@@ -221,19 +329,25 @@ public final class MusicSourceApi {
     public static void restore(Activity activity) {
         try {
             if (persistentTree == null) persistentTree = treeUri(activity);
+            if (persistentCookieDocument == null) persistentCookieDocument = cookieDocumentUri(activity);
             File f = new File(activity.getFilesDir(), COOKIE_FILE);
             if (!f.exists()) {
                 String saved = readPersistent(activity);
-                if (saved.length() > 0) saveCookie(activity, saved);
+                saved = QqCookies.normalize(saved);
+                if (QqCookies.valid(saved)) {
+                    synchronized (LOCK) { cookie = saved; }
+                    saveCookie(activity, saved);
+                }
             }
             if (!f.exists()) return;
-            String value = new String(readBytes(new FileInputStream(f)), StandardCharsets.UTF_8);
-            if (value.contains("qqmusic_key=")) synchronized (LOCK) { cookie = value; }
+            String value = QqCookies.normalize(readAll(new FileInputStream(f)));
+            if (QqCookies.valid(value)) synchronized (LOCK) { cookie = value; }
         } catch (Exception ignored) {}
     }
 
     /** System picker grants a durable URI which survives uninstall/reinstall. */
     public static boolean onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
+        if (requestCode == PICK_COOKIE_FILE) return onCookieFileResult(activity, resultCode, data);
         if (requestCode != PICK_TREE) return false;
         try {
             if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
@@ -265,6 +379,32 @@ public final class MusicSourceApi {
         return true;
     }
 
+    private static boolean onCookieFileResult(Activity activity, int resultCode, Intent data) {
+        try {
+            if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                Uri document = data.getData();
+                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                activity.getContentResolver().takePersistableUriPermission(document, flags);
+                String value = QqCookies.normalize(readAll(activity.getContentResolver().openInputStream(document)));
+                if (!QqCookies.valid(value)) throw new IllegalArgumentException("登录文件缺少 qqmusic_key、wxuin 或 uin");
+                activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                    .edit().putString(COOKIE_DOCUMENT, document.toString()).apply();
+                persistentCookieDocument = document;
+                synchronized (LOCK) { cookie = value; }
+                saveCookie(activity, value);
+                if (pendingImportCallback != null) pendingImportCallback.done("{\"ok\":true}");
+            } else if (pendingImportCallback != null) {
+                pendingImportCallback.done(error("LOGIN", "未选择登录文件"));
+            }
+        } catch (Exception e) {
+            if (pendingImportCallback != null) {
+                pendingImportCallback.done(error("LOGIN", e.getMessage() == null ? "登录文件读取失败" : e.getMessage()));
+            }
+        }
+        pendingImportCallback = null;
+        return true;
+    }
+
     private static Uri treeUri(Context context) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -273,18 +413,30 @@ public final class MusicSourceApi {
         } catch (Exception e) { return null; }
     }
 
+    private static Uri cookieDocumentUri(Context context) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            String saved = prefs.getString(COOKIE_DOCUMENT, "");
+            return saved.length() == 0 ? null : Uri.parse(saved);
+        } catch (Exception e) { return null; }
+    }
+
     private static String readPersistent(Context context) {
+        if (persistentCookieDocument != null) {
+            try {
+                return readAll(context.getContentResolver().openInputStream(persistentCookieDocument));
+            } catch (Exception ignored) {}
+        }
         if (persistentTree == null) return "";
         try {
-            Uri file = persistentDocument(context);
+            Uri file = treeDocument(context);
             if (file == null) return "";
-            InputStream in = context.getContentResolver().openInputStream(file);
-            return in == null ? "" : new String(readBytes(in), StandardCharsets.UTF_8);
+            return readAll(context.getContentResolver().openInputStream(file));
         } catch (Exception ignored) {}
         return "";
     }
 
-    private static Uri persistentDocument(Context context) {
+    private static Uri treeDocument(Context context) {
         try {
             Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(persistentTree,
                 DocumentsContract.getTreeDocumentId(persistentTree));
@@ -304,9 +456,15 @@ public final class MusicSourceApi {
     }
 
     private static void writePersistent(Context context, String value) {
+        if (persistentCookieDocument != null) {
+            try (OutputStream out = context.getContentResolver().openOutputStream(persistentCookieDocument, "wt")) {
+                if (out != null) out.write(value.getBytes(StandardCharsets.UTF_8));
+            } catch (Exception ignored) {}
+            return;
+        }
         if (persistentTree == null) return;
         try {
-            Uri file = persistentDocument(context);
+            Uri file = treeDocument(context);
             if (file == null) {
                 Uri tree = DocumentsContract.buildDocumentUriUsingTree(persistentTree,
                     DocumentsContract.getTreeDocumentId(persistentTree));
@@ -357,6 +515,7 @@ public final class MusicSourceApi {
             out.write(value.getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {}
         if (persistentTree == null) persistentTree = treeUri(context);
+        if (persistentCookieDocument == null) persistentCookieDocument = cookieDocumentUri(context);
         writePersistent(context, value);
     }
 

@@ -62,6 +62,10 @@ class SpatialPlayer(context: Context) {
     var reverse = false
         set(value) {
             if (field == value) return
+            if (value && decoded?.isDiskBacked == true) {
+                main.post { onReverseUnavailable?.invoke() }
+                return
+            }
             field = value
             // 切换方向以当前声像位置为锚点：正向向前播到曲尾，反向向曲首播到开头。
             val source = decoded
@@ -74,7 +78,10 @@ class SpatialPlayer(context: Context) {
         }
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onReverseUnavailable: (() -> Unit)? = null
+    var onSeekOutsideWindow: ((Double) -> Unit)? = null
     var onPcm: ((ByteArray, Int) -> Unit)? = null
+    var seekRestartSupported = false
 
     private val lock = Any()
     // AudioTrack 的写、flush、play 和 release 必须互斥，代际标记本身不能保护 native 调用。
@@ -142,8 +149,8 @@ class SpatialPlayer(context: Context) {
         decoded = source
         remoteDurationSec = knownDurationSec.coerceAtLeast(0.0)
         sampleRate = source.sampleRate
-        cacheStart.set(if (reverse) source.frames.toLong() else 0L)
-        playPos = if (reverse) source.frames else 0
+        playPos = if (reverse) source.frames else source.retainedStartFrame()
+        cacheStart.set(playPos.toLong())
         headBase = playPos
         pausedHead = playPos
         trackStarted = false
@@ -157,7 +164,10 @@ class SpatialPlayer(context: Context) {
     fun play(): Boolean = synchronized(lock) {
         if (!prepared || !paused) return@synchronized prepared
         val source = decoded ?: return@synchronized false
-        if (playPos >= source.frames) { playPos = if (reverse) source.frames else 0; headBase = playPos }
+        if (source.decodeDone && playPos >= source.frames) {
+            playPos = if (reverse) source.frames else source.retainedStartFrame()
+            headBase = playPos
+        }
         try {
             paused = false
             playedOnce = true
@@ -190,13 +200,27 @@ class SpatialPlayer(context: Context) {
     }
 
     fun toggle() = if (paused) play() else pause().let { true }
-    fun seek(seconds: Double, userInitiated: Boolean = false) = invalidate(seconds, userInitiated)
+    fun seek(seconds: Double, userInitiated: Boolean = false) {
+        val source = decoded ?: return
+        val targetFrame = (seconds.coerceIn(0.0, duration) * sampleRate).toInt()
+        val outsideWindow = seekRestartSupported &&
+            (targetFrame < source.retainedStartFrame() || targetFrame > source.frames ||
+                source.isDiskBacked && targetFrame < position * sampleRate)
+        if (outsideWindow) {
+            onSeekOutsideWindow?.invoke(targetFrame.toDouble() / sampleRate)
+            return
+        }
+        invalidate(seconds, userInitiated)
+    }
     fun replay(forcePlay: Boolean = false): Boolean {
         // 自然播完会先清 playedOnce；自动续播必须显式要求重新起播。
         val resume = playedOnce || forcePlay
-        val source = decoded
-        stop()
-        if (source != null) prepare(source)
+        val source = decoded ?: return false
+        if (source.retainedStartFrame() > 0 && seekRestartSupported) {
+            onSeekOutsideWindow?.invoke(0.0)
+            return true
+        }
+        invalidate(0.0)
         return if (resume) play() else true
     }
 
@@ -217,6 +241,7 @@ class SpatialPlayer(context: Context) {
             trackStarted = false
             endMarkerArmed = false
             drainStartedAt = 0L
+            decoded?.close()
             decoded = null
             playPos = 0
             headBase = 0
@@ -317,6 +342,11 @@ class SpatialPlayer(context: Context) {
             val output = ByteArray(OUTPUT_CHUNK * 4)
             while (own == generation && prepared) {
                 if (paused) { Thread.sleep(12); continue }
+                if (reverse && decoded?.isDiskBacked == true) {
+                    disableDiskBackedReverse()
+                    Thread.sleep(16)
+                    continue
+                }
                 // 倒放必须知道真实曲尾，流式解码阶段不能拿当前水位当最后一帧。
                 if (reverse && decoded?.decodeDone != true) { Thread.sleep(30); continue }
                 val epoch = cacheEpoch.get()
@@ -358,6 +388,8 @@ class SpatialPlayer(context: Context) {
                 current.consumed += count
                 playPos = if (reverse) (current.startFrame - current.consumed).coerceAtLeast(0)
                     else current.startFrame + current.consumed
+                // 只能回收硬件播放头之前的 PCM；已写入但尚未听到的预滚仍可能用于轨道恢复。
+                if (!reverse) decoded?.releaseBefore(lastHeardFrame())
                 // 先写入短预滚再 play，兼顾起播延迟和 AudioTrack 不欠载。
                 if (!trackStarted && current.consumed >= min(START_FRAMES, current.produced.get())) {
                     trackStarted = true
@@ -437,6 +469,13 @@ class SpatialPlayer(context: Context) {
                 }
                 val count = min(CHUNK, if (reverse) start else source.frames - start)
                 val input = source.copyFrames(start, count)
+                if (input == null) {
+                    // 固定窗口不保留旧 PCM；本地歌曲由 Service 从目标时间重新建解码器。
+                    onSeekOutsideWindow?.invoke(current.startFrame.toDouble() / sampleRate)
+                    pause()
+                    current.finish()
+                    break
+                }
                 val rendered = current.render {
                     // 每块使用稳定快照：解码扩容后仍读取新 PCM，不持有旧数组。
                     NativeSpatialPlayer.render(current.native, input,
@@ -497,6 +536,12 @@ class SpatialPlayer(context: Context) {
             return true
         }
         return false
+    }
+
+    private fun disableDiskBackedReverse() {
+        if (!reverse || decoded?.isDiskBacked != true) return
+        reverse = false
+        main.post { onReverseUnavailable?.invoke() }
     }
 
     private fun finishTrack(own: Int) {

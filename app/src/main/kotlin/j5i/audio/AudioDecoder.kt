@@ -8,6 +8,7 @@ import android.media.MediaDataSource
 import android.net.Uri
 
 import j5i.spatial8d.core.PcmBuffer
+import java.io.File
 import java.nio.ByteOrder
 
 class AudioDecoder(private val context: Context) {
@@ -18,8 +19,9 @@ class AudioDecoder(private val context: Context) {
      */
     fun decode(uri: Uri, onProgress: (Int) -> Unit, isActive: () -> Boolean = { true },
         onHead: (PcmBuffer, Long) -> Unit = { _, _ -> },
-        onFormat: (PcmBuffer) -> Unit = {}): PcmBuffer = decode(
-        { extractor -> extractor.setDataSource(context, uri, null) }, onProgress, isActive, onHead, onFormat)
+        onFormat: (PcmBuffer) -> Unit = {}, startPositionSec: Double = 0.0): PcmBuffer = decode(
+        { extractor -> extractor.setDataSource(context, uri, null) }, onProgress, isActive, onHead, onFormat,
+        (startPositionSec * 1_000_000L).toLong().coerceAtLeast(0L))
 
     /** 直播使用滑动 HTTP 数据源；其余解码流程与本地文件完全一致。 */
     fun decode(source: MediaDataSource, onProgress: (Int) -> Unit, isActive: () -> Boolean = { true },
@@ -29,7 +31,7 @@ class AudioDecoder(private val context: Context) {
 
     private fun decode(setSource: (MediaExtractor) -> Unit, onProgress: (Int) -> Unit,
         isActive: () -> Boolean, onHead: (PcmBuffer, Long) -> Unit,
-        onFormat: (PcmBuffer) -> Unit): PcmBuffer {
+        onFormat: (PcmBuffer) -> Unit, startUs: Long = 0L): PcmBuffer {
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
         var lastPercent = -1
@@ -38,6 +40,7 @@ class AudioDecoder(private val context: Context) {
             lastPercent = percent
             onProgress(percent)
         }
+        var output: PcmBuffer? = null
         try {
             setSource(extractor)
             val track = (0 until extractor.trackCount).firstOrNull { index ->
@@ -45,6 +48,7 @@ class AudioDecoder(private val context: Context) {
                     ?.startsWith("audio/") == true
             } ?: error("没有音频轨")
             extractor.selectTrack(track)
+            if (startUs > 0L) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val format = extractor.getTrackFormat(track)
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error("音频格式不可识别")
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION))
@@ -56,7 +60,6 @@ class AudioDecoder(private val context: Context) {
             var sampleRate = 0
             var channels = 0
             var floating = false
-            var output: PcmBuffer? = null
             var headPublished = false
             var inputDone = false
             var outputDone = false
@@ -86,19 +89,26 @@ class AudioDecoder(private val context: Context) {
                         channels = changed.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                         floating = changed.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
                             changed.getInteger(MediaFormat.KEY_PCM_ENCODING) == 4
-                        output = PcmBuffer(sampleRate, channels, floating, durationUs)
+                        val baseFrame = if (startUs > 0L) (startUs * sampleRate / 1_000_000L).toInt() else 0
+                        output = PcmBuffer(sampleRate, channels, floating, durationUs,
+                            File(context.cacheDir, "decoded-pcm"), baseFrame = baseFrame)
                         onFormat(output!!)
                     }
                     else -> if (index >= 0) {
                         val buffer = codec.getOutputBuffer(index)
-                        if (buffer != null && info.size > 0) {
+                        val beforeStart = startUs > 0L && info.presentationTimeUs < startUs
+                        if (buffer != null && info.size > 0 && !beforeStart) {
                             buffer.position(info.offset)
                             buffer.limit(info.offset + info.size)
                             // MediaCodec 的 PCM 是小端；按原字节保留 16bit/float 和声道布局。
                             buffer.order(ByteOrder.LITTLE_ENDIAN)
                             val bytes = ByteArray(info.size)
                             buffer.get(bytes)
-                            output?.append(bytes)
+                            // 窗口写满时保留 codec output buffer，等播放线程释放旧 PCM 后重试同一块。
+                            while (output?.append(bytes) == false) {
+                                if (!isActive()) error("已取消旧音频解码")
+                                Thread.sleep(16)
+                            }
                             if (!headPublished && output != null && output!!.frames > 0) {
                                 headPublished = true
                                 onHead(output!!, durationUs)
@@ -118,6 +128,7 @@ class AudioDecoder(private val context: Context) {
             // 水位置完成前不能把播完或导出当成安全操作。
             return (output ?: error("音频没有 PCM 输出")).also { it.decodeDone = true }
         } catch (e: Exception) {
+            output?.close()
             throw IllegalStateException("解码失败: ${e.message ?: e.javaClass.simpleName}", e)
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
