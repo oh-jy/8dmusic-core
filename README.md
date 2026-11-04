@@ -51,6 +51,8 @@ D:\temp\tools\gradle-8.14.3\bin\gradle.bat :app:assembleDebug --no-daemon
 
 当前详细功能清单、历史 Bug 状态和验证证据统一维护在 `SESSION-REQUIREMENTS-AND-VERIFICATION.md` 第 9 节。
 
+计划公开发布前请先阅读 `OPEN-SOURCE-RELEASE-ASSESSMENT.md`。当前第三方音源、内置 FM、在线导出/录音和原生依赖许可证链尚未达到直接公开发布条件。
+
 ## 对拍策略
 
 沿用 `8dmusic-uts/tools/` 的 Python 参照脚本作为 WAV/算法基准。Kotlin 侧补 JVM 单测，逐函数与 UTS 数值对齐，再对整段输出听感/波形。
