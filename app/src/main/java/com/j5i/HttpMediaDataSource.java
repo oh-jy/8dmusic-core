@@ -14,7 +14,7 @@ import java.net.URL;
  * downloading the whole response. Icecast/Shoutcast metadata is stripped
  * before the bytes reach MediaExtractor.
  */
-public final class HttpMediaDataSource extends MediaDataSource {
+public class HttpMediaDataSource extends MediaDataSource {
     private static final int CACHE_BYTES = 512 * 1024;
     private static final int CONNECT_TIMEOUT_MS = 2500;
     private static final int READ_TIMEOUT_MS = 5000;

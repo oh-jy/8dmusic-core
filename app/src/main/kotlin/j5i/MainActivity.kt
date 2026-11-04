@@ -2968,7 +2968,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         isLive = true
         val generation = ++radioGeneration
         currentStationId = station.id
-        radioSources = station.sources
+        // 蜻蜓 MP3 的 MediaExtractor 会持续探测十几秒；同源 AAC 已可直接逐帧解码。
+        radioSources = station.sources.sortedBy { if (it.quality.contains("HLS")) 0 else 1 }
         // 每个频道独立记住最近成功线路；下次先尝试它，失败仍顺序回退其它源。
         val preferredUrl = preferences.getString("radioSource:${station.id}", null)
         val preferred = radioSources.indexOfFirst { it.url == preferredUrl }.coerceAtLeast(0)

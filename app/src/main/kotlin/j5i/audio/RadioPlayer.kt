@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import com.j5i.spatial8d.HttpMediaDataSource
+import com.j5i.spatial8d.Mp3MediaDataSource
 import com.j5i.spatial8d.TsAdtsMediaDataSource
 import com.j5i.spatial8d.NativeSpatialPlayer
 import com.j5i.spatial8d.PcmWavRecorder
@@ -204,8 +205,10 @@ class RadioPlayer(private val probe: Boolean = false) {
         val sessionStarted = android.os.SystemClock.elapsedRealtime()
         android.util.Log.i("8DRadio", "session start")
         val stream = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
-            TsAdtsMediaDataSource(url) else HttpMediaDataSource(url)
+            TsAdtsMediaDataSource(url) else if (url.substringBefore('?').endsWith(".mp3", ignoreCase = true))
+            Mp3MediaDataSource(url) else HttpMediaDataSource(url)
         if (stream is TsAdtsMediaDataSource) return aacSession(stream, own, sessionStarted)
+        if (stream is Mp3MediaDataSource) return mp3Session(stream, own, sessionStarted)
         source = stream
         val extractor = MediaExtractor()
         var codec: MediaCodec? = null
@@ -300,6 +303,8 @@ class RadioPlayer(private val probe: Boolean = false) {
             val first = stream.nextFrame() ?: error("直播流没有 AAC 帧")
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
                 stream.sampleRate, stream.channels.coerceAtLeast(1))
+            // 直解绕过 MediaExtractor，AAC-LC/HE-AAC 的 AudioSpecificConfig 必须显式提供。
+            format.setByteBuffer("csd-0", java.nio.ByteBuffer.wrap(audioSpecificConfig(first)))
             codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
             codec.configure(format, null, null, 0)
             codec.start()
@@ -315,7 +320,7 @@ class RadioPlayer(private val probe: Boolean = false) {
                 val input = codec.dequeueInputBuffer(10_000)
                 if (input >= 0 && pending != null) {
                     val buffer = codec.getInputBuffer(input)!!
-                    val frame = pending!!
+                    val frame = aacPayload(pending!!)
                     buffer.put(frame)
                     codec.queueInputBuffer(input, 0, frame.size, 0, 0)
                     pending = null
@@ -352,6 +357,64 @@ class RadioPlayer(private val probe: Boolean = false) {
                 if (pending == null) pending = stream.nextFrame() ?: break
             }
             return true
+        } finally {
+            try { codec?.stop() } catch (_: Exception) {}
+            try { codec?.release() } catch (_: Exception) {}
+            if (source === stream) source = null
+            stream.close()
+        }
+    }
+
+    private fun mp3Session(stream: Mp3MediaDataSource, own: Int, sessionStarted: Long): Boolean {
+        source = stream
+        var codec: MediaCodec? = null
+        try {
+            val first = stream.nextFrame() ?: error("直播流没有 MP3 帧")
+            sampleRate = stream.sampleRate
+            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_MPEG, sampleRate, stream.channels)
+            codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_MPEG)
+            codec.configure(format, null, null, 0)
+            codec.start()
+            android.util.Log.i("8DRadio", "mp3 codec ready +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms rate=$sampleRate")
+            buildTrack(own)
+            var pending: ByteArray? = first
+            var channels = stream.channels
+            var floating = false
+            var notifiedReady = false
+            val info = MediaCodec.BufferInfo()
+            while (own == generation && running) {
+                val input = codec.dequeueInputBuffer(10_000)
+                if (input >= 0 && pending != null) {
+                    val frame = pending!!
+                    codec.getInputBuffer(input)!!.put(frame)
+                    codec.queueInputBuffer(input, 0, frame.size, 0, 0)
+                    pending = null
+                }
+                val output = codec.dequeueOutputBuffer(info, 10_000)
+                if (output == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    val changed = codec.outputFormat
+                    channels = changed.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    floating = changed.containsKey(MediaFormat.KEY_PCM_ENCODING) &&
+                        changed.getInteger(MediaFormat.KEY_PCM_ENCODING) == AudioFormat.ENCODING_PCM_FLOAT
+                } else if (output >= 0) {
+                    val buffer = codec.getOutputBuffer(output)
+                    if (buffer != null && info.size > 0) {
+                        buffer.position(info.offset); buffer.limit(info.offset + info.size)
+                        buffer.order(ByteOrder.LITTLE_ENDIAN)
+                        val bytes = ByteArray(info.size)
+                        buffer.get(bytes)
+                        renderAndWrite(bytes, channels, floating, own)
+                        if (!notifiedReady && playedFrames > 0 && own == generation) {
+                            android.util.Log.i("8DRadio", "first pcm +${android.os.SystemClock.elapsedRealtime() - sessionStarted}ms rate=$sampleRate channels=$channels")
+                            notifiedReady = true
+                            main.post { if (own == generation) onReady?.invoke() }
+                        }
+                    }
+                    codec.releaseOutputBuffer(output, false)
+                }
+                if (pending == null) pending = stream.nextFrame() ?: break
+            }
+            return notifiedReady
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}
@@ -509,6 +572,32 @@ class RadioPlayer(private val probe: Boolean = false) {
         }
     }
 
+    private object AacConfig {
+        internal fun payload(adts: ByteArray): ByteArray {
+            require(adts.size >= 7)
+            val headerSize = if (adts[1].toInt() and 1 == 0) 9 else 7
+            require(adts.size >= headerSize)
+            return adts.copyOfRange(headerSize, adts.size)
+        }
+
+        internal fun audioSpecificConfig(adts: ByteArray): ByteArray {
+            require(adts.size >= 7)
+            val profile = ((adts[2].toInt() ushr 6) and 3) + 1
+            val frequency = (adts[2].toInt() ushr 2) and 0x0f
+            val channels = ((adts[2].toInt() and 1) shl 2) or ((adts[3].toInt() ushr 6) and 3)
+            require(frequency < 13 && channels > 0) { "无效 AAC 配置" }
+            val config = (profile shl 11) or (frequency shl 7) or (channels shl 3)
+            val base = byteArrayOf((config ushr 8).toByte(), config.toByte())
+            if (profile != 2) return base
+            val extensionFrequency = when {
+                frequency >= 6 -> frequency - 3
+                else -> frequency + 3
+            }
+            val extension = (5 shl 11) or (extensionFrequency shl 7) or (1 shl 3)
+            return base + byteArrayOf((extension ushr 8).toByte(), extension.toByte())
+        }
+    }
+
     private fun releaseTrack() = synchronized(trackLock) {
         val old = track ?: return@synchronized
         track = null
@@ -518,6 +607,8 @@ class RadioPlayer(private val probe: Boolean = false) {
     }
 
     internal companion object {
+        internal fun aacPayload(adts: ByteArray) = AacConfig.payload(adts)
+        internal fun audioSpecificConfig(adts: ByteArray) = AacConfig.audioSpecificConfig(adts)
         const val CHUNK = 4096
         /** 播放首包而不是预填满 AudioTrack，避免解码完成后仍等待约一秒才出声。 */
         internal fun shouldStartTrack(started: Boolean, writtenFrames: Long) = !started && writtenFrames > 0

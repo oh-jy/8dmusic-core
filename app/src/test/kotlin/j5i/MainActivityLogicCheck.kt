@@ -19,9 +19,17 @@ import com.j5i.spatial8d.TsAdtsMediaDataSource
 import j5i.spatial8d.audio.SpatialPlayer.RenderCache
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 
 /** 不启动 Android 设备的纯逻辑回归。 */
 class MainActivityLogicCheck {
+    @Test fun aacConfigPreservesLcAndSbrFromAdts() {
+        val lc = byteArrayOf(0xff.toByte(), 0xf1.toByte(), 0x4c, 0x80.toByte(), 0, 0x1f, 0xfc.toByte())
+        val he = byteArrayOf(0xff.toByte(), 0xf1.toByte(), 0x50, 0x80.toByte(), 0, 0x1f, 0xfc.toByte())
+        assertContentEquals(byteArrayOf(0x11, 0x90.toByte(), 0x2b, 0x08), j5i.spatial8d.audio.RadioPlayer.audioSpecificConfig(lc))
+        assertContentEquals(byteArrayOf(0x12, 0x10, 0x2b, 0x88.toByte()), j5i.spatial8d.audio.RadioPlayer.audioSpecificConfig(he))
+        assertContentEquals(byteArrayOf(1, 2, 3), j5i.spatial8d.audio.RadioPlayer.aacPayload(lc + byteArrayOf(1, 2, 3)))
+    }
     @Test fun sliderTouchReleaseNeverRefreshesOtherSeekBars() {
         val source = File("src/main/kotlin/j5i/MainActivity.kt").readText()
         val releaseBlocks = Regex("onStopTrackingTouch\\(seekBar: SeekBar\\) \\{([\\s\\S]*?)\\n\\s{16}\\}")
