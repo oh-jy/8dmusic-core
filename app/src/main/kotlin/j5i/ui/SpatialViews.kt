@@ -108,6 +108,11 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
     override var playing: Boolean = false
         set(value) {
             if (field == value) return
+            if (!value && ::pcmClock.isInitialized) {
+                pcmClock.reset()
+                smoothEnergy = 0.0; energyBaseline = 0.025; energyPeak = 0.05
+                lastPcmAt = 0L; meteors.clear()
+            }
             field = value; clock.playing = value; clock.sync(position); invalidate(); updateAnimation()
         }
     var dark = true
@@ -221,8 +226,11 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
                 (star[2] * (1f + intensity * 0.5f)).toFloat(), paint)
         }
         val meteorLimit = 1
-        val beatMeteor = intensity > 0.90 && nowMs - lastMeteorAt > 2_500L
-        if (playing && meteors.size < meteorLimit && (nowMs >= nextMeteorAt || beatMeteor)) {
+        val beatAge = System.nanoTime() - pcmClock.beatAtNs
+        val beatMeteor = pcmClock.beatAtNs != 0L && beatAge in 0..180_000_000L
+        val responsiveMeteor = intensity > 0.82 || beatMeteor
+        if (playing && meteors.size < meteorLimit &&
+            (nowMs >= nextMeteorAt || (responsiveMeteor && nowMs - lastMeteorAt >= 900L))) {
             val startX = random.nextFloat() * w * 0.78f
             val startY = random.nextFloat() * h * 0.64f
             val angle = random.nextDouble(0.0, Math.PI * 2)

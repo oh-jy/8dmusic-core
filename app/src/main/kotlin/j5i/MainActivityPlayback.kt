@@ -43,6 +43,7 @@ internal fun MainActivity.load(item: MusicItem) {
 internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         // 所有选歌、切歌和冷启动恢复共用同一条加载链路，旧代号回调全部丢弃。
         if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
+        if (isViewReady(this@load::visualizerView)) visualizerView.pcmClock.reset()
         val generation = ++loadGeneration
         ++radioGeneration
         radioProbes.forEach { it.stop() }
@@ -122,6 +123,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
 
 internal fun MainActivity.adoptServiceTrack(item: MusicItem) {
         if (currentUri == item.uri) return
+        if (isViewReady(this@adoptServiceTrack::visualizerView)) visualizerView.pcmClock.reset()
         currentQueue = service?.queueSnapshot?.ifEmpty { currentQueue } ?: currentQueue
         currentItem = item
         currentUri = item.uri

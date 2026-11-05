@@ -1,17 +1,44 @@
 package j5i.spatial8d.ui
 
-import android.os.SystemClock
 import j5i.spatial8d.visual.PerfTrace
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 
 /** 所有 PCM 动效共用同一延迟队列，避免顶部和可视化各自积压不同的音频历史。 */
+internal class BeatDetector {
+    private var average = 0.0
+    private var started = 0L
+    private var lastSample = 0L
+    private var lastBeat = 0L
+
+    fun reset() { average = 0.0; started = 0L; lastSample = 0L; lastBeat = 0L }
+
+    fun accept(energy: Double, now: Long): Boolean {
+        if (lastSample == 0L || now - lastSample > 500_000_000L) {
+            reset(); started = now; lastSample = now; average = energy
+            return false
+        }
+        val dt = ((now - lastSample).coerceAtLeast(0L) / 1e9).coerceAtMost(0.25)
+        lastSample = now
+        val beat = now - started >= 300_000_000L && energy > 0.025 &&
+            energy > average * 1.6 && energy - average > 0.015 &&
+            (lastBeat == 0L || now - lastBeat >= 250_000_000L)
+        if (beat) lastBeat = now
+        average += (energy - average) * (1.0 - kotlin.math.exp(-dt / 0.8))
+        return beat
+    }
+}
+
 class PcmVisualClock {
-    private data class Chunk(val atNs: Long, val rms: Double, val peak: Double)
+    private data class Chunk(val atNs: Long, val rms: Double, val peak: Double, val beat: Boolean)
     private val chunks = ArrayDeque<Chunk>()
-    var rms = 0.0; private set
-    var peak = 0.0; private set
+    private val detector = BeatDetector()
+    @Volatile var generation = 0L; private set
+    @Volatile var rms = 0.0; private set
+    @Volatile var peak = 0.0; private set
+    @Volatile var beatAtNs = 0L; private set
+    private var lastInputNs = 0L
 
     @Synchronized fun accept(data: ByteArray, bytes: Int) {
         val startedAt = System.nanoTime()
@@ -22,7 +49,11 @@ class PcmVisualClock {
             sum += sample * sample; peak = maxOf(peak, kotlin.math.abs(sample)); count++
         }
         if (count == 0) return
-        chunks.addLast(Chunk(System.nanoTime() + DELAY_NS, sqrt(sum / count), peak))
+        val now = System.nanoTime()
+        if (lastInputNs != 0L && now - lastInputNs > 500_000_000L) reset()
+        lastInputNs = now
+        val rms = sqrt(sum / count)
+        chunks.addLast(Chunk(now + DELAY_NS, rms, peak, detector.accept(rms, now)))
         while (chunks.size > 32) chunks.removeFirst()
         PerfTrace.sample("clock.acceptNs", System.nanoTime() - startedAt)
     }
@@ -32,10 +63,15 @@ class PcmVisualClock {
         while (chunks.firstOrNull()?.atNs?.let { it <= now } == true) {
             val current = chunks.removeFirst()
             rms = current.rms; peak = current.peak
+            if (current.beat) beatAtNs = current.atNs
         }
+        if (lastInputNs != 0L && now - lastInputNs > 500_000_000L) reset()
     }
 
-    @Synchronized fun reset() { chunks.clear(); rms = 0.0; peak = 0.0 }
+    @Synchronized fun reset() {
+        chunks.clear(); detector.reset(); rms = 0.0; peak = 0.0
+        beatAtNs = 0L; lastInputNs = 0L; generation++
+    }
 
     private companion object { const val DELAY_NS = 80_000_000L }
 }

@@ -690,6 +690,7 @@ internal fun MainActivity.playCustom(raw: String) {
 
 internal fun MainActivity.playRadio(station: RadioStation) {
         if (recordingKind.isNotEmpty()) { toast("请先停止当前录音，再切换音源"); return }
+        if (isViewReady(this@playRadio::visualizerView)) visualizerView.pcmClock.reset()
         ++loadGeneration
         radioProbes.forEach { it.stop() }
         radioProbes = emptyList()
