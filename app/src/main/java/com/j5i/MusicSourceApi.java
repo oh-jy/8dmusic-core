@@ -1,13 +1,18 @@
 package com.j5i.spatial8d;
 
 import android.app.Activity;
+import android.content.ContentUris;
+import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Environment;
 import android.provider.DocumentsContract;
+import android.provider.MediaStore;
 import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
@@ -42,6 +47,8 @@ public final class MusicSourceApi {
     private static final String COOKIE_DOCUMENT = "persistent_cookie_document";
     private static final String COOKIE_FILE = "qq_cookie.txt";
     private static final String SESSION_PREFS = "online_provider_sessions";
+    private static final String LOGIN_RELATIVE_PATH = Environment.DIRECTORY_DOWNLOADS + "/8d/login/";
+    private static final String[] LOGIN_PROVIDERS = {"qq", "netease", "kugou", "kuwo", "bilibili"};
     private static final int PICK_TREE = 8142;
     private static final int PICK_COOKIE_FILE = 8143;
     private static String cookie = "";
@@ -52,6 +59,8 @@ public final class MusicSourceApi {
     private static Callback pendingImportCallback;
     private static Uri persistentTree;
     private static Uri persistentCookieDocument;
+    private static String importProvider = "qq";
+    private static volatile boolean bootstrapped = false;
 
     private MusicSourceApi() {}
 
@@ -142,7 +151,10 @@ public final class MusicSourceApi {
             if (result.length() > 0) result.append("; ");
             result.append(entry.getKey()).append('=').append(entry.getValue());
         }
-        saveProviderCookie(activity, provider, result.toString());
+        String merged = result.toString();
+        saveProviderCookie(activity, provider, merged);
+        // 短信登录等非 WebView 流程拿到完整会话后，同样落盘到公共登录目录。
+        if (LoginCookies.valid(provider, merged)) writeLoginFile(activity, provider, merged);
     }
 
     private static void saveProviderCookie(Activity activity, String provider, String value) {
@@ -154,15 +166,18 @@ public final class MusicSourceApi {
     public static String sessionInfo(Activity activity, String provider) {
         if ("qq".equals(provider)) return sessionInfo();
         String value = providerCookie(activity, provider);
-        boolean loggedIn = ("netease".equals(provider) && value.contains("MUSIC_U="))
-                || ("bilibili".equals(provider) && value.contains("SESSDATA="));
+        boolean loggedIn = LoginCookies.valid(provider, value);
         try { return new JSONObject().put("loggedIn", loggedIn).put("provider", provider).toString(); }
         catch (Exception e) { return "{\"loggedIn\":false}"; }
     }
 
     public static void logout(Activity activity, String provider) {
-        if ("qq".equals(provider)) { logout(activity); return; }
         saveProviderCookie(activity, provider, "");
+        deleteLoginFile(activity, provider);
+        if ("qq".equals(provider)) {
+            synchronized (LOCK) { cookie = ""; }
+            try { new File(activity.getFilesDir(), COOKIE_FILE).delete(); } catch (Exception ignored) {}
+        }
     }
 
     /** Raw provider cookie for binary downloads (e.g. DASH audio CDN checks). */
@@ -199,8 +214,15 @@ public final class MusicSourceApi {
                     @Override public void onPageFinished(WebView web, String url) {
                         String value = CookieManager.getInstance().getCookie(cookieDomain);
                         if (!done[0] && value != null && value.contains(cookieMarker)) {
+                            String normalized = LoginCookies.normalize(value);
+                            if (!LoginCookies.valid(provider, normalized)) return;
+                            // 酷我的 kw_token 可能在未登录时就存在，需要再向服务端确认。
+                            if ("kuwo".equals(provider) && Boolean.FALSE.equals(validateSession(activity, provider, normalized))) {
+                                return;
+                            }
                             done[0] = true;
-                            saveProviderCookie(activity, provider, value);
+                            saveProviderCookie(activity, provider, normalized);
+                            writeLoginFile(activity, provider, normalized);
                             closeLogin();
                             callback.done("{\"ok\":true}");
                         }
@@ -228,17 +250,20 @@ public final class MusicSourceApi {
         });
     }
 
+    /** 按 LoginCookies 内置的官方登录页配置打开 WebView 登录。 */
+    public static void loginWithWeb(Activity activity, String provider, Callback callback) {
+        loginWeb(activity, provider, LoginCookies.loginUrl(provider),
+            LoginCookies.cookieDomain(provider), LoginCookies.marker(provider), callback);
+    }
+
+    public static String cookieMarkerHint(String provider) {
+        return LoginCookies.markerHint(provider);
+    }
+
     /** WeChat authorizes on its official page; QQ Music then sets its own session cookies. */
     public static void login(Activity activity, Callback callback) {
         MAIN.post(() -> {
             try {
-                if (persistentTree == null && treeUri(activity) == null
-                        && persistentCookieDocument == null && cookieDocumentUri(activity) == null) {
-                    pendingActivity = activity;
-                    pendingCallback = callback;
-                    activity.startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), PICK_TREE);
-                    return;
-                }
                 closeLogin();
                 CookieManager cookies = CookieManager.getInstance();
                 cookies.setAcceptCookie(true);
@@ -255,7 +280,11 @@ public final class MusicSourceApi {
                         String value = QqCookies.normalize(CookieManager.getInstance().getCookie("https://y.qq.com/"));
                         if (QqCookies.valid(value)) {
                             synchronized (LOCK) { cookie = value; }
-                            saveCookie(activity, value);
+                            saveProviderCookie(activity, "qq", value);
+                            writeLoginFile(activity, "qq", value);
+                            try (FileOutputStream out = new FileOutputStream(new File(activity.getFilesDir(), COOKIE_FILE))) {
+                                out.write(value.getBytes(StandardCharsets.UTF_8));
+                            } catch (Exception ignored) {}
                             closeLogin();
                             callback.done("{\"ok\":true}");
                         }
@@ -276,9 +305,10 @@ public final class MusicSourceApi {
     }
 
     /** Restores the plain-text Cookie backup created by a previous install. */
-    public static void pickCookieFile(Activity activity, Callback callback) {
+    public static void pickCookieFile(Activity activity, String provider, Callback callback) {
         MAIN.post(() -> {
             pendingImportCallback = callback;
+            importProvider = provider == null || provider.isEmpty() ? "qq" : provider;
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .setType("*/*")
@@ -288,13 +318,22 @@ public final class MusicSourceApi {
     }
 
     /** Allows restoring a session when the user only has the Cookie string. */
-    public static void saveCookieText(Activity activity, String raw, Callback callback) {
+    public static void saveCookieText(Activity activity, String provider, String raw, Callback callback) {
         new Thread(() -> {
             try {
-                String value = QqCookies.normalize(raw);
-                if (!QqCookies.valid(value)) throw new IllegalArgumentException("Cookie 缺少 qqmusic_key、wxuin 或 uin");
-                synchronized (LOCK) { cookie = value; }
-                saveCookie(activity, value);
+                String key = provider == null || provider.isEmpty() ? "qq" : provider;
+                String value = LoginCookies.normalize(raw);
+                if (!LoginCookies.valid(key, value)) {
+                    throw new IllegalArgumentException("Cookie 无效：" + LoginCookies.markerHint(key));
+                }
+                saveProviderCookie(activity, key, value);
+                writeLoginFile(activity, key, value);
+                if ("qq".equals(key)) {
+                    synchronized (LOCK) { cookie = value; }
+                    try (FileOutputStream out = new FileOutputStream(new File(activity.getFilesDir(), COOKIE_FILE))) {
+                        out.write(value.getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception ignored) {}
+                }
                 MAIN.post(() -> callback.done("{\"ok\":true}"));
             } catch (Exception e) {
                 MAIN.post(() -> callback.done(error("LOGIN", e.getMessage())));
@@ -305,6 +344,7 @@ public final class MusicSourceApi {
     public static void logout(Activity activity) {
         synchronized (LOCK) { cookie = ""; }
         try { new File(activity.getFilesDir(), COOKIE_FILE).delete(); } catch (Exception ignored) {}
+        deleteLoginFile(activity, "qq");
         try {
             Uri document = persistentCookieDocument != null ? persistentCookieDocument : cookieDocumentUri(activity);
             if (document != null) {
@@ -328,6 +368,16 @@ public final class MusicSourceApi {
 
     public static void restore(Activity activity) {
         try {
+            // 新机制：公共下载目录 Download/8d/login 为权威来源。
+            String published = LoginCookies.normalize(readLoginFile(activity, "qq"));
+            if (QqCookies.valid(published)) {
+                synchronized (LOCK) { cookie = published; }
+                saveProviderCookie(activity, "qq", published);
+                try (FileOutputStream out = new FileOutputStream(new File(activity.getFilesDir(), COOKIE_FILE))) {
+                    out.write(published.getBytes(StandardCharsets.UTF_8));
+                } catch (Exception ignored) {}
+                return;
+            }
             if (persistentTree == null) persistentTree = treeUri(activity);
             if (persistentCookieDocument == null) persistentCookieDocument = cookieDocumentUri(activity);
             File f = new File(activity.getFilesDir(), COOKIE_FILE);
@@ -384,14 +434,23 @@ public final class MusicSourceApi {
             if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
                 Uri document = data.getData();
                 int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                activity.getContentResolver().takePersistableUriPermission(document, flags);
-                String value = QqCookies.normalize(readAll(activity.getContentResolver().openInputStream(document)));
-                if (!QqCookies.valid(value)) throw new IllegalArgumentException("登录文件缺少 qqmusic_key、wxuin 或 uin");
+                try { activity.getContentResolver().takePersistableUriPermission(document, flags); }
+                catch (Exception ignored) {}
+                String value = LoginCookies.normalize(readAll(activity.getContentResolver().openInputStream(document)));
+                if (!LoginCookies.valid(importProvider, value)) {
+                    throw new IllegalArgumentException("登录文件无效：" + LoginCookies.markerHint(importProvider));
+                }
+                saveProviderCookie(activity, importProvider, value);
+                writeLoginFile(activity, importProvider, value);
+                if ("qq".equals(importProvider)) {
+                    synchronized (LOCK) { cookie = value; }
+                    try (FileOutputStream out = new FileOutputStream(new File(activity.getFilesDir(), COOKIE_FILE))) {
+                        out.write(value.getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception ignored) {}
+                }
                 activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                     .edit().putString(COOKIE_DOCUMENT, document.toString()).apply();
                 persistentCookieDocument = document;
-                synchronized (LOCK) { cookie = value; }
-                saveCookie(activity, value);
                 if (pendingImportCallback != null) pendingImportCallback.done("{\"ok\":true}");
             } else if (pendingImportCallback != null) {
                 pendingImportCallback.done(error("LOGIN", "未选择登录文件"));
@@ -517,6 +576,206 @@ public final class MusicSourceApi {
         if (persistentTree == null) persistentTree = treeUri(context);
         if (persistentCookieDocument == null) persistentCookieDocument = cookieDocumentUri(context);
         writePersistent(context, value);
+    }
+
+    // ------------------------------------------------------------------
+    // 公共下载目录 Download/8d/login 登录文件（Android 10+ 走 MediaStore）
+    // ------------------------------------------------------------------
+
+    /** 启动时自动恢复公共登录目录中的会话；失效文件只在服务端明确拒绝时删除。 */
+    public static void bootstrap(Activity activity) {
+        if (bootstrapped) return;
+        bootstrapped = true;
+        new Thread(() -> {
+            for (String provider : LOGIN_PROVIDERS) {
+                try {
+                    String value = LoginCookies.normalize(readLoginFile(activity, provider));
+                    if (value.isEmpty()) continue;
+                    if (!LoginCookies.valid(provider, value)) {
+                        deleteLoginFile(activity, provider);
+                        continue;
+                    }
+                    saveProviderCookie(activity, provider, value);
+                    if ("qq".equals(provider)) {
+                        synchronized (LOCK) { cookie = value; }
+                        try (FileOutputStream out = new FileOutputStream(new File(activity.getFilesDir(), COOKIE_FILE))) {
+                            out.write(value.getBytes(StandardCharsets.UTF_8));
+                        } catch (Exception ignored) {}
+                    }
+                    Boolean alive = validateSession(activity, provider, value);
+                    if (Boolean.FALSE.equals(alive)) {
+                        saveProviderCookie(activity, provider, "");
+                        if ("qq".equals(provider)) synchronized (LOCK) { cookie = ""; }
+                        deleteLoginFile(activity, provider);
+                    }
+                } catch (Exception ignored) {
+                    // 单平台恢复失败不影响其它平台；网络异常时保留文件等下次判定。
+                }
+            }
+        }, "login-bootstrap").start();
+    }
+
+    /**
+     * 服务端校验登录态。返回 null 表示网络/风控原因无法判定，调用方必须保留会话；
+     * 只有明确未登录才返回 false 并删除登录文件。
+     */
+    private static Boolean validateSession(Activity activity, String provider, String cookieValue) {
+        try {
+            switch (provider) {
+                case "netease": {
+                    JSONObject r = new JSONObject(httpGet(
+                        "https://music.163.com/api/nuser/account/get", cookieValue,
+                        "https://music.163.com/"));
+                    if (r.optInt("code") != 200) return null;
+                    return r.optJSONObject("profile") != null;
+                }
+                case "bilibili": {
+                    JSONObject r = new JSONObject(httpGet(
+                        "https://api.bilibili.com/x/web-interface/nav", cookieValue,
+                        "https://www.bilibili.com/"));
+                    if (r.optInt("code") != 0) return null;
+                    JSONObject data = r.optJSONObject("data");
+                    return data != null && data.optBoolean("isLogin");
+                }
+                case "kuwo": {
+                    String token = LoginCookies.fieldValue(cookieValue, "kw_token");
+                    HttpURLConnection c = openJsonConnection(
+                        "https://www.kuwo.cn/api/www/kuwo/user/getUserInfo", cookieValue,
+                        "https://www.kuwo.cn/");
+                    c.setRequestProperty("csrf", token);
+                    String body = execute(c);
+                    if (body.contains("illegal") || body.contains("非法")) return null;
+                    JSONObject r = new JSONObject(body);
+                    return r.optBoolean("success");
+                }
+                case "kugou":
+                case "qq":
+                default:
+                    // 酷狗 WAF 无法稳定区分过期与拦截，QQ 以本地标记为准，均 fail-open。
+                    return Boolean.TRUE;
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String httpGet(String url, String cookieValue, String referer) throws Exception {
+        return execute(openJsonConnection(url, cookieValue, referer));
+    }
+
+    private static HttpURLConnection openJsonConnection(String url, String cookieValue, String referer) throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(15000);
+        c.setInstanceFollowRedirects(true);
+        c.setRequestProperty("User-Agent",
+            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36");
+        c.setRequestProperty("Accept", "application/json,text/plain,*/*");
+        c.setRequestProperty("Referer", referer);
+        if (cookieValue != null && !cookieValue.isEmpty()) c.setRequestProperty("Cookie", cookieValue);
+        return c;
+    }
+
+    private static String execute(HttpURLConnection c) throws Exception {
+        try {
+            int status = c.getResponseCode();
+            InputStream in = status >= 400 ? c.getErrorStream() : c.getInputStream();
+            return in == null ? "" : readAll(in);
+        } finally {
+            c.disconnect();
+        }
+    }
+
+    public static void writeLoginFile(Activity activity, String provider, String value) {
+        if (value == null || value.isEmpty() || !LoginCookies.valid(provider, value)) return;
+        String name = LoginCookies.fileName(provider);
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                Uri existing = findLoginUri(activity, name);
+                if (existing != null) {
+                    try (OutputStream out = activity.getContentResolver().openOutputStream(existing, "wt")) {
+                        if (out != null) out.write(bytes);
+                    }
+                    return;
+                }
+                ContentValues values = new ContentValues();
+                values.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                values.put(MediaStore.Downloads.MIME_TYPE, "text/plain");
+                values.put(MediaStore.Downloads.RELATIVE_PATH, LOGIN_RELATIVE_PATH);
+                values.put(MediaStore.Downloads.IS_PENDING, 1);
+                Uri uri = activity.getContentResolver()
+                    .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
+                if (uri == null) throw new IllegalStateException("无法创建登录文件");
+                try (OutputStream out = activity.getContentResolver().openOutputStream(uri)) {
+                    if (out == null) throw new IllegalStateException("无法写入登录文件");
+                    out.write(bytes);
+                }
+                values.clear();
+                values.put(MediaStore.Downloads.IS_PENDING, 0);
+                activity.getContentResolver().update(uri, values, null, null);
+            } catch (Exception e) {
+                writeLegacyLoginFile(activity, name, bytes);
+            }
+        } else {
+            writeLegacyLoginFile(activity, name, bytes);
+        }
+    }
+
+    public static String readLoginFile(Activity activity, String provider) {
+        String name = LoginCookies.fileName(provider);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Uri uri = findLoginUri(activity, name);
+            if (uri != null) {
+                try (InputStream in = activity.getContentResolver().openInputStream(uri)) {
+                    if (in != null) return readAll(in);
+                } catch (Exception ignored) {}
+            }
+        }
+        File legacy = new File(new File(activity.getFilesDir(), "login"), name);
+        if (legacy.exists()) {
+            try (FileInputStream in = new FileInputStream(legacy)) {
+                return readAll(in);
+            } catch (Exception ignored) {}
+        }
+        return "";
+    }
+
+    public static void deleteLoginFile(Activity activity, String provider) {
+        String name = LoginCookies.fileName(provider);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            Uri uri = findLoginUri(activity, name);
+            if (uri != null) {
+                try { activity.getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
+            }
+        }
+        File legacy = new File(new File(activity.getFilesDir(), "login"), name);
+        if (legacy.exists()) legacy.delete();
+    }
+
+    private static Uri findLoginUri(Activity activity, String name) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null;
+        String selection = MediaStore.Downloads.DISPLAY_NAME + "=? AND "
+            + MediaStore.Downloads.RELATIVE_PATH + "=?";
+        try (android.database.Cursor cursor = activity.getContentResolver().query(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                new String[]{MediaStore.Downloads._ID},
+                selection, new String[]{name, LOGIN_RELATIVE_PATH}, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                return ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cursor.getLong(0));
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static void writeLegacyLoginFile(Activity activity, String name, byte[] bytes) {
+        try {
+            File dir = new File(activity.getFilesDir(), "login");
+            if (!dir.exists() && !dir.mkdirs()) return;
+            try (FileOutputStream out = new FileOutputStream(new File(dir, name))) {
+                out.write(bytes);
+            }
+        } catch (Exception ignored) {}
     }
 
     private static String readAll(InputStream in) throws Exception {

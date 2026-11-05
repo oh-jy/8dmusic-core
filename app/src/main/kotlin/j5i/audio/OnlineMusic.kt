@@ -112,6 +112,16 @@ class OnlineMusic(private val activity: Activity) {
     /** 哔哩哔哩官方页登录：页面内可选扫码或手机号短信，风控由官方页面完成。 */
     fun biliLogin(callback: (Result<Unit>) -> Unit) = bili.login(callback)
 
+    /** 网易云、酷狗、酷我、哔哩哔哩统一走官方页登录（扫码/手机号/密码均在站点页面内完成）。 */
+    fun providerLogin(provider: Int, callback: (Result<Unit>) -> Unit) {
+        val name = providerName(provider)
+        require(name.isNotEmpty()) { "该来源暂不支持账号登录" }
+        MusicSourceApi.loginWithWeb(activity, name) { raw -> completeLogin(raw, callback) }
+    }
+
+    fun cookieMarkerHint(provider: Int): String =
+        MusicSourceApi.cookieMarkerHint(providerName(provider).ifEmpty { "qq" })
+
     /** 展开哔哩哔哩分 P 合集；单 P 视频也统一返回单元素列表。 */
     fun biliParts(track: OnlineTrack, callback: (Result<List<OnlineTrack>>) -> Unit) {
         thread(name = "online-music-bili-parts") {
@@ -121,12 +131,22 @@ class OnlineMusic(private val activity: Activity) {
     }
 
     fun importCookieFile(callback: (Result<Unit>) -> Unit) {
-        MusicSourceApi.pickCookieFile(activity) { completeLogin(it, callback) }
+        MusicSourceApi.pickCookieFile(activity, "qq") { completeLogin(it, callback) }
+    }
+
+    fun importCookieFile(provider: Int, callback: (Result<Unit>) -> Unit) {
+        MusicSourceApi.pickCookieFile(activity, providerName(provider).ifEmpty { "qq" }) { completeLogin(it, callback) }
     }
 
     fun saveCookieText(cookie: String, callback: (Result<Unit>) -> Unit) {
-        MusicSourceApi.saveCookieText(activity, cookie) { completeLogin(it, callback) }
+        MusicSourceApi.saveCookieText(activity, "qq", cookie) { completeLogin(it, callback) }
+    }
+
+    fun saveCookieText(provider: Int, cookie: String, callback: (Result<Unit>) -> Unit) {
+        MusicSourceApi.saveCookieText(activity, providerName(provider).ifEmpty { "qq" }, cookie) {
+            completeLogin(it, callback)
         }
+    }
 
     fun sendPhoneCode(provider: Int, phone: String, callback: (Result<Unit>) -> Unit) {
         if (provider != 2) return callback(Result.failure(UnsupportedOperationException("该来源暂无可验证的手机号登录接口")))
@@ -303,7 +323,9 @@ class OnlineMusic(private val activity: Activity) {
         if (r.optBoolean("ok")) callback(Result.success(Unit))
         else callback(Result.failure(Exception(r.optString("message", "登录失败"))))
     }
-    private fun providerName(provider: Int) = when (provider) { 4 -> "qq"; 2 -> "netease"; 3 -> "kugou"; 5 -> "jamendo"; 6 -> "bilibili"; else -> "" }
+    private fun providerName(provider: Int) = when (provider) {
+        1 -> "kuwo"; 4 -> "qq"; 2 -> "netease"; 3 -> "kugou"; 5 -> "jamendo"; 6 -> "bilibili"; else -> ""
+    }
     private fun providerLabel(provider: Int) = when (provider) { 1 -> "酷我"; 4 -> "QQ"; 2 -> "网易云"; 3 -> "酷狗"; 5 -> "Jamendo"; 6 -> "B站"; else -> "未知来源" }
     private fun encode(value: String) = URLEncoder.encode(value, "UTF-8")
     private fun cookieValue(vararg names: String): String? = session().optString("cookie").split(';').map { it.trim() }

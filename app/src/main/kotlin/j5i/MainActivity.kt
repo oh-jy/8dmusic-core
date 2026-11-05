@@ -276,6 +276,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.j5i.spatial8d.MusicSourceApi.bootstrap(this)
         musicStore = MusicStore(this)
         presetStore = PresetStore(this)
         customPresets = presetStore.load().toMutableList()
@@ -2945,7 +2946,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 showQqCookieInput()
             })
             addView(ThemeUi.text(this@MainActivity,
-                "重装或清空数据后，选择之前保存目录中的 qq_cookie.txt 即可恢复；Cookie 不会上传到本应用服务器。",
+                "登录信息默认保存到 Download/8d/login/qq_cookie.txt，启动时自动恢复，也可选择登录文件还原；Cookie 不会上传到本应用服务器。",
                 10f, palette, role = ThemeUi.ROLE_FAINT))
         }
         dialog.show()
@@ -2959,23 +2960,60 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             return
         }
         if (provider == 4) { showQqAuthentication(); return }
-        if (provider == 6) {
-            onlineStatusView?.text = "在哔哩哔哩官方页面可扫码或手机号短信登录；未登录也能搜索公开视频"
-            onlineMusic.biliLogin { result ->
-                result.onSuccess {
-                    if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) }
-                    toast("哔哩哔哩已登录")
-                }.onFailure {
-                    if (onlineDialog?.isShowing == true)
-                        onlineStatusView?.text = it.message ?: "登录失败"
+        showProviderAuthentication(provider)
+    }
+
+    private fun providerDisplayName(provider: Int) = when (provider) {
+        1 -> "酷我"; 2 -> "网易云"; 3 -> "酷狗"; 6 -> "哔哩哔哩"; else -> "该平台"
+    }
+
+    /** 网易云、酷狗、酷我、哔哩哔哩统一认证入口；登录文件固定保存到 Download/8d/login。 */
+    private fun showProviderAuthentication(provider: Int) {
+        val name = providerDisplayName(provider)
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, "$name 账号登录",
+            "登录信息默认保存到 Download/8d/login，启动时自动恢复") {
+            addView(ThemeUi.button(this@MainActivity, palette, "官方页登录（扫码 / 手机号）", ThemeUi.ROLE_ACCENT_FILL) {
+                dialog.dismiss()
+                onlineStatusView?.text = "正在打开$name 官方登录页…"
+                onlineMusic.providerLogin(provider) { result ->
+                    result.onSuccess {
+                        if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) }
+                        toast("$name 已登录")
+                    }.onFailure {
+                        if (onlineDialog?.isShowing == true)
+                            onlineStatusView?.text = it.message ?: "登录失败"
+                    }
                 }
-            }
-            return
+            })
+            if (provider == 2) addView(ThemeUi.button(this@MainActivity, palette, "手机号短信登录") {
+                dialog.dismiss(); showNeteaseSmsLogin()
+            })
+            addView(ThemeUi.button(this@MainActivity, palette, "选择登录文件还原") {
+                dialog.dismiss()
+                onlineStatusView?.text = "请选择 $name 的登录文件…"
+                onlineMusic.importCookieFile(provider) { result ->
+                    result.onSuccess {
+                        if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) }
+                        toast("$name 登录已还原")
+                    }.onFailure {
+                        if (onlineDialog?.isShowing == true)
+                            onlineStatusView?.text = it.message ?: "登录文件还原失败"
+                    }
+                }
+            })
+            addView(ThemeUi.button(this@MainActivity, palette, "手动输入 Cookie") {
+                dialog.dismiss(); showProviderCookieInput(provider)
+            })
+            addView(ThemeUi.text(this@MainActivity,
+                "启动时自动扫描 Download/8d/login；失效或退出登录才会删除对应文件，Cookie 不会上传到本应用服务器。",
+                10f, palette, role = ThemeUi.ROLE_FAINT))
         }
-        if (provider != 2) {
-            onlineStatusView?.text = "该平台尚未接入经验证的手机号登录，当前仅支持公开免费内容"
-            return
-        }
+        dialog.show()
+    }
+
+    private fun showNeteaseSmsLogin() {
+        val provider = 2
         lateinit var dialog: Dialog
         dialog = ThemeUi.showSheet(this, palette, "网易云手机号登录", "验证码由网易云官方发送；仅保存登录会话") {
             val phone = ThemeUi.input(this@MainActivity, palette, "手机号").apply {
@@ -3000,6 +3038,38 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     result.onSuccess {
                         dialog.dismiss(); refreshOnlineBody(); toast("网易云已登录")
                     }.onFailure { toast(it.message ?: "登录失败") }
+                }
+            })
+        }
+        dialog.show()
+    }
+
+    private fun showProviderCookieInput(provider: Int) {
+        val name = providerDisplayName(provider)
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, "手动输入 $name Cookie",
+            "粘贴完整 Cookie；保存到 Download/8d/login 并自动还原") {
+            val input = ThemeUi.input(this@MainActivity, palette, "完整 Cookie").apply {
+                minLines = 4
+                gravity = android.view.Gravity.TOP
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+                    android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            }
+            addView(input, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 104f)))
+            addView(ThemeUi.text(this@MainActivity, onlineMusic.cookieMarkerHint(provider),
+                10f, palette, role = ThemeUi.ROLE_FAINT))
+            addView(ThemeUi.button(this@MainActivity, palette, "保存并还原", ThemeUi.ROLE_ACCENT_FILL) {
+                onlineStatusView?.text = "正在保存 Cookie…"
+                onlineMusic.saveCookieText(provider, input.text.toString()) { result ->
+                    result.onSuccess {
+                        dialog.dismiss()
+                        if (onlineDialog?.isShowing == true) { refreshOnlineBody(); loadOnlineTracks(false) }
+                        toast("$name 登录已还原")
+                    }.onFailure {
+                        toast(it.message ?: "Cookie 保存失败")
+                        if (onlineDialog?.isShowing == true) onlineStatusView?.text = it.message ?: "Cookie 保存失败"
+                    }
                 }
             })
         }
