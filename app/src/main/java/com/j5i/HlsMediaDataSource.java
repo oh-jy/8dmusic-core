@@ -13,6 +13,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 /** Live HLS reader: refreshes media playlists and exposes joined TS segments. */
 public final class HlsMediaDataSource extends MediaDataSource {
@@ -39,7 +40,7 @@ public final class HlsMediaDataSource extends MediaDataSource {
 
     public HlsMediaDataSource(String url) {
         this.playlistUrl = url;
-        this.playlist = url.split("\\?", 2)[0].toLowerCase().endsWith(".m3u8");
+        this.playlist = url.split("\\?", 2)[0].toLowerCase(Locale.ROOT).endsWith(".m3u8");
     }
 
     @Override

@@ -18,12 +18,20 @@ internal fun MainActivity.scheduleLyricsPrefetch() {
 
 internal fun MainActivity.loadLyrics(item: MusicItem, manualTitle: String? = null) {
         val generation = ++lyricsGeneration
+        var finished = false
         currentLyrics = null
         pushLyricsToVisualizer()
         if (isViewReady(this@loadLyrics::lyricsView)) lyricsView.clear()
         val title = manualTitle ?: Lyrics.searchTitle(item.name, item.artist)
+        main.postDelayed({
+            if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) {
+                finished = true
+                lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name), timedOut = true)
+            }
+        }, 25_000)
         lyrics.load(title, item.artist, item.duration / 1000.0, { result ->
-            if (generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
+            if (finished || generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
+            finished = true
             result.onSuccess {
                 currentLyrics = it
                 lyricsView.setLyrics(it)
@@ -31,7 +39,7 @@ internal fun MainActivity.loadLyrics(item: MusicItem, manualTitle: String? = nul
                 updateDriving()
             }.onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
         }, { progress ->
-            if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
+            if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
         })
     }
 
@@ -176,6 +184,7 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
                         setOnClickListener {
                             dismiss()
                             lyricsDialog?.dismiss()
+                            ++lyricsGeneration
                             lyrics.applyCandidate(title, artist, duration, candidate, { result ->
                                 if (currentItem?.uri != item.uri) return@applyCandidate
                                 result.onSuccess {

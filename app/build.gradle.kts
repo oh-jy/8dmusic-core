@@ -13,7 +13,8 @@ val versionCounter = Properties().apply {
     versionCounterFile.takeIf { it.isFile }?.inputStream()?.use { load(it) }
 }
 val sameHour = versionCounter.getProperty("hour") == buildHour
-val buildNumber = if (sameHour) versionCounter.getProperty("count", "0").toInt() + 1 else 1
+// The last sequence value is reused if more than nine releases are built in one hour.
+val buildNumber = if (sameHour) (versionCounter.getProperty("count", "0").toInt() + 1).coerceAtMost(9) else 1
 // 仅正式发布累计次数；同小时测试/debug 构建复用当前序号，不消耗打包次数。
 val releaseBuild = gradle.startParameter.taskNames.any { it.contains("assembleRelease") }
 if (releaseBuild) {
@@ -22,7 +23,9 @@ if (releaseBuild) {
     versionCounter.setProperty("count", buildNumber.toString())
     versionCounterFile.outputStream().use { versionCounter.store(it, null) }
 }
-val versionSequence = if (releaseBuild) buildNumber else versionCounter.getProperty("count", "1").toInt()
+// Debug builds do not publish a version code and must not advance the release counter.
+val versionSequence = if (releaseBuild) buildNumber else
+    if (sameHour) versionCounter.getProperty("count", "1").toInt().coerceIn(1, 9) else 1
 val hourlyVersionCode = (buildHour + versionSequence).toInt()
 
 android {
@@ -36,7 +39,7 @@ android {
         targetSdk = 34
         // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.8.3"
+        versionName = "2.9.9"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 

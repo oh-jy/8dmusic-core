@@ -31,14 +31,13 @@ internal fun MainActivity.card(block: LinearLayout.() -> Unit): LinearLayout = T
 internal fun MainActivity.spaceSettingsCard(): LinearLayout {
         val card = card {
             val header = FrameLayout(this@spaceSettingsCard).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 32f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 40f))
             }
-            header.addView(ThemeUi.text(this@spaceSettingsCard, t("space.style"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             presetPicker = ThemeUi.text(this@spaceSettingsCard, preset.name, 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 ThemeUi.hideOverflow(this)
                 gravity = Gravity.CENTER
-                setPadding(ThemeUi.dp(this@spaceSettingsCard, 12f), 0, ThemeUi.dp(this@spaceSettingsCard, 24f), 0)
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@spaceSettingsCard, 168f), ThemeUi.dp(this@spaceSettingsCard, 32f), Gravity.CENTER)
+                setPadding(ThemeUi.dp(this@spaceSettingsCard, 24f), 0, ThemeUi.dp(this@spaceSettingsCard, 24f), 0)
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     // 快速选择只调整展示顺序，保持内置和自定义预设原值不变。
                     val pinned = listOfNotNull(SPACE_PRESETS.firstOrNull { it.raw },
@@ -55,24 +54,15 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
             }
             header.addView(presetPicker)
             header.addView(ThemeUi.text(this@spaceSettingsCard, "▾", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@spaceSettingsCard, 22f),
-                    ThemeUi.dp(this@spaceSettingsCard, 32f), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    rightMargin = ThemeUi.dp(this@spaceSettingsCard, 67f)
-                }
-            })
-            header.addView(ThemeUi.text(this@spaceSettingsCard, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
-                tag = "toggleP"
-                layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
-                setOnClickListener { toggleParameterOpen() }
-            })
+            }, FrameLayout.LayoutParams(ThemeUi.dp(this@spaceSettingsCard, 32f), -1, Gravity.END))
             addView(header)
             presetNote = ThemeUi.text(this@spaceSettingsCard, preset.note, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, ThemeUi.dp(this@spaceSettingsCard, 5f), 0, 0)
             }
             parameterPanel = LinearLayout(this@spaceSettingsCard).apply { orientation = LinearLayout.VERTICAL }
             addView(parameterPanel)
-            // 折叠时与音频变换共用相同的一行头部；说明跟随展开面板展示。
             parameterPanel.addView(presetNote)
             parameterPanel.addView(ThemeUi.divider(this@spaceSettingsCard, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 1f)).apply {
@@ -93,7 +83,19 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                 setPadding(0, ThemeUi.dp(this@spaceSettingsCard, 10f), 0, ThemeUi.dp(this@spaceSettingsCard, 4f))
             })
             parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "depth", "phase") }))
-            val saveRow = ThemeUi.row(this@spaceSettingsCard)
+            parameterPanel.addView(ThemeUi.divider(this@spaceSettingsCard, palette).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 1f)).apply {
+                    topMargin = ThemeUi.dp(this@spaceSettingsCard, 12f); bottomMargin = ThemeUi.dp(this@spaceSettingsCard, 9f)
+                }
+            })
+            parameterPanel.addView(ThemeUi.row(this@spaceSettingsCard).apply {
+                addView(ThemeUi.text(this@spaceSettingsCard, t("room.acoustics"), 12f, palette, bold = true))
+                addView(ThemeUi.text(this@spaceSettingsCard, t("room.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
+            }.apply {
+                setPadding(0, ThemeUi.dp(this@spaceSettingsCard, 4f), 0, ThemeUi.dp(this@spaceSettingsCard, 4f))
+            })
+            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("room", "wet", "rt60", "width") }))
+            val saveRow = ThemeUi.row(this@spaceSettingsCard).apply { tag = "savePresetRow" }
             val saveInput = EditText(this@spaceSettingsCard).apply {
                 hint = "自定义风格名称"
                 setTextColor(palette.text)
@@ -113,20 +115,10 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                 saveCustomPreset(saveInput.text.toString())
             })
             parameterPanel.addView(saveRow)
-            parameterPanel.addView(ThemeUi.divider(this@spaceSettingsCard, palette).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 1f)).apply {
-                    topMargin = ThemeUi.dp(this@spaceSettingsCard, 12f); bottomMargin = ThemeUi.dp(this@spaceSettingsCard, 9f)
-                }
-            })
-            parameterPanel.addView(ThemeUi.row(this@spaceSettingsCard).apply {
-                addView(ThemeUi.text(this@spaceSettingsCard, t("room.acoustics"), 12f, palette, bold = true))
-                addView(ThemeUi.text(this@spaceSettingsCard, t("room.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
-            }.apply {
-                setPadding(0, ThemeUi.dp(this@spaceSettingsCard, 4f), 0, ThemeUi.dp(this@spaceSettingsCard, 4f))
-            })
-            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("room", "wet", "rt60", "width") }))
             parameterPanel.visibility = View.GONE
         }
+        card.setPadding(ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f))
+        (card.layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, 0, 0)
         return card
     }
 
@@ -192,13 +184,13 @@ internal fun MainActivity.dirSegmented(): LinearLayout {
 internal fun MainActivity.transformCard(): LinearLayout {
         val card = card {
             val header = FrameLayout(this@transformCard).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@transformCard, 32f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@transformCard, 40f))
             }
-            header.addView(ThemeUi.text(this@transformCard, t("transform"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             pitchPicker = ThemeUi.text(this@transformCard, "原声", 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 gravity = Gravity.CENTER
                 ThemeUi.hideOverflow(this)
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@transformCard, 168f), ThemeUi.dp(this@transformCard, 32f), Gravity.CENTER)
+                setPadding(ThemeUi.dp(this@transformCard, 24f), 0, ThemeUi.dp(this@transformCard, 24f), 0)
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     val options = interleavedPitchOptions(PITCH_PRESETS)
                     pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.name, it.semi) },
@@ -209,17 +201,9 @@ internal fun MainActivity.transformCard(): LinearLayout {
             }
             header.addView(pitchPicker)
             header.addView(ThemeUi.text(this@transformCard, "▾", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@transformCard, 22f),
-                    ThemeUi.dp(this@transformCard, 32f), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    rightMargin = ThemeUi.dp(this@transformCard, 67f)
-                }
-            })
-            header.addView(ThemeUi.text(this@transformCard, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
-                tag = "toggleT"
-                layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
-                setOnClickListener { toggleTransformOpen() }
-            })
+            }, FrameLayout.LayoutParams(ThemeUi.dp(this@transformCard, 32f), -1, Gravity.END))
             addView(header)
             transformBody = LinearLayout(this@transformCard).apply { orientation = LinearLayout.VERTICAL }
             transformBody.addView(ThemeUi.divider(this@transformCard, palette).apply {
@@ -254,6 +238,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
                     override fun onStopTrackingTouch(seekBar: SeekBar) {
                         draggingControl = false
                         if (isViewReady(this@transformCard::pitchPicker)) pitchPicker.text = pitchPickerLabel()
+                        refreshHomePickers()
                     }
                 })
             }
@@ -312,6 +297,25 @@ internal fun MainActivity.transformCard(): LinearLayout {
             }
             speedSlider.tag = "localOnly"
             transformBody.addView(speedSlider)
+            val chips = ThemeUi.row(this@transformCard)
+            listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
+                chips.addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 48f), 1f).apply {
+                        leftMargin = ThemeUi.dp(this@transformCard, 3f)
+                    }
+                    textSize = 9f
+                    gravity = Gravity.CENTER
+                    setLineSpacing(0f, 0.85f)
+                    setPadding(0, 0, 0, 0)
+                    setOnClickListener {
+                        transform = transform.copy(speed = value)
+                        applyTransform()
+                    }
+                })
+            }
+            speedChipButtons = (0 until chips.childCount).map { chips.getChildAt(it) as Button }
+            chips.tag = "localOnly"
+            transformBody.addView(chips)
             denoiseLabel = ThemeUi.text(this@transformCard, "65%", 12f, palette, role = ThemeUi.ROLE_ACCENT)
             transformBody.addView(ThemeUi.row(this@transformCard).apply {
                 addView(ThemeUi.text(this@transformCard, t("denoise"), 12f, palette).apply {
@@ -365,25 +369,6 @@ internal fun MainActivity.transformCard(): LinearLayout {
                 })
             }
             transformBody.addView(claritySlider)
-            val chips = ThemeUi.row(this@transformCard)
-            listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
-                chips.addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×\n${t("speed.realtime")}", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 40f), 1f).apply {
-                        leftMargin = ThemeUi.dp(this@transformCard, 3f)
-                    }
-                    textSize = 9f
-                    gravity = Gravity.CENTER
-                    setLineSpacing(0f, 0.85f)
-                    setPadding(0, 0, 0, 0)
-                    setOnClickListener {
-                        transform = transform.copy(speed = value)
-                        applyTransform()
-                    }
-                })
-            }
-            speedChipButtons = (0 until chips.childCount).map { chips.getChildAt(it) as Button }
-            chips.tag = "localOnly"
-            transformBody.addView(chips)
             transformBody.addView(switchRow(t("tape"), t("tape.hint")) { transform = transform.copy(tape = it); applyTransform() }.also {
                 tapeSwitch = it.second
             }.first.apply { tag = "localOnly" })
@@ -401,6 +386,8 @@ internal fun MainActivity.transformCard(): LinearLayout {
             addView(transformBody)
             transformBody.visibility = View.GONE
         }
+        card.setPadding(ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f))
+        (card.layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, 0, 0)
         transformCardRoot = card
         return card
     }
@@ -511,13 +498,13 @@ internal fun MainActivity.toggleTransformOpen() {
 internal fun MainActivity.refreshCardState() {
         if (isViewReady(this@refreshCardState::parameterPanel)) {
             parameterPanel.visibility = if (parameterOpen) View.VISIBLE else View.GONE
-        (root.findViewWithTag<View>("toggleP") as? TextView)?.let {
+        ((parameterPanel.parent as? ViewGroup)?.findViewWithTag<View>("toggleP") as? TextView)?.let {
                 it.text = if (parameterOpen) t("collapse") else t("expand")
             }
         }
         if (isViewReady(this@refreshCardState::transformBody)) {
             transformBody.visibility = if (transformOpen) View.VISIBLE else View.GONE
-            (root.findViewWithTag<View>("toggleT") as? TextView)?.let {
+            (transformCardRoot.findViewWithTag<View>("toggleT") as? TextView)?.let {
                 it.text = if (transformOpen) t("collapse") else t("expand")
             }
         }

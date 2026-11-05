@@ -164,7 +164,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         drawSky(canvas, w, h, now)
         val elevMax = min(80.0, max(0.0, p.elev)) * Math.PI / 180.0
         val vSpan = (SIN_T + COS_T * sin(elevMax)).toFloat()
-        val r = min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f
+        val r = (min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f)
+            .coerceIn(0f, (w * 0.5f - 3f).coerceAtLeast(0f))
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.4f
         paint.color = if (dark) 0xb8becfe4.toInt() else 0xc7445871.toInt()

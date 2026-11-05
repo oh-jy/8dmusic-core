@@ -1,5 +1,6 @@
 package j5i.spatial8d
 
+import androidx.core.content.pm.PackageInfoCompat
 import android.app.Dialog
 import android.os.SystemClock
 import android.view.Gravity
@@ -40,6 +41,15 @@ internal fun MainActivity.showSettingsSheet() {
         dialog = ThemeUi.showSheet(this, palette, t("settings"), compactPicker = true) {
             addView(settingRow("☾", t("theme"), themeLabel()) {
                 dialog.dismiss(); showThemePicker()
+            })
+            val colors = listOf("theme.blue", "theme.green", "theme.orange", "theme.neutral", "theme.rose", "theme.violet", "theme.slate").map { t(it) }
+            addView(settingRow("●", t("theme.color"), colors[ThemeUi.colorTheme]) {
+                dialog.dismiss()
+                pickOption(t("theme.color"), colors, ThemeUi.colorTheme) { index ->
+                    preferences.edit().putInt("colorTheme", index).apply()
+                    ThemeUi.colorTheme = index
+                    refreshTheme()
+                }
             })
             addView(settingRow("A", t("language"), languageLabel()) {
                 dialog.dismiss(); showLanguagePicker()
@@ -242,7 +252,7 @@ internal fun MainActivity.showInfoSheet() {
                 setPadding(0, ThemeUi.dp(this@showInfoSheet, 6f), 0, ThemeUi.dp(this@showInfoSheet, 3f))
             })
             val version = packageManager.getPackageInfo(packageName, 0)
-            addView(ThemeUi.text(this@showInfoSheet, "${t("app.name")}  v${version.versionName}  ·  Version Code ${version.longVersionCode}",
+            addView(ThemeUi.text(this@showInfoSheet, "${t("app.name")}  v${version.versionName}  ·  Version Code ${PackageInfoCompat.getLongVersionCode(version)}",
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 4f))
             })

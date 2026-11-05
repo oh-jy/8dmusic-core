@@ -21,6 +21,8 @@ import android.os.Build
 import android.os.IBinder
 import android.os.SystemClock
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import j5i.spatial8d.data.MusicItem
 import j5i.spatial8d.data.MusicStore
 import j5i.spatial8d.data.PlayMode
@@ -102,11 +104,15 @@ class PlaybackService : Service() {
         }
     }
     private val focusRequest by lazy {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) createFocusRequest()
+        else error("AudioFocusRequest requires Android 8 or later")
+    }
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun createFocusRequest(): AudioFocusRequest =
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             .setOnAudioFocusChangeListener(focusListener, main).build()
-    }
     private val headsetReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val unplugged = intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY ||
@@ -126,9 +132,11 @@ class PlaybackService : Service() {
         super.onCreate()
         // 上次进程异常退出可能留下整轨 PCM；本进程尚未创建新缓冲。
         File(cacheDir, "decoded-pcm").listFiles()?.forEach { it.delete() }
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW)
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            getSystemService(NotificationManager::class.java).createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW)
+            )
+        }
         session = MediaSession(this, "Spatial8D").apply {
             setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS or MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS)
             setCallback(object : MediaSession.Callback() {
@@ -152,10 +160,10 @@ class PlaybackService : Service() {
                 load(item, queue, autoplay = desiredPlaying || player.isPlaying, resumePosition = position)
             }
         }
-        registerReceiver(headsetReceiver, IntentFilter().apply {
+        ContextCompat.registerReceiver(this, headsetReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_HEADSET_PLUG)
             addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        }, Context.RECEIVER_NOT_EXPORTED)
+        }, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     /** 解码、队列和播放都在服务；页面销毁不影响自然续播。 */
@@ -364,7 +372,10 @@ class PlaybackService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val style = Notification.MediaStyle().setMediaSession(session.sessionToken)
         style.setShowActionsInCompactView(0, 1, 2)
-        return Notification.Builder(this, CHANNEL_ID)
+        // Notification channels are only available on Android 8 and later.
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
+        return builder
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(title).setContentText(subtitle).setContentIntent(content)
             .setVisibility(Notification.VISIBILITY_PUBLIC).setOnlyAlertOnce(true).setOngoing(playing)

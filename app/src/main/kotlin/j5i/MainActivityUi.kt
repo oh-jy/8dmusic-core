@@ -50,17 +50,94 @@ internal fun MainActivity.buildUi() {
             val available = (resources.displayMetrics.heightPixels / resources.displayMetrics.density - 52 - 184 - 216).coerceAtLeast(200f)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@buildUi, available * 0.62f))
         }
-        root.addView(card { addView(visualization) })
+        root.addView(card { addView(visualization) }.apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ThemeUi.dp(this@buildUi, 6f)
+        })
         status = ThemeUi.text(this, "请选择音频文件", 13f, palette.copy(faint = palette.sub), role = ThemeUi.ROLE_SUB)
-        root.addView(spaceSettingsCard())
-        root.addView(transformCard())
-        root.addView(curveCard())
+        val panelHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val spaceCard = spaceSettingsCard()
+        val effectsCard = transformCard()
+        panelHost.addView(spaceCard)
+        panelHost.addView(effectsCard)
+        root.addView(ThemeUi.row(this).apply {
+            setPadding(ThemeUi.dp(this@buildUi, 10f), ThemeUi.dp(this@buildUi, 6f),
+                ThemeUi.dp(this@buildUi, 10f), 0)
+            fun openPanel(view: View, title: String) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                val dialog = ThemeUi.showSheet(this@buildUi, palette, title, fullHeight = true) {
+                    addView(view)
+                }
+                if (view === spaceCard) {
+                    val header = dialog.findViewById<ViewGroup>(android.R.id.content)?.findViewWithTag<FrameLayout>("sheetHeader")
+                    presetSheetSave = ThemeUi.text(this@buildUi, t("preset.save"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        gravity = Gravity.CENTER
+                        minHeight = ThemeUi.dp(this@buildUi, 48f)
+                        setPadding(ThemeUi.dp(this@buildUi, 8f), 0, ThemeUi.dp(this@buildUi, 8f), 0)
+                        setOnClickListener { saveCustomPreset() }
+                    }
+                    header?.addView(presetSheetSave, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                        rightMargin = ThemeUi.dp(this@buildUi, 58f)
+                    })
+                }
+                dialog.setOnDismissListener {
+                    if (view === spaceCard) presetSheetSave = null
+                    (view.parent as? ViewGroup)?.removeView(view)
+                    panelHost.addView(view)
+                }
+                if (view === spaceCard) parameterOpen = true else transformOpen = true
+                refreshCardState()
+                refreshAll()
+                dialog.show()
+            }
+            addView(LinearLayout(this@buildUi).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(ThemeUi.button(this@buildUi, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
+                    openPanel(spaceCard, t("space.style"))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
+                homePresetButton = ThemeUi.button(this@buildUi, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
+                    presetPicker.performClick()
+                }
+                homePresetButton.maxLines = 1
+                homePresetButton.ellipsize = android.text.TextUtils.TruncateAt.END
+                addView(homePresetButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)).apply {
+                    topMargin = ThemeUi.dp(this@buildUi, 2f)
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(LinearLayout(this@buildUi).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(ThemeUi.button(this@buildUi, palette, t("transform"), ThemeUi.ROLE_HOME_CONTROL) {
+                    openPanel(effectsCard, t("transform"))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
+                homePitchButton = ThemeUi.button(this@buildUi, palette, t("pitch"), ThemeUi.ROLE_HOME_CONTROL) {
+                    pitchPicker.performClick()
+                }
+                homePitchButton.maxLines = 1
+                homePitchButton.ellipsize = android.text.TextUtils.TruncateAt.END
+                addView(homePitchButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)).apply {
+                    topMargin = ThemeUi.dp(this@buildUi, 2f)
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                leftMargin = ThemeUi.dp(this@buildUi, 8f)
+            })
+        })
+        root.addView(panelHost)
+        root.addView(curveCard().apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ThemeUi.dp(this@buildUi, 6f)
+        })
         root.setPadding(0, ThemeUi.dp(this, 52f), 0, ThemeUi.dp(this, 176f))
         scroll.addView(root)
         val frame = FrameLayout(this)
         frame.setBackgroundColor(palette.background)
         frame.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(nowPlayingBar())
+        playerBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) {
+                // Keep the final card above the overlay and retain the same gap as other sections.
+                root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight,
+                    bottom - top + ThemeUi.dp(this@buildUi, 6f))
+                root.post { resizeCurveToRemainingSpace() }
+            }
+        }
         setContentView(frame)
         // 首屏用实际测量值分配曲线剩余空间，避免按屏幕高度硬减常量留下空白。
         curveContent.post { resizeCurveToRemainingSpace() }
@@ -76,10 +153,9 @@ internal fun MainActivity.buildUi() {
 internal fun MainActivity.resizeCurveToRemainingSpace() {
         if (!isViewReady(this@resizeCurveToRemainingSpace::curveContent)) return
         val card = curveContent.parent as? View ?: return
-        val extra = (card.parent as? ViewGroup)?.paddingBottom ?: 0
-        val frame = card.parent?.parent as? View ?: return
-        val remaining = frame.height - playerBar.height - root.paddingTop - root.paddingBottom - extra
-        val height = (remaining - (root.height - curveContent.height)).coerceAtLeast(ThemeUi.dp(this, 140f))
+        val scroll = root.parent as? ScrollView ?: return
+        val available = scroll.height - root.paddingBottom
+        val height = (curveContent.height + available - card.bottom).coerceAtLeast(ThemeUi.dp(this, 140f))
         if (height == curveContent.height) return
         curveContent.layoutParams = curveContent.layoutParams.apply { this.height = height }
     }
@@ -126,6 +202,8 @@ internal fun MainActivity.refreshAll() {
         updateDriving()
         curve.invalidate()
         if (isViewReady(this@refreshAll::pitchPicker)) pitchPicker.text = pitchPickerLabel()
+        refreshHomePickers()
+        refreshPresetSaveVisibility()
         if (isViewReady(this@refreshAll::pitchLabel)) {
             pitchLabel.text = when {
                 transform.semi == 0.0 -> t("original")
@@ -141,7 +219,7 @@ internal fun MainActivity.refreshAll() {
         if (speedChipButtons.isNotEmpty()) {
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEachIndexed { i, v ->
                 val btn = speedChipButtons[i]
-                btn.text = "${formatSpeedShort(v)}×\n${t("speed.realtime")}"
+                btn.text = "${formatSpeedShort(v)}×"
                 btn.gravity = Gravity.CENTER
                 btn.setLineSpacing(0f, 0.85f)
                 btn.tag = if (transform.speed == v) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
@@ -180,6 +258,27 @@ internal fun MainActivity.refreshPresetSummary() {
             presetPicker.text = AppLanguage.preset(this, presetIndex)
             presetNote.text = AppLanguage.preset(this, presetIndex, note = true)
         }
+        refreshHomePickers()
+        refreshPresetSaveVisibility()
+    }
+
+internal fun MainActivity.refreshPresetSaveVisibility() {
+        if (!isViewReady(this@refreshPresetSaveVisibility::parameterPanel)) return
+        val card = parameterPanel.parent as? ViewGroup ?: return
+        val visibility = if (preset.name == j5i.spatial8d.core.CUSTOM_SPACE) View.VISIBLE else View.GONE
+        presetSheetSave?.visibility = visibility
+        card.findViewWithTag<View>("savePresetRow")?.visibility = visibility
+    }
+
+internal fun MainActivity.refreshHomePickers() {
+        if (isViewReady(this@refreshHomePickers::homePresetButton)) {
+            homePresetButton.text = "${presetPicker.text} ▾"
+            homePresetButton.contentDescription = "${t("space.style")}: ${presetPicker.text}"
+        }
+        if (isViewReady(this@refreshHomePickers::homePitchButton)) {
+            homePitchButton.text = "${pitchPicker.text} ▾"
+            homePitchButton.contentDescription = "${t("pitch")}: ${pitchPicker.text}"
+        }
     }
 
 internal fun MainActivity.refreshControls() {
@@ -206,7 +305,10 @@ internal fun MainActivity.rebuildTransport() {
     }
 
 internal fun MainActivity.refreshTheme() {
+        val previous = palette
         palette = ThemeUi.palette(dark)
+        ThemeUi.applyTheme(root, palette, previous)
+        if (isViewReady(this@refreshTheme::playerBar)) ThemeUi.applyTheme(playerBar, palette, previous)
         tint(root, palette.text)
         root.setBackgroundColor(palette.background)
         (root.parent?.parent as? FrameLayout)?.setBackgroundColor(palette.background)
@@ -216,17 +318,22 @@ internal fun MainActivity.refreshTheme() {
         visualizerView.dark = dark
         popupVisualizer?.dark = dark
         if (isViewReady(this@refreshTheme::lyricsView)) lyricsView.dark = dark
-        if (isViewReady(this@refreshTheme::playerBar)) ThemeUi.bg(playerBar, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
+        if (isViewReady(this@refreshTheme::playerBar)) ThemeUi.bg(playerBar, palette.surface, 0f)
         // 透明圆形应用图标自带颜色，深浅模式下都不叠 tint。
         if (isViewReady(this@refreshTheme::disc)) disc.imageTintList = null
         tint(root, palette.text)
         if (isViewReady(this@refreshTheme::playerBar)) ThemeUi.applyTheme(playerBar, palette)
         // PNG 图标不经过 Button 主题回刷；播放键白色，普通控制键随主题切换。
         fun tintIcons(view: View) {
-            if (view is ImageButton && !(isViewReady(this@refreshTheme::favoriteButton) && view === favoriteButton)) view.imageTintList = ColorStateList.valueOf(
-                if (view.tag == ThemeUi.ROLE_ACCENT_FILL) 0xffffffff.toInt() else palette.controlText)
+            if (view is ImageButton && !(isViewReady(this@refreshTheme::favoriteButton) && view === favoriteButton)) {
+                if (view.tag == ThemeUi.ROLE_ACCENT_FILL) {
+                    ThemeUi.bg(view, palette.accent, 26f)
+                    view.imageTintList = ColorStateList.valueOf(palette.darkInk)
+                } else view.imageTintList = ColorStateList.valueOf(palette.controlText)
+            }
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
+        root.findViewWithTag<View>("navbar")?.let(::tintIcons)
         if (isViewReady(this@refreshTheme::playerBar)) tintIcons(playerBar)
         tint(root, palette.text)
         for (i in 0 until root.childCount) {
@@ -252,7 +359,7 @@ internal fun MainActivity.refreshTheme() {
 internal fun MainActivity.resolveDark(): Boolean = when (themeMode) {
         0 -> true
         1 -> false
-        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+        else -> (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 
@@ -260,7 +367,7 @@ internal fun MainActivity.resolveDark(): Boolean = when (themeMode) {
 
 internal fun MainActivity.tint(view: View, color: Int) {
         window.statusBarColor = palette.background
-        window.navigationBarColor = if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt()
+        window.navigationBarColor = palette.surface
         ThemeUi.applyTheme(view, palette)
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.setSystemBarsAppearance(
@@ -306,6 +413,7 @@ internal fun MainActivity.refreshPlayback() {
         if (isViewReady(this@refreshPlayback::visualizerView)) visualizerView.setPosition(lyricPositionMs)
         popupVisualizer?.setPosition(lyricPositionMs)
         songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
+        refreshTrackTechnicalInfo()
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
         durationTime.text = time(player?.duration ?: 0.0)
@@ -323,17 +431,19 @@ internal fun MainActivity.refreshPlayback() {
         status.text = effectiveStatus
         // 歌词只允许出现在一个位置：同步歌词，或可视化的图谱/粒子/穿梭及其弹窗。
         val visualLyrics = curvePanel == 1 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
-        val statusLine = if (isLive) {
-            "● LIVE · 流媒体实时处理 · $effectiveStatus"
-        } else if (curvePanel != 2 && !visualLyrics) {
+        val currentLine = if (!isLive && curvePanel != 2 && !visualLyrics) {
             val lines = currentLyrics?.lines
-            val currentLine = lines?.let { ls ->
+            lines?.let { ls ->
                 val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
                 if (idx >= 0) ls[idx].text else null
-            }
-            currentLine?.takeIf { it.isNotBlank() } ?: effectiveStatus
-        } else effectiveStatus
-        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text = statusLine
+            }?.takeIf { it.isNotBlank() }
+        } else null
+        val statusLine = if (isLive) "● LIVE · 流媒体实时处理 · $effectiveStatus"
+            else currentLine ?: effectiveStatus
+        val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
+        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text =
+            if (!isLive && playing && currentLine == null)
+                playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
         recordingLabel.setTextColor(0xffff5d5d.toInt())
@@ -344,11 +454,9 @@ internal fun MainActivity.refreshPlayback() {
             liveTimeline.visibility = View.GONE
         }
         if (isViewReady(this@refreshPlayback::exportButton)) {
-            exportButton.background = ThemeUi.bgDrawable(this,
-                if (dark) 0xff263e55.toInt() else 0xffe3efff.toInt(), 8f)
-            exportButton.text = if (isLive) (if (recordingKind == "playback") "停止" else "录音") else "导出"
-            exportButton.setTextColor(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.accent)
-            exportButton.contentDescription = if (isLive) "录制电台最终输出" else "导出当前音频"
+            exportButton.setImageResource(if (!isLive) j5i.spatial8d.R.drawable.ic_export else if (recordingKind == "playback") j5i.spatial8d.R.drawable.ic_record_stop else j5i.spatial8d.R.drawable.ic_record)
+            exportButton.imageTintList = ColorStateList.valueOf(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.controlText)
+            exportButton.contentDescription = if (!isLive) "导出当前音频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
         }
         if (isViewReady(this@refreshPlayback::favoriteButton)) {
             favoriteButton.background = null
@@ -431,6 +539,7 @@ internal fun MainActivity.updateParameter(key: String, value: Double) {
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
         }
+        refreshPresetSaveVisibility()
         // 滑块或方向按钮修改后，同时同步中间下拉文本、全部展开控件与预设说明。
         service?.player?.preset = preset
         service?.radio?.preset = preset
@@ -477,7 +586,16 @@ internal fun MainActivity.showVisualizerSheet() {
     }
 
 internal fun MainActivity.saveCustomPreset() {
-        saveCustomPreset("")
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, t("preset.save"), compactPicker = true) {
+            val name = ThemeUi.input(this@saveCustomPreset, palette, t("preset.name.hint"))
+            addView(name)
+            addView(ThemeUi.button(this@saveCustomPreset, palette, t("preset.save"), ThemeUi.ROLE_ACCENT_FILL) {
+                saveCustomPreset(name.text.toString())
+                dialog.dismiss()
+            }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@saveCustomPreset, 48f)))
+        }
+        dialog.show()
     }
 
 internal fun MainActivity.saveCustomPreset(rawInput: String) {
@@ -597,12 +715,12 @@ internal fun MainActivity.navbar(): LinearLayout {
         }
         onlineButton = navButton(t("library")) { showSourceSheet(true) }.apply {
             visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 3f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
         bar.addView(onlineButton)
         fmButton = navButton("FM") { showSourceSheet(false) }.apply {
             visibility = if (fmUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 3f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
         bar.addView(fmButton)
         bar.addView(ImageButton(this).apply {
@@ -612,7 +730,9 @@ internal fun MainActivity.navbar(): LinearLayout {
             background = ThemeUi.bgDrawable(this@navbar, palette.control, 15f)
             setPadding(ThemeUi.dp(this@navbar, 6f), 0, ThemeUi.dp(this@navbar, 6f), 0)
             contentDescription = t("driving")
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f))
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply {
+                leftMargin = ThemeUi.dp(this@navbar, 4f)
+            }
             setOnClickListener { showDrivingMode() }
         })
         bar.addView(ImageButton(this).apply {
@@ -623,7 +743,7 @@ internal fun MainActivity.navbar(): LinearLayout {
             setPadding(ThemeUi.dp(this@navbar, 7f), 0, ThemeUi.dp(this@navbar, 7f), 0)
             contentDescription = t("settings")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@navbar, 6f)
+                leftMargin = ThemeUi.dp(this@navbar, 4f)
             }
             setOnClickListener { showSettingsSheet() }
         })
@@ -640,7 +760,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(ThemeUi.dp(this@nowPlayingBar, 12f), ThemeUi.dp(this@nowPlayingBar, 6f), ThemeUi.dp(this@nowPlayingBar, 12f), ThemeUi.dp(this@nowPlayingBar, 4f))
-            bg(this, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
+            bg(this, palette.surface, 0f)
             gravity = Gravity.BOTTOM
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
         }
@@ -654,7 +774,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             setPadding(0, 0, 0, 0)
             background = null
             contentDescription = t("playlist")
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 38f), ThemeUi.dp(this@nowPlayingBar, 38f))
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 48f), ThemeUi.dp(this@nowPlayingBar, 48f))
         }
         disc.setOnClickListener { showPlaylist() }
         meta.addView(disc)
@@ -703,7 +823,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             imageTintList = null
             background = null
-            setPadding(ThemeUi.dp(this@nowPlayingBar, 6f), 0, ThemeUi.dp(this@nowPlayingBar, 6f), 0)
+            setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f), ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f))
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 34f), ThemeUi.dp(this@nowPlayingBar, 30f))
             contentDescription = "收藏"
             setOnClickListener {
@@ -718,13 +838,11 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             }
         }
         meta.addView(favoriteButton)
-        exportButton = ThemeUi.button(this, palette, "导出", ThemeUi.ROLE_ACCENT, minHeightDp = 30f).apply {
-            background = ThemeUi.bgDrawable(this@nowPlayingBar, if (dark) 0xff263e55.toInt() else 0xffe3efff.toInt(), 8f)
-            textSize = 11f
-            setPadding(0, 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 46f), ThemeUi.dp(this@nowPlayingBar, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@nowPlayingBar, 8f)
-            }
+        exportButton = ImageButton(this).apply {
+            background = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f), ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f))
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 34f), ThemeUi.dp(this@nowPlayingBar, 30f))
             setOnClickListener {
                 if (isLive) playerBar.findViewWithTag<TextView>("playerStatus")?.let(::togglePlaybackRecording)
                 else showExportSheet()
@@ -812,7 +930,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
 internal fun MainActivity.iconControl(icon: Int, big: Boolean = false, action: () -> Unit): ImageButton = ImageButton(this).apply {
         setImageResource(icon)
         scaleType = ImageView.ScaleType.CENTER_INSIDE
-        imageTintList = ColorStateList.valueOf(if (big) 0xffffffff.toInt() else palette.controlText)
+        imageTintList = ColorStateList.valueOf(if (big) palette.darkInk else palette.controlText)
         tag = if (big) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
         bg(this, if (big) palette.accent else palette.control, if (big) 26f else 19f)
         setPadding(ThemeUi.dp(this@iconControl, if (big) 12f else 9f), 0, ThemeUi.dp(this@iconControl, if (big) 12f else 9f), 0)

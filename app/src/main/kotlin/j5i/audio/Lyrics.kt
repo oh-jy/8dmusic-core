@@ -2,7 +2,10 @@ package j5i.spatial8d.audio
 
 import android.content.Context
 import android.icu.text.Transliterator
+import android.os.Build
 import android.text.Html
+import android.util.Base64
+import androidx.core.content.ContextCompat
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,7 +15,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
-import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -71,9 +73,9 @@ class Lyrics(context: Context) {
         callback: (Result<List<LyricsCandidate>>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
-            appContext.mainExecutor.execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
             return
         }
         progress("正在检索歌词候选…")
@@ -85,7 +87,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(IOException("暂时无法获取在线歌词", e))
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 
@@ -96,9 +98,9 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
-            appContext.mainExecutor.execute {
+            ContextCompat.getMainExecutor(appContext).execute {
                 callback(Result.failure(IllegalArgumentException("歌曲名称为空")))
             }
             return
@@ -107,6 +109,7 @@ class Lyrics(context: Context) {
         val cleanTitle = title.trim()
         val cleanArtist = knownArtist(artist.trim())
         val requestKey = key(cleanTitle, cleanArtist, durationSeconds)
+        // 合并相同请求；旧请求超时后允许新请求重试。
         val callbacks = synchronized(requestLock) {
             val pending = requests[requestKey]
             if (pending != null && System.currentTimeMillis() - pending.first < 30_000) {
@@ -140,14 +143,15 @@ class Lyrics(context: Context) {
                 Log.w("8DLyrics", "QQ 请求失败", e)
                 Result.failure(IOException("暂时无法获取在线歌词", e))
             }
-            appContext.mainExecutor.execute {
-                synchronized(requestLock) { requests.remove(requestKey) }
+            ContextCompat.getMainExecutor(appContext).execute {
+                synchronized(requestLock) {
+                    // 迟到的旧请求不能移除同一首歌的新请求。
+                    if (requests[requestKey]?.second === callbacks) requests.remove(requestKey)
+                }
                 synchronized(requestLock) {
                     if (result.isSuccess) failures.edit().remove(requestKey).apply()
                     else failures.edit().putInt(requestKey, (failures.getInt(requestKey, 0) + 1).coerceAtMost(5)).apply()
                 }
-                // 最终结果回调先执行；不再发送终态进度覆盖手动检索输入区。
-                if (result.isSuccess) progress("解析并缓存歌词…")
                 result.onSuccess { Log.i("8DLyrics", "歌词成功：${it.trackName} · ${it.artistName} · ${it.lines.size} 行") }
                 callbacks.forEach { it(result) }
             }
@@ -287,7 +291,7 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         progress("正在获取所选歌词…")
         thread(name = "lyrics-apply") {
             val result = try {
@@ -297,7 +301,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(e)
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 
@@ -310,7 +314,7 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         progress("正在获取所选歌词…")
         thread(name = "lyrics-preview") {
             val result = try {
@@ -318,7 +322,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(e)
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 
@@ -380,7 +384,7 @@ class Lyrics(context: Context) {
         val lyricUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8" +
             "&id=${encode(parts[0])}&accesskey=${encode(parts[1])}"
         val lyric = JSONObject(request(lyricUrl) ?: "{}")
-        val synced = String(Base64.getDecoder().decode(lyric.optString("content")), Charsets.UTF_8)
+        val synced = String(Base64.decode(lyric.optString("content"), Base64.DEFAULT), Charsets.UTF_8)
         val lines = parseLrc(synced)
         if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
         val result = LyricsResult(candidate.trackName, candidate.artistName, lines, toSimplified(synced))
@@ -551,7 +555,7 @@ class Lyrics(context: Context) {
         val lyricUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8" +
             "&id=${encode(best.optString("id"))}&accesskey=${encode(best.optString("accesskey"))}"
         val lyric = JSONObject(request(lyricUrl) ?: "{}")
-        val synced = String(Base64.getDecoder().decode(lyric.optString("content")), Charsets.UTF_8)
+        val synced = String(Base64.decode(lyric.optString("content"), Base64.DEFAULT), Charsets.UTF_8)
         val lines = parseLrc(synced)
         if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("酷狗无匹配歌词")
         return LyricsResult(best.optString("song"), best.optString("singer"), lines, toSimplified(synced))
@@ -662,11 +666,13 @@ class Lyrics(context: Context) {
     private class NotFoundException : IOException()
 
     companion object {
+        // ICU transliteration requires Android 10; older releases keep the original text.
         private val traditionalToSimplified by lazy {
-            Transliterator.getInstance("Traditional-Simplified")
+            if (Build.VERSION.SDK_INT >= 29) Transliterator.getInstance("Traditional-Simplified") else null
         }
 
-        private fun toSimplified(value: String) = traditionalToSimplified.transliterate(value)
+        private fun toSimplified(value: String) =
+            if (Build.VERSION.SDK_INT >= 29) traditionalToSimplified?.transliterate(value) ?: value else value
 
         /** 支持 [mm:ss.xx]、[mm:ss:xx]、小时及同一行多个时间戳；标签和空行会忽略。 */
         fun parseLrc(lrc: String): List<LyricLine> {

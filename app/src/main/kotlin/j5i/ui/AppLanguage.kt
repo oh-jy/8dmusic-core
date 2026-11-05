@@ -2,6 +2,7 @@ package j5i.spatial8d.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import android.content.res.Resources
 import java.util.Locale
 
 /** 应用内语言；第三方歌曲、歌手、电台与 API 内容不经过翻译。 */
@@ -15,13 +16,16 @@ object AppLanguage {
     fun current(context: Context): String =
         context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE).getString(PREF, SYSTEM) ?: SYSTEM
 
+    fun systemLanguage(locale: Locale): String = when (locale.language) {
+        "zh" -> if (locale.script == "Hant" || locale.country in setOf("TW", "HK", "MO")) TRADITIONAL else SIMPLIFIED
+        "en" -> ENGLISH
+        else -> SIMPLIFIED
+    }
+
     fun resolved(context: Context): String = when (val selected = current(context)) {
-        SYSTEM -> when (Locale.getDefault().language) {
-            "zh" -> if (Locale.getDefault().script == "Hant" || Locale.getDefault().country in setOf("TW", "HK", "MO"))
-                TRADITIONAL else SIMPLIFIED
-            else -> ENGLISH
-        }
-        else -> selected
+        SYSTEM -> systemLanguage(Resources.getSystem().configuration.locales[0] ?: Locale.SIMPLIFIED_CHINESE)
+        SIMPLIFIED, TRADITIONAL, ENGLISH -> selected
+        else -> SIMPLIFIED
     }
 
     fun select(context: Context, value: String) {
@@ -34,8 +38,6 @@ object AppLanguage {
             TRADITIONAL -> Locale.TRADITIONAL_CHINESE
             else -> Locale.ENGLISH
         }
-        // 跟随系统必须读取系统 locale，不能被上次手动选择覆盖。
-        if (current(context) != SYSTEM) Locale.setDefault(locale)
         return context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(locale) })
     }
 
@@ -57,6 +59,14 @@ object AppLanguage {
         "language" to e("语言", "語言", "Language"),
         "settings" to e("设置", "設定", "Settings"),
         "theme" to e("外观颜色", "外觀顏色", "Appearance"),
+        "theme.color" to e("主题配色", "主題配色", "Theme color"),
+        "theme.blue" to e("经典蓝", "經典藍", "Classic blue"),
+        "theme.green" to e("清新绿", "清新綠", "Fresh green"),
+        "theme.orange" to e("暖阳橙", "暖陽橙", "Sunny orange"),
+        "theme.neutral" to e("柔和灰", "柔和灰", "Soft gray"),
+        "theme.rose" to e("玫瑰红", "玫瑰紅", "Rose red"),
+        "theme.violet" to e("暮光紫", "暮光紫", "Twilight violet"),
+        "theme.slate" to e("雾霭蓝", "霧靄藍", "Misty blue"),
         "language.system" to e("跟随系统", "跟隨系統", "System"),
         "language.simplified" to e("简体中文", "簡體中文", "Simplified Chinese"),
         "language.traditional" to e("繁体中文", "繁體中文", "Traditional Chinese"),
@@ -81,6 +91,7 @@ object AppLanguage {
         "song.no.lyrics" to e("该歌曲暂无歌词", "該歌曲暫無歌詞", "No lyrics for this song"),
         "lyrics.matching" to e("正在匹配在线歌词…", "正在匹配線上歌詞…", "Matching online lyrics…"),
         "lyrics.edit" to e("手动修正歌词", "手動修正歌詞", "Edit lyrics"),
+        "lyrics.timeout" to e("歌词获取超时，可手动搜索", "歌詞取得逾時，可手動搜尋", "Lyrics request timed out. Search manually."),
         "lyrics.not.found" to e("未找到匹配歌词：", "未找到匹配歌詞：", "No matching lyrics: "),
         "space.style" to e("空间风格", "空間風格", "Space preset"),
         "space.choose" to e("选择空间风格 · 房间由小到大", "選擇空間風格 · 房間由小到大", "Choose space preset · by room size"),
@@ -124,6 +135,7 @@ object AppLanguage {
         "driving" to e("驾驶", "駕駛", "Drive"),
         "driving.close" to e("退出驾驶", "退出駕駛", "Exit driving"),
         "driving.hint" to e("左右滑动切换视图", "左右滑動切換視圖", "Swipe to change view"),
+        "driving.next.view" to e("切换可视化", "切換視覺化", "Change visualization"),
         "lyrics" to e("歌词", "歌詞", "Lyrics"),
         "left.ear" to e("左耳", "左耳", "Left"),
         "right.ear" to e("右耳", "右耳", "Right"),

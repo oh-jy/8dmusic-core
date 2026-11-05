@@ -19,6 +19,33 @@ import j5i.spatial8d.data.PlayMode
 import j5i.spatial8d.ui.PlaylistDialog
 import org.json.JSONObject
 
+internal fun MainActivity.refreshTrackTechnicalInfo() {
+        val item = currentItem
+        val uri = item?.uri?.takeUnless { isLive || it.isBlank() }
+        if (trackInfoUri == uri) return
+        trackInfoUri = uri
+        trackTechnicalInfo = ""
+        // Do not open a second network stream just to populate the information line.
+        if (uri == null || uri.startsWith("http", ignoreCase = true)) return
+        Thread {
+            val extractor = android.media.MediaExtractor()
+            val details = try {
+                extractor.setDataSource(this, Uri.parse(uri), null)
+                val format = (0 until extractor.trackCount).map(extractor::getTrackFormat)
+                    .firstOrNull { it.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                fun value(key: String): Int = if (format?.containsKey(key) == true) format.getInteger(key) else 0
+                audioDetails(format?.getString(android.media.MediaFormat.KEY_MIME).orEmpty(),
+                    value(android.media.MediaFormat.KEY_SAMPLE_RATE), value(android.media.MediaFormat.KEY_BIT_RATE))
+            } catch (_: Exception) { "" } finally { extractor.release() }
+            main.post {
+                if (!isDestroyed && !isLive && currentItem?.uri == uri && trackInfoUri == uri) {
+                    trackTechnicalInfo = details
+                    refreshPlayback()
+                }
+            }
+        }.start()
+    }
+
 internal fun MainActivity.addAndPlay(uri: Uri) {
         // SAF 授权跨重启保留，手动添加的歌曲不会因为应用重启而从队列失效。
         try {

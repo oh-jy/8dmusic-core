@@ -1,5 +1,6 @@
 package com.j5i.spatial8d;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ContentUris;
 import android.content.ContentValues;
@@ -396,6 +397,8 @@ public final class MusicSourceApi {
     }
 
     /** System picker grants a durable URI which survives uninstall/reinstall. */
+    // The picker flags are masked to the only two grant flags accepted by the resolver.
+    @SuppressLint("WrongConstant")
     public static boolean onActivityResult(Activity activity, int requestCode, int resultCode, Intent data) {
         if (requestCode == PICK_COOKIE_FILE) return onCookieFileResult(activity, resultCode, data);
         if (requestCode != PICK_TREE) return false;
@@ -429,6 +432,8 @@ public final class MusicSourceApi {
         return true;
     }
 
+    // Preserve exactly the read/write grants returned by the document picker.
+    @SuppressLint("WrongConstant")
     private static boolean onCookieFileResult(Activity activity, int resultCode, Intent data) {
         try {
             if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {

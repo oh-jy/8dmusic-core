@@ -29,6 +29,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
             role = if (index == 1) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER
             maxLines = 1
+            setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.BLACK)
         }
     }
     private var lyrics: LyricsResult? = null
@@ -53,13 +54,18 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         val shade = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.BOTTOM
-            setBackgroundColor(0x990b0c0e.toInt())
             setPadding(dp(24), dp(14), dp(24), dp(20))
         }
-        shade.addView(title.apply { gravity = Gravity.CENTER; maxLines = 1 })
+        shade.addView(title.apply { gravity = Gravity.CENTER; maxLines = 1; setShadowLayer(dp(3).toFloat(), 0f, 0f, Color.BLACK) })
         lines.forEach { shade.addView(it, LinearLayout.LayoutParams(-1, dp(34))) }
         shade.addView(ThemeUi.text(context, AppLanguage.text(context, "driving.hint"), 11f,
             ThemeUi.palette(true), role = ThemeUi.ROLE_SUB).apply { gravity = Gravity.CENTER })
+        shade.addView(ThemeUi.button(context, ThemeUi.palette(true), AppLanguage.text(context, "driving.next.view"),
+            ThemeUi.ROLE_SURFACE_ALT, minHeightDp = 48f).apply {
+            setOnClickListener {
+                visualizerChild?.let { it.restoreVisualState(true to nextMode(it.visualState.second, true)) }
+            }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         shade.addView(ThemeUi.row(context).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(14), 0, 0)

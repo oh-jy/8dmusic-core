@@ -262,6 +262,7 @@ class BiliMusic(private val activity: Activity) {
         return null
     }
 
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.Q)
     private fun publishAudio(file: File, name: String): Uri {
         check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
         val resolver = activity.contentResolver

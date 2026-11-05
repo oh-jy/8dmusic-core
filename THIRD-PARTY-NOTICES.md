@@ -17,14 +17,12 @@ AndroidX/Kotlin 的完整许可证可由对应官方仓库和 Maven 包获取。
 - Kotlin Test / JUnit 5：Apache-2.0（JUnit 使用 EPL-2.0 的部分按其原始许可保留）。
 - 测试依赖不随正式 APK 作为独立第三方库发布。
 
-## 已移除组件
+## MP3 编码组件
 
-Core 版不包含 LAME、MPGLIB、`lame-3.100.aar`、`libmp3lame.so` 或 MP3 导出，因此当前发布物不再以这些组件的 LGPL/GPL 义务作为分发前提。
+本仓库包含 LAME、MPGLIB 及 MP3 编码导出相关组件；对外分发前必须逐项核对实际链接方式、LGPL/GPL 义务、对应源码、修改和重新链接要求。
 
-**完整版特别说明：** 主分支仍包含上述 LAME/MPGLIB 组件与 MP3 导出。此“已移除”结论仅适用于 `opensource-core`，不可作为完整版依赖清单或免责依据。
-
-如果后续恢复 MP3 编码，必须重新审核 LAME/MPGLIB 的实际链接、许可证、对应源码、修改和重新链接要求，不得直接沿用本 Core 版声明。
+未完成上述核对前，不要将相关二进制或源码对外发布。
 
 ## 内容与商标
 
-SomaFM、LRCLIB 及其他第三方名称、直播和歌词不属于本项目的 Apache-2.0 授权范围，详见 `THIRD-PARTY-SOURCES.md` 和 `TERMS.md`。
+各音乐平台、歌词服务、电台及其他第三方名称、直播和歌词不属于本项目的 Apache-2.0 授权范围，详见 `THIRD-PARTY-SOURCES.md` 和 `TERMS.md`。

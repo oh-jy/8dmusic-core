@@ -78,6 +78,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var dark = true
     /** 0=深色 1=浅色 2=跟随系统。dark 字段始终是"当前生效"的结果，由 themeMode 派生。 */
     internal var themeMode = 0
+    private var displayedLanguage = ""
     internal var playbackStatus = "就绪"
     internal var transform = TransformParams()
     internal var reverse = false
@@ -103,6 +104,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var lyricsGeneration = 0
     internal var currentLyrics: LyricsResult? = null
     internal lateinit var presetPicker: TextView
+    internal lateinit var homePresetButton: Button
+    internal lateinit var homePitchButton: Button
     internal lateinit var playButton: View
     internal lateinit var parameterPanel: LinearLayout
     internal lateinit var palette: ThemeUi.Palette
@@ -140,7 +143,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     internal lateinit var transportRow: LinearLayout
     internal lateinit var playerBar: LinearLayout
-    internal lateinit var exportButton: Button
+    internal lateinit var exportButton: ImageButton
+    internal var presetSheetSave: TextView? = null
+    internal var trackInfoUri: String? = null
+    internal var trackTechnicalInfo = ""
     internal lateinit var disc: ImageView
     internal lateinit var modeTextView: TextView
     internal lateinit var currentTime: TextView
@@ -258,6 +264,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        displayedLanguage = AppLanguage.resolved(this)
         com.j5i.spatial8d.MusicSourceApi.bootstrap(this)
         musicStore = MusicStore(this)
         presetStore = PresetStore(this)
@@ -269,6 +276,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         themeMode = if (preferences.contains("themeMode")) preferences.getInt("themeMode", 0)
         else if (preferences.getBoolean("dark", true)) 0 else 1
         dark = resolveDark()
+        ThemeUi.colorTheme = preferences.getInt("colorTheme", 0).coerceIn(0, 6)
         playbackStatus = t("ready")
         restorePlaybackState()
         transform = transform.copy(clarity = preferences.getInt("soundClarity", 50).coerceIn(0, 100))
@@ -290,7 +298,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             window.setDecorFitsSystemWindows(false)
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
-                view.setPadding(0, bars.top, 0, ThemeUi.dp(this, 176f) + bars.bottom)
+                view.setPadding(0, bars.top, 0, playerBar.height.coerceAtLeast(ThemeUi.dp(this, 176f)))
                 playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f) + bars.bottom)
                 insets
             }
@@ -337,6 +345,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (AppLanguage.current(this) == AppLanguage.SYSTEM && AppLanguage.resolved(this) != displayedLanguage) {
+            recreate()
+            return
+        }
         val carMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK ==
             android.content.res.Configuration.UI_MODE_TYPE_CAR
         if (carMode && !lastCarMode && !drivingAutoDismissed) showDrivingMode()
@@ -490,5 +502,4 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         showMetadataEditor()
     }
 
-    /** 三击开放 FM，五击开放曲库；两个入口及弹窗各自独立，不写入持久化。 */
 }

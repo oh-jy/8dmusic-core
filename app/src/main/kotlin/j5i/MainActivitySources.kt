@@ -134,7 +134,17 @@ internal fun MainActivity.filterScroll(label: String, values: List<String>, sele
             val row = ThemeUi.row(this@filterScroll)
             values.forEach { value ->
                 row.addView(ThemeUi.button(this@filterScroll, palette, value,
-                    if (value == selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_CONTROL) { action(value) })
+                    if (value == selected) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL) {
+                    for (index in 0 until row.childCount) {
+                        (row.getChildAt(index) as? Button)?.let { button ->
+                            val active = button.text.toString() == value
+                            button.tag = if (active) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
+                            button.isSelected = active
+                            ThemeUi.applyButton(button, palette)
+                        }
+                    }
+                    action(value)
+                }.apply { isSelected = value == selected })
             }
             addView(HorizontalScrollView(this@filterScroll).apply {
                 isHorizontalScrollBarEnabled = false
@@ -147,18 +157,20 @@ internal fun MainActivity.addStationBrowser(parent: LinearLayout, filters: Linea
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         stationListBody = body
         val search = ThemeUi.input(this, palette, t("fm.search.hint")).apply {
+            tag = "stationSearch"
             setOnEditorActionListener { _, _, _ ->
                 renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, text.toString()))
                 true
             }
         }
         parent.addView(search)
-        val seq = ++sourceSearchSeq
+        ++sourceSearchSeq
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 val q = s?.toString().orEmpty()
+                val seq = ++sourceSearchSeq
                 main.postDelayed({
                     if (seq == sourceSearchSeq && fmDialog?.isShowing == true) {
                         renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, q))
@@ -207,7 +219,9 @@ internal fun MainActivity.addStationBrowser(parent: LinearLayout, filters: Linea
 
 internal fun MainActivity.refreshStationFilter() {
         val body = stationListBody ?: return
-        body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)) }
+        val query = fmDialog?.window?.decorView?.findViewWithTag<android.widget.EditText>("stationSearch")?.text?.toString().orEmpty()
+        ++sourceSearchSeq
+        body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, query)) }
     }
 
 internal fun MainActivity.renderStations(parent: LinearLayout, stations: List<RadioStation>) {
