@@ -130,6 +130,12 @@ class OnlineMusic(private val activity: Activity) {
         }
     }
 
+    fun biliCached(track: OnlineTrack): Boolean = bili.cached(track)
+
+    fun deleteBiliAudio(track: OnlineTrack): Boolean = bili.delete(track)
+
+    fun deleteBiliAudioUri(rawUri: String): Boolean = bili.deleteUri(rawUri)
+
     fun importCookieFile(callback: (Result<Unit>) -> Unit) {
         MusicSourceApi.pickCookieFile(activity, "qq") { completeLogin(it, callback) }
     }

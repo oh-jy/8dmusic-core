@@ -30,7 +30,7 @@ class BiliMusic(private val activity: Activity) {
         private const val LOGIN_URL =
             "https://passport.bilibili.com/login?goto=https%3A%2F%2Fwww.bilibili.com%2F"
         private const val MIN_SINGLE_SECONDS = 20.0
-        private val COMPILATION_TITLE = Regex("合集|分P|分p|歌单|精选|盘点|100首|\\d+首|歌单|全收录|串烧")
+        private val BILI_RELATIVE_PATH = Environment.DIRECTORY_DOWNLOADS + "/bili/"
     }
 
     @Volatile private var imgKey = ""
@@ -70,14 +70,77 @@ class BiliMusic(private val activity: Activity) {
             // 过滤几十秒的短视频片段；合集（分 P）保留，点按时展开成曲目列表。
             if (duration in 1.0..<MIN_SINGLE_SECONDS) return@mapNotNull null
             val title = cleanTitle(v.optString("title"))
-            // 搜索接口的 videos 常为 0；标题关键词和超长时长是实际可区分合集的依据。
-            val isCompilation = COMPILATION_TITLE.containsMatchIn(title) || duration >= 20 * 60
+            // 只用真实分 P 数判断；标题里的「精选 / XX首」和长时长单曲都不代表多 P。
+            val partCount = v.optInt("videos").coerceAtLeast(0)
             OnlineTrack(
                 "bili:$bvid", title,
                 v.optString("author").ifEmpty { "哔哩哔哩UP主" },
-                duration, "哔哩哔哩", isCompilation
+                duration, "哔哩哔哩", partCount > 1, partCount
             )
         }
+    }
+
+    /** 公共下载目录的 B 站音频是否已缓存；私有旧缓存也视为已缓存。 */
+    fun cached(track: OnlineTrack): Boolean {
+        val segments = track.id.substringAfter("bili:").split(':')
+        val bvid = segments.firstOrNull().orEmpty()
+        if (!bvid.startsWith("BV")) return false
+        val cid = segments.getOrNull(1)?.toLongOrNull()
+        val key = if (cid != null) "${bvid}_$cid" else bvid
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            publicAudio("$key.m4a") != null || privateAudio(key) != null
+        } else privateAudio(key) != null
+    }
+
+    /** 删除 B 站音频缓存；公共文件与私有旧缓存都删除，不提供恢复。 */
+    fun delete(track: OnlineTrack): Boolean {
+        val segments = track.id.substringAfter("bili:").split(':')
+        val bvid = segments.firstOrNull().orEmpty()
+        if (!bvid.startsWith("BV")) return false
+        val cid = segments.getOrNull(1)?.toLongOrNull()
+        val key = if (cid != null) "${bvid}_$cid" else bvid
+        var removed = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            publicAudio("$key.m4a")?.let { uri ->
+                removed = activity.contentResolver.delete(uri, null, null) > 0 || removed
+            }
+        }
+        File(activity.filesDir, "bili").listFiles()?.forEach { file ->
+            if (file.name == "$key.m4a" || file.name == "$key.m4a.part") removed = file.delete() || removed
+        }
+        return removed
+    }
+
+    /** 按已登记到播放列表的 URI 删除公共/私有 B 站音频，兼容旧条目。 */
+    fun deleteUri(rawUri: String): Boolean {
+        val uri = Uri.parse(rawUri)
+        val name = displayName(uri) ?: if (uri.scheme == "file") uri.lastPathSegment else null
+        val key = name?.removeSuffix(".m4a")?.takeIf { it.startsWith("BV") } ?: return false
+        var removed = false
+        if (uri.scheme == "content") {
+            removed = runCatching { activity.contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                publicAudio("$key.m4a")?.let { public ->
+                    if (public != uri) removed = activity.contentResolver.delete(public, null, null) > 0 || removed
+                }
+            }
+        }
+        if (uri.scheme == "file") {
+            removed = runCatching { File(uri.path.orEmpty()).delete() }.getOrDefault(false)
+        }
+        File(activity.filesDir, "bili").listFiles()?.forEach { file ->
+            if (file.name == "$key.m4a" || file.name == "$key.m4a.part") removed = file.delete() || removed
+        }
+        return removed
+    }
+
+    private fun displayName(uri: Uri): String? {
+        if (uri.scheme != "content") return null
+        return runCatching {
+            activity.contentResolver.query(uri, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+        }.getOrDefault(null)
     }
 
     /** 展开分 P 合集：每个分 P 是一首可独立播放和缓存的曲目；单 P 视频返回单元素列表。 */
@@ -86,6 +149,9 @@ class BiliMusic(private val activity: Activity) {
         require(bvid.startsWith("BV")) { "哔哩哔哩视频标识无效" }
         val pages = pageList(bvid)
         Log.i("8DBili", "parts bvid=$bvid count=${pages.length()}")
+        if (pages.length() == 1 && track.compilation) {
+            Log.i("8DBili", "correct compilation flag bvid=$bvid searchVideos=${track.partCount}")
+        }
         val artist = track.artist
         return (0 until pages.length()).map { i ->
             val page = pages.getJSONObject(i)
@@ -150,7 +216,7 @@ class BiliMusic(private val activity: Activity) {
         val columns = arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.SIZE)
         val selection = "${MediaStore.Downloads.DISPLAY_NAME}=? AND ${MediaStore.Downloads.RELATIVE_PATH}=? AND ${MediaStore.Downloads.IS_PENDING}=0"
         activity.contentResolver.query(collection, columns, selection,
-            arrayOf(name, "${Environment.DIRECTORY_DOWNLOADS}/bili/"), null)?.use { cursor ->
+            arrayOf(name, BILI_RELATIVE_PATH), null)?.use { cursor ->
             if (cursor.moveToFirst() && cursor.getLong(1) > 100_000)
                 return ContentUris.withAppendedId(collection, cursor.getLong(0))
         }
@@ -163,7 +229,7 @@ class BiliMusic(private val activity: Activity) {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, "audio/mp4")
-            put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/bili/")
+            put(MediaStore.Downloads.RELATIVE_PATH, BILI_RELATIVE_PATH)
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
@@ -184,9 +250,11 @@ class BiliMusic(private val activity: Activity) {
 
     private fun cached(bvid: String, cid: Long?): File? {
         val key = if (cid != null) "${bvid}_$cid" else bvid
-        return File(activity.filesDir, "bili").listFiles()?.firstOrNull {
-            it.name == "$key.m4a" && it.length() > 100_000
-        }
+        return privateAudio(key)
+    }
+
+    private fun privateAudio(key: String): File? = File(activity.filesDir, "bili").listFiles()?.firstOrNull {
+        it.name == "$key.m4a" && it.length() > 100_000
     }
 
     private fun pageList(bvid: String): JSONArray {

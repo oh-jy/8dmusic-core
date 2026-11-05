@@ -83,13 +83,14 @@ import j5i.spatial8d.ui.ThemeUi
 import j5i.spatial8d.ui.AppLanguage
 import j5i.spatial8d.ui.DrivingView
 import j5i.spatial8d.ui.PlaylistMetadataHost
+import j5i.spatial8d.ui.PlaylistLibraryHost
 import java.util.Locale
 import org.json.JSONObject
 import kotlin.math.roundToInt
 import kotlin.math.pow
 
 /** 页面只持有一份空间参数和队列状态；实际解码、DSP、播放统一交给 SpatialPlayer。 */
-class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost {
+class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, PlaylistLibraryHost {
     private lateinit var musicStore: MusicStore
     private lateinit var presetStore: PresetStore
     private var service: PlaybackService? = null
@@ -199,6 +200,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private var onlineStatusView: TextView? = null
     private var onlineSearchSeq = 0
     private var sourceSearchSeq = 0
+    private var pendingDeleteResult: ((Boolean) -> Unit)? = null
     private var recordingKind = ""
     private var recordingPath = ""
     private var recordingStartedAt = 0L
@@ -212,7 +214,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private var lyricsDialog: Dialog? = null
     private lateinit var fmButton: Button
     private lateinit var onlineButton: Button
-    private lateinit var radioRefreshButton: Button
     private var sourceStatusView: TextView? = null
     private var playlistDialog: PlaylistDialog? = null
     private var seekGuardUntil = 0L
@@ -344,6 +345,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 8144) {
+            pendingDeleteResult?.invoke(resultCode == RESULT_OK)
+            pendingDeleteResult = null
+            return
+        }
         if (MusicSourceApi.onActivityResult(this, requestCode, resultCode, data)) refreshOnlineBody()
     }
 
@@ -665,7 +671,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             exportButton.setTextColor(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.accent)
             exportButton.contentDescription = if (isLive) "录制电台最终输出" else "导出当前音频"
         }
-        if (::radioRefreshButton.isInitialized) radioRefreshButton.visibility = if (isLive) View.VISIBLE else View.GONE
         if (::favoriteButton.isInitialized) {
             favoriteButton.background = null
             favoriteButton.tag = "favoriteButton"
@@ -1047,7 +1052,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (isLive) {
             val radio = service?.radio ?: return
             if (radio.isPlaying) { radio.pause(); playbackStatus = "电台已暂停" }
-            else if (service?.play() == true) playbackStatus = "电台播放中"
+            else if (radioSources.isNotEmpty()) {
+                // FM 暂停后点播放即重新连接当前线路，兼作原来的刷新按钮。
+                tryRadioSource(radioSourceIndex.coerceAtLeast(0))
+                playbackStatus = "正在重新连接电台…"
+            } else playbackStatus = "电台线路不可用"
             refreshPlayback()
             return
         }
@@ -1118,6 +1127,41 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 service?.syncQueue(it, currentUri)
             }, songs)
         playlistDialog?.show()
+    }
+
+    override fun onLibraryChanged(items: List<MusicItem>) {
+        songs = items.toMutableList()
+        queue = musicStore.view(songs)
+        currentQueue = queue
+        service?.syncQueue(queue, currentUri)
+        refreshPlayback()
+    }
+
+    override fun deleteLibrarySource(item: MusicItem, onResult: (Boolean) -> Unit) {
+        val uri = Uri.parse(item.uri)
+        if (onlineMusic.deleteBiliAudioUri(item.uri)) {
+            onResult(true)
+            return
+        }
+        if (uri.scheme == "file" || item.uri.startsWith("file://")) {
+            onResult(runCatching { java.io.File(item.uri.removePrefix("file://")).delete() }.getOrDefault(false))
+            return
+        }
+        if (uri.scheme != "content") {
+            onResult(false)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                val request = MediaStore.createDeleteRequest(contentResolver, listOf(uri))
+                pendingDeleteResult = onResult
+                startIntentSenderForResult(request.intentSender, 8144, null, 0, 0, 0)
+                return
+            } catch (_: Exception) {
+                pendingDeleteResult = null
+            }
+        }
+        onResult(runCatching { contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false))
     }
 
     private fun togglePlaylist() {
@@ -1352,16 +1396,16 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             setPadding(ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 8f), 0)
             setOnClickListener { action() }
         }
-        fmButton = navButton("FM") { showSourceSheet(false) }.apply {
-            visibility = if (fmUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
-        }
-        bar.addView(fmButton)
         onlineButton = navButton(t("library")) { showSourceSheet(true) }.apply {
             visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
         }
         bar.addView(onlineButton)
+        fmButton = navButton("FM") { showSourceSheet(false) }.apply {
+            visibility = if (fmUnlocked) View.VISIBLE else View.GONE
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
+        }
+        bar.addView(fmButton)
         bar.addView(navButton(t("driving")) { showDrivingMode() })
         themeButton = navButton(when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }) {
             // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
@@ -2192,20 +2236,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 leftMargin = ThemeUi.dp(this@MainActivity, 10f)
             }
         })
-        radioRefreshButton = ThemeUi.button(this, palette, "↻", ThemeUi.ROLE_ACCENT, minHeightDp = 30f).apply {
-            textSize = 21f
-            setPadding(0, 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 32f), ThemeUi.dp(this@MainActivity, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@MainActivity, 8f)
-            }
-            visibility = View.GONE
-            contentDescription = "重新连接当前电台"
-            setOnClickListener {
-                if (recordingKind.isNotEmpty()) toast("请先停止录音，再重新连接电台")
-                else if (isLive && radioSources.isNotEmpty()) tryRadioSource(radioSourceIndex.coerceAtLeast(0))
-            }
-        }
-        meta.addView(radioRefreshButton)
         favoriteButton = ImageButton(this).apply {
             setImageDrawable(j5i.spatial8d.ui.HeartDrawable(false, palette.controlText))
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -2411,11 +2441,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             setPadding(ThemeUi.dp(this@MainActivity, 18f), ThemeUi.dp(this@MainActivity, 20f),
                 ThemeUi.dp(this@MainActivity, 18f), ThemeUi.dp(this@MainActivity, 10f))
             background = ThemeUi.bgDrawable(this@MainActivity, palette.surface, 14f)
-            addView(ThemeUi.text(this@MainActivity, "退出 8D 空间音频", 18f, palette, bold = true))
-            addView(ThemeUi.text(this@MainActivity, "退出将停止播放，也可以保留音乐并转入后台。", 12f, palette,
+            addView(ThemeUi.text(this@MainActivity, "请确认", 18f, palette, bold = true))
+            addView(ThemeUi.text(this@MainActivity, "请确认，选择退出播放或转入后台", 12f, palette,
                 role = ThemeUi.ROLE_SUB).apply { setPadding(0, ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 16f)) })
             addView(ThemeUi.row(this@MainActivity, gravity = Gravity.END).apply {
-                addView(ThemeUi.text(this@MainActivity, "后台播放", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                addView(ThemeUi.text(this@MainActivity, "后台", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                     setPadding(ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f),
                         ThemeUi.dp(this@MainActivity, 12f), ThemeUi.dp(this@MainActivity, 10f))
                     setOnClickListener { exitDialog?.dismiss(); moveTaskToBack(true) }
@@ -2594,6 +2624,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (if (online) !onlineUnlocked else !fmUnlocked) return
         val current = if (online) onlineDialog else fmDialog
         if (current?.isShowing == true) return
+        if (!online) syncStationFilterToCurrent()
         sourceStatusView = null
         val sheet = ThemeUi.showSheet(this, palette, if (online) t("online") else t("fm"), "8D",
             cancelLabel = t("close"), fullHeight = true, scrollable = false) {
@@ -2606,6 +2637,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             (content.getChildAt(0) as? LinearLayout)?.addView(sourceStatusView)
         }
         sheet.show()
+    }
+
+    // 再次打开 FM 时先恢复当前电台所属筛选，避免当前电台被旧筛选条件隐藏。
+    private fun syncStationFilterToCurrent() {
+        if (!isLive || currentStationId.isBlank()) return
+        val station = RadioCatalog.filter(false).firstOrNull { it.id == currentStationId } ?: return
+        sourceRegion = station.region
+        sourceCity = station.city
+        sourceType = station.type
     }
 
     private fun showSourceSheetRecreate() {
@@ -2730,6 +2770,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         renderStations(body, stations)
         val footer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val customActive = isLive && currentStationId == "custom"
         val toggle = ThemeUi.text(this, t("fm.custom"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f))
@@ -2739,6 +2780,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 text = if (open) t("fm.custom").replace("▸", "▾") else t("fm.custom")
             }
         }
+        if (customActive) toggle.text = t("fm.custom").replace("▸", "▾")
         val input = ThemeUi.input(this, palette, t("fm.url.hint")).apply {
             setText(preferences.getString("customRadio", ""))
             setOnEditorActionListener { _, _, _ -> playCustom(text.toString()); true }
@@ -2758,7 +2800,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             11f, palette, role = ThemeUi.ROLE_SUB))
         footer.addView(toggle)
         footer.addView(details)
-        details.visibility = View.GONE
+        details.visibility = if (customActive) View.VISIBLE else View.GONE
         filters.addView(footer)
     }
 
@@ -2770,6 +2812,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun renderStations(parent: LinearLayout, stations: List<RadioStation>) {
         parent.removeAllViews()
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var activeRow: View? = null
         stations.forEach { station ->
             val active = currentStationId == station.id && isLive
             rows.addView(ThemeUi.row(this).apply {
@@ -2787,12 +2830,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 addView(ThemeUi.text(this@MainActivity, if (active) "LIVE" else "${t("play")} ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener { playRadio(station); dismissSource() }
+                if (active) activeRow = this
             })
         }
-        parent.addView(ScrollView(this).apply {
+        val scrollView = ScrollView(this).apply {
             isFillViewport = true
             addView(rows)
-        }, LinearLayout.LayoutParams(-1, -1))
+        }
+        parent.addView(scrollView, LinearLayout.LayoutParams(-1, -1))
+        activeRow?.let { row -> scrollView.post { scrollView.scrollTo(0, row.top) } }
     }
 
     private fun refreshOnlineBody() {
@@ -2835,6 +2881,13 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     orientation = LinearLayout.VERTICAL
                     addView(ThemeUi.row(this@MainActivity).apply {
                         gravity = android.view.Gravity.CENTER_VERTICAL
+                        if (track.provider == "哔哩哔哩" && onlineMusic.biliCached(track)) addView(ThemeUi.text(this@MainActivity,
+                            "已缓存", 10f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                            background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 6f)
+                            setPadding(ThemeUi.dp(this@MainActivity, 4f), ThemeUi.dp(this@MainActivity, 1f),
+                                ThemeUi.dp(this@MainActivity, 4f), ThemeUi.dp(this@MainActivity, 1f))
+                            (layoutParams as? LinearLayout.LayoutParams)?.rightMargin = ThemeUi.dp(this@MainActivity, 6f)
+                        })
                         if (track.provider == "哔哩哔哩") addView(ThemeUi.text(this@MainActivity,
                             if (track.compilation) "合集" else "单曲", 10f, palette,
                             role = if (track.compilation) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_SUB).apply {
@@ -2850,7 +2903,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     addView(ThemeUi.text(this@MainActivity,
                         when {
                             track.provider != "哔哩哔哩" -> "${track.artist} · ${track.provider}"
-                            track.compilation -> "${track.artist} · ${track.provider} · 可展开分 P 曲目"
+                            track.compilation -> "${track.artist} · ${track.provider} · ${track.partCount} 首分 P · 可展开"
                             else -> "${track.artist} · ${track.provider} · ${formatTrackDuration(track.duration)}"
                         }, 11f, palette, role = ThemeUi.ROLE_SUB))
                 }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -3131,8 +3184,22 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         onlineStatusView?.text = "正在读取《${track.title}》的曲目列表…"
         onlineMusic.biliParts(track) { result ->
             result.onSuccess { parts ->
-                if (parts.size == 1) resolveOnline(parts[0])
-                else { onlineStatusView?.text = "合集共 ${parts.size} 首，请选择曲目"; showBiliParts(track, parts) }
+                if (parts.size == 1) {
+                    if (track.compilation) {
+                        onlineTracks = onlineTracks.map { if (it.id == track.id) it.copy(compilation = false, partCount = 1) else it }
+                        refreshOnlineBody()
+                    }
+                    resolveOnline(parts[0])
+                } else {
+                    if (!track.compilation || track.partCount != parts.size) {
+                        onlineTracks = onlineTracks.map {
+                            if (it.id == track.id) it.copy(compilation = true, partCount = parts.size) else it
+                        }
+                        refreshOnlineBody()
+                    }
+                    onlineStatusView?.text = "合集共 ${parts.size} 首，请选择曲目"
+                    showBiliParts(track, parts)
+                }
             }.onFailure {
                 if (onlineDialog?.isShowing == true)
                     onlineStatusView?.text = it.message ?: "曲目列表读取失败"
@@ -3151,7 +3218,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f))
                     addView(LinearLayout(this@MainActivity).apply {
                         orientation = LinearLayout.VERTICAL
-                        addView(ThemeUi.text(this@MainActivity, "${index + 1}. ${part.title}", 13f, palette, bold = true))
+                        addView(ThemeUi.text(this@MainActivity,
+                            "${index + 1}. ${part.title}${if (onlineMusic.biliCached(part)) " · 已缓存" else ""}",
+                            13f, palette, bold = true))
                         addView(ThemeUi.text(this@MainActivity, formatTrackDuration(part.duration),
                             11f, palette, role = ThemeUi.ROLE_SUB))
                     }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -3188,7 +3257,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         val localFile = if (url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else null
         val item = MusicItem((track.provider + track.id).hashCode().toLong(), "${track.title} · ${track.artist}",
             url, size = localFile?.length() ?: 0L,
-            duration = (track.duration * 1000).toLong(), artist = track.artist)
+            duration = (track.duration * 1000).toLong(), artist = track.artist,
+            album = if (track.provider == "哔哩哔哩") "B站音频" else "未知专辑")
         if ((localFile != null || (track.provider == "哔哩哔哩" && url.startsWith("content://media/"))) &&
             musicStore.cached().none { it.uri == item.uri }) {
             musicStore.remember(item)

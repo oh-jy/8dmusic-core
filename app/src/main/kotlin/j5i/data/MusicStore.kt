@@ -20,7 +20,6 @@ class MusicStore(private val context: Context) {
         private set
     var query = ""
     var playlistIndex = -1
-    val hidden = preferences.getStringSet("hidden", emptySet())!!.mapNotNull { it.toLongOrNull() }.toMutableSet()
     var manualOrder = jsonLongs(preferences.getString("manual", "[]")).toMutableList()
         private set
     val playlists = jsonPlaylists(preferences.getString("playlists", "[]")).toMutableList()
@@ -206,10 +205,9 @@ class MusicStore(private val context: Context) {
         val favoritesView = playlistIndex == FAVORITES_INDEX
         val q = sanitizeQuery(query).trim().lowercase()
         val filtered = songs.filter { song ->
-            song.id !in hidden &&
-                (if (favoritesView) song.id in favorites
-                    else playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
-                (q.isEmpty() || matches(song, q))
+            (if (favoritesView) song.id in favorites
+                else playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
+            (q.isEmpty() || matches(song, q))
         }
         if (sort != "manual") {
             val sorted = if (sort == "time") {
@@ -270,14 +268,31 @@ class MusicStore(private val context: Context) {
         preferences.edit().putString("sort", "manual").apply()
     }
 
-    fun hide(item: MusicItem) {
-        hidden.add(item.id)
-        saveHidden()
+    /** 永久移出本机索引、自建列表与收藏；不提供恢复。 */
+    fun removePermanently(item: MusicItem) {
+        val library = cached().filterNot { it.uri == item.uri }
+        saveLibrary(library)
+        val added = loadAdded().filterNot { it.uri == item.uri }
+        saveAdded(added)
+        playlists.indices.forEach { index ->
+            val playlist = playlists[index]
+            playlists[index] = playlist.copy(ids = playlist.ids.filterNot { it == item.id }, rule = "")
+        }
+        savePlaylists()
+        favorites.remove(item.id)
+        save("favorites", JSONArray(favorites.toList()).toString())
+        manualOrder = manualOrder.filterNot { it == item.id }.toMutableList()
+        saveOrder()
+        dropCache(item)
     }
 
-    fun restoreHidden() {
-        hidden.clear()
-        saveHidden()
+    /** 仅从当前自定义播放列表移除；搜索型列表固化为快照，避免刷新后再次出现。 */
+    fun removeFromCurrentPlaylist(item: MusicItem) {
+        val index = playlistIndex
+        if (index !in playlists.indices) return
+        val playlist = playlists[index]
+        playlists[index] = playlist.copy(ids = playlist.ids.filterNot { it == item.id }, rule = "")
+        savePlaylists()
     }
 
     fun addPlaylist(name: String, songs: List<MusicItem>): Boolean {
@@ -296,13 +311,6 @@ class MusicStore(private val context: Context) {
         savePlaylists()
     }
 
-    fun removeFromPlaylist(index: Int, item: MusicItem) {
-        val playlist = playlists.getOrNull(index) ?: return
-        // 搜索型列表移除一首后固化为快照，否则刷新时该歌曲会再次出现。
-        playlists[index] = playlist.copy(ids = playlist.ids.filterNot { it == item.id }, rule = "")
-        savePlaylists()
-    }
-
     fun toggleFavorite(id: Long) {
         val next = if (id in favorites) favorites - id else favorites + id
         favorites.clear()
@@ -317,7 +325,6 @@ class MusicStore(private val context: Context) {
         it in charArrayOf('\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u00ad') || (it.code < 0x20 && it != '\t')
     }
     private fun saveOrder() = save("manual", JSONArray(manualOrder).toString())
-    private fun saveHidden() { preferences.edit().putStringSet("hidden", hidden.map { it.toString() }.toSet()).apply() }
     private fun savePlaylists() {
         save("playlists", JSONArray().apply {
             playlists.forEach { put(JSONObject().apply {

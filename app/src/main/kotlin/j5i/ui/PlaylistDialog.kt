@@ -20,6 +20,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Build
 import android.provider.Settings
+import android.net.Uri
 import androidx.core.content.ContextCompat
 import android.widget.TextView
 import android.widget.Toast
@@ -177,7 +178,7 @@ class PlaylistDialog(
             addView(list)
         }
         root.addView(listScroll)
-        status = ThemeUi.text(c, "点按播放 · 长按歌曲拖动排序 · 移除不会删除源文件", 11f, p, role = ThemeUi.ROLE_SUB)
+        status = ThemeUi.text(c, "点按播放 · 长按歌曲拖动排序 · 操作菜单可移除、删除或编辑", 11f, p, role = ThemeUi.ROLE_SUB)
         root.addView(status)
         refresh()
         return Dialog(c).apply {
@@ -210,10 +211,6 @@ class PlaylistDialog(
         tabs.removeAllViews()
         tabs.addView(chip(t("playlist.all"), store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })
         tabs.addView(chip("♥ ${t("playlist.favorites")}", store.playlistIndex == FAVORITES_INDEX) { store.playlistIndex = FAVORITES_INDEX; refresh() })
-        if (store.hidden.isNotEmpty()) tabs.addView(ThemeUi.text(context, "恢复 ${store.hidden.size}", 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
-            setPadding(dp(8), dp(10), dp(8), dp(10))
-            setOnClickListener { store.restoreHidden(); refresh() }
-        })
         store.playlists.forEachIndexed { index, playlist ->
             tabs.addView(chip(playlist.name, store.playlistIndex == index) { store.playlistIndex = index; refresh() }.apply {
                 // 内置收藏列表不在 playlists 集合内，只有用户自建列表可删除。
@@ -307,25 +304,10 @@ class PlaylistDialog(
             addView(ThemeUi.text(c, (if (active) "▶ " else "") + displayName, 13f, p, bold = active, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply { ThemeUi.hideOverflow(this) })
             addView(ThemeUi.text(c, "${song.artist} · ${song.album} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) })
         })
-        row.addView(ThemeUi.text(c, t("remove"), 11f, p, role = ThemeUi.ROLE_FAINT).apply {
-            setPadding(dp(6), dp(10), dp(4), dp(10))
-            setOnClickListener {
-                AlertDialog.Builder(context, if (dark)
-                        androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
-                    else androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert)
-                    .setMessage("从列表移除“${song.name}”？不会删除源文件。")
-                    .setPositiveButton(t("remove")) { _, _ ->
-                        val playlist = store.playlistIndex
-                        if (playlist == FAVORITES_INDEX) store.toggleFavorite(song.id)
-                        else if (playlist >= 0) store.removeFromPlaylist(playlist, song) else store.hide(song)
-                        status.text = "已移除，不删除源文件"; refresh()
-                    }
-                    .setNegativeButton(t("cancel"), null).show()
-            }
-        })
-        row.addView(ThemeUi.text(c, t("metadata.edit"), 11f, p, role = ThemeUi.ROLE_ACCENT).apply {
-            setPadding(dp(6), dp(10), dp(4), dp(10))
-            setOnClickListener { (context as? PlaylistMetadataHost)?.editMetadata(song) }
+        row.addView(ThemeUi.text(c, "⋯", 18f, p, role = ThemeUi.ROLE_ACCENT).apply {
+            contentDescription = "更多操作"
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            setOnClickListener { showRowActions(song) }
         })
         row.setOnClickListener { if (!reorderMode && dragging < 0) { onPlay(song); dismiss() } }
         row.findViewWithTag<TextView>("dragHandle")?.setOnTouchListener { view, event ->
@@ -343,6 +325,74 @@ class PlaylistDialog(
         }
         return row
     }
+
+    private fun showRowActions(song: MusicItem) {
+        val customPlaylist = store.playlistIndex >= 0
+        val labels = mutableListOf<String>()
+        val actions = mutableListOf<() -> Unit>()
+        if (customPlaylist) { labels.add(t("remove")); actions.add { confirmRemove(song) } }
+        labels.add(t("delete")); actions.add { confirmDelete(song) }
+        labels.add(t("metadata.edit")); actions.add {
+            (context as? PlaylistMetadataHost)?.editMetadata(song)
+        }
+        AlertDialog.Builder(context, dialogTheme())
+            .setTitle(song.name)
+            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
+            .setNegativeButton(t("cancel"), null)
+            .show()
+    }
+
+    private fun confirmRemove(song: MusicItem) {
+        AlertDialog.Builder(context, dialogTheme())
+            .setMessage("从当前自定义播放列表移除“${song.name}”？不会删除原文件，且无法恢复。")
+            .setPositiveButton(t("remove")) { _, _ ->
+                store.removeFromCurrentPlaylist(song)
+                status.text = "已从当前列表移除，不删除源文件"
+                refresh()
+            }
+            .setNegativeButton(t("cancel"), null).show()
+    }
+
+    private fun confirmDelete(song: MusicItem) {
+        AlertDialog.Builder(context, dialogTheme())
+            .setMessage("删除“${song.name}”的原文件并移出所有列表？若系统要求确认，请在系统弹窗中允许。此操作无法恢复。")
+            .setPositiveButton(t("delete")) { _, _ ->
+                requestDelete(song)
+            }
+            .setNegativeButton(t("cancel"), null).show()
+    }
+
+    /** 删除原文件后永久移出所有列表；需要系统授权时只由 Activity 拉起系统确认。 */
+    private fun requestDelete(song: MusicItem) {
+        (context as? PlaylistLibraryHost)?.let { host ->
+            host.deleteLibrarySource(song) { deleted ->
+                if (deleted) {
+                    store.removePermanently(song)
+                    status.text = "原文件已删除，已从所有列表移除"
+                    syncLibrary()
+                } else status.text = "原文件未删除或已取消，歌曲仍保留在列表"
+            }
+            return
+        }
+        val uri = Uri.parse(song.uri)
+        val deleted = if (uri.scheme == "file" || song.uri.startsWith("file://"))
+            runCatching { java.io.File(song.uri.removePrefix("file://")).delete() }.getOrDefault(false)
+        else false
+        if (deleted) {
+            store.removePermanently(song)
+            status.text = "原文件已删除，已从所有列表移除"
+            syncLibrary()
+        } else status.text = "原文件未删除，歌曲仍保留在列表"
+    }
+
+    private fun syncLibrary() {
+        source = store.cached()
+        (context as? PlaylistLibraryHost)?.onLibraryChanged(source)
+        refresh()
+    }
+
+    private fun dialogTheme() = if (dark) androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
+        else androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert
 
     private fun beginDrag(index: Int, row: View, rawY: Float) {
         if (dragging >= 0) return
@@ -468,3 +518,7 @@ interface PlaylistHost {
     fun isLocalMusicPlaying(): Boolean = false
 }
 interface PlaylistMetadataHost { fun editMetadata(item: MusicItem) }
+interface PlaylistLibraryHost {
+    fun onLibraryChanged(items: List<MusicItem>)
+    fun deleteLibrarySource(item: MusicItem, onResult: (Boolean) -> Unit)
+}
