@@ -24,7 +24,6 @@ import android.net.Uri
 import androidx.core.content.ContextCompat
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
 import j5i.spatial8d.data.FAVORITES_INDEX
 import j5i.spatial8d.data.FAVORITES_NAME
 import j5i.spatial8d.data.MusicItem
@@ -215,12 +214,13 @@ class PlaylistDialog(
             tabs.addView(chip(playlist.name, store.playlistIndex == index) { store.playlistIndex = index; refresh() }.apply {
                 // 内置收藏列表不在 playlists 集合内，只有用户自建列表可删除。
                 setOnLongClickListener {
-                    AlertDialog.Builder(context, if (dark)
-                        androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
-                    else androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert)
-                    .setMessage("删除列表“${playlist.name}”？")
-                        .setPositiveButton("删除") { _, _ -> store.deletePlaylist(index); refresh() }
-                        .setNegativeButton("取消", null).show()
+                    lateinit var sheet: Dialog
+                    sheet = ThemeUi.showSheet(context, p, "删除播放列表", "删除“${playlist.name}”？") {
+                        addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
+                            sheet.dismiss(); store.deletePlaylist(index); refresh()
+                        })
+                    }
+                    sheet.show()
                     true
                 }
             })
@@ -327,39 +327,46 @@ class PlaylistDialog(
     }
 
     private fun showRowActions(song: MusicItem) {
-        val customPlaylist = store.playlistIndex >= 0
-        val labels = mutableListOf<String>()
-        val actions = mutableListOf<() -> Unit>()
-        if (customPlaylist) { labels.add(t("remove")); actions.add { confirmRemove(song) } }
-        labels.add(t("delete")); actions.add { confirmDelete(song) }
-        labels.add(t("metadata.edit")); actions.add {
-            (context as? PlaylistMetadataHost)?.editMetadata(song)
+        lateinit var sheet: Dialog
+        val displayName = song.name.replace(Regex("\\.[A-Za-z0-9]{1,8}$"), "")
+        sheet = ThemeUi.showSheet(context, p, displayName.take(28),
+            "${song.artist} · ${song.album}") {
+            if (store.playlistIndex >= 0) addView(sheetButton(t("remove"), ThemeUi.ROLE_CONTROL) {
+                sheet.dismiss(); confirmRemove(song)
+            })
+            addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
+                sheet.dismiss(); confirmDelete(song)
+            })
+            addView(sheetButton(t("metadata.edit"), ThemeUi.ROLE_CONTROL) {
+                sheet.dismiss(); (context as? PlaylistMetadataHost)?.editMetadata(song)
+            })
         }
-        AlertDialog.Builder(context, dialogTheme())
-            .setTitle(song.name)
-            .setItems(labels.toTypedArray()) { _, which -> actions[which]() }
-            .setNegativeButton(t("cancel"), null)
-            .show()
+        sheet.show()
     }
 
     private fun confirmRemove(song: MusicItem) {
-        AlertDialog.Builder(context, dialogTheme())
-            .setMessage("从当前自定义播放列表移除“${song.name}”？不会删除原文件，且无法恢复。")
-            .setPositiveButton(t("remove")) { _, _ ->
+        lateinit var sheet: Dialog
+        sheet = ThemeUi.showSheet(context, p, t("remove"),
+            "从当前自定义播放列表移除“${song.name}”？不会删除原文件，且无法恢复。") {
+            addView(sheetButton(t("remove"), ThemeUi.ROLE_ACCENT_FILL) {
+                sheet.dismiss()
                 store.removeFromCurrentPlaylist(song)
                 status.text = "已从当前列表移除，不删除源文件"
                 refresh()
-            }
-            .setNegativeButton(t("cancel"), null).show()
+            })
+        }
+        sheet.show()
     }
 
     private fun confirmDelete(song: MusicItem) {
-        AlertDialog.Builder(context, dialogTheme())
-            .setMessage("删除“${song.name}”的原文件并移出所有列表？若系统要求确认，请在系统弹窗中允许。此操作无法恢复。")
-            .setPositiveButton(t("delete")) { _, _ ->
-                requestDelete(song)
-            }
-            .setNegativeButton(t("cancel"), null).show()
+        lateinit var sheet: Dialog
+        sheet = ThemeUi.showSheet(context, p, t("delete"),
+            "删除“${song.name}”的原文件并移出所有列表？若系统要求确认，请在系统弹窗中允许。此操作无法恢复。") {
+            addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
+                sheet.dismiss(); requestDelete(song)
+            })
+        }
+        sheet.show()
     }
 
     /** 删除原文件后永久移出所有列表；需要系统授权时只由 Activity 拉起系统确认。 */
@@ -391,8 +398,11 @@ class PlaylistDialog(
         refresh()
     }
 
-    private fun dialogTheme() = if (dark) androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert
-        else androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert
+    private fun sheetButton(label: String, role: String, action: () -> Unit) =
+        ThemeUi.button(context, p, label, role) { action() }.apply {
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42))
+                .apply { topMargin = dp(8) }
+        }
 
     private fun beginDrag(index: Int, row: View, rawY: Float) {
         if (dragging >= 0) return

@@ -1139,6 +1139,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     override fun deleteLibrarySource(item: MusicItem, onResult: (Boolean) -> Unit) {
         val uri = Uri.parse(item.uri)
+        // 原文件已被外部删除时，直接允许清理失效的曲库记录。
+        if (isSourceMissing(uri)) {
+            onResult(true)
+            return
+        }
         if (onlineMusic.deleteBiliAudioUri(item.uri)) {
             onResult(true)
             return
@@ -1162,6 +1167,16 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
         }
         onResult(runCatching { contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false))
+    }
+
+    private fun isSourceMissing(uri: Uri): Boolean = when {
+        uri.scheme == "file" || uri.scheme == null ->
+            !java.io.File(uri.path.orEmpty()).exists()
+        uri.scheme == "content" -> runCatching {
+            contentResolver.query(uri, arrayOf(android.provider.BaseColumns._ID), null, null, null)
+                ?.use { !it.moveToFirst() } ?: false
+        }.getOrDefault(false)
+        else -> false
     }
 
     private fun togglePlaylist() {
