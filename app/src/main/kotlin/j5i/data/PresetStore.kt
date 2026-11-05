@@ -17,7 +17,7 @@ class PresetStore(context: Context) {
                 p.getDouble("period"), p.getDouble("elev"), p.getDouble("depth"),
                 p.getDouble("room"), p.getDouble("wet"), p.getDouble("rt60"),
                 p.getDouble("phase"), p.getDouble("direction"), p.optDouble("width", 100.0),
-                p.optBoolean("raw")
+                p.optBoolean("raw"), p.optInt("trajectory", 0).coerceIn(0, 4)
             )
         }
     } catch (_: Exception) { emptyList() }
@@ -38,6 +38,7 @@ class PresetStore(context: Context) {
                 put("direction", p.direction)
                 put("width", p.width)
                 put("raw", p.raw)
+                put("trajectory", p.trajectory)
             })
         }
         preferences.edit().putString("presets", array.toString()).apply()

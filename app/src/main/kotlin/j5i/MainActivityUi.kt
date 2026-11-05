@@ -180,6 +180,9 @@ internal fun MainActivity.refreshAll() {
             btn.tag = if (preset.direction == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
             ThemeUi.applyButton(btn, palette)
         }
+        parameterPanel.findViewWithTag<Button>("trajectoryPicker")?.text =
+            t("trajectory." + listOf("orbit", "figure8", "vertical", "spiral", "wander")[preset.trajectory.coerceIn(0, 4)]) +
+                if (preset.raw) " · ${t("trajectory.raw.short")}" else " ▾"
         sliderControls.forEach { (key, slider) ->
             val value = parameter(key)
             val definition = SLIDERS.first { it.key == key }
@@ -529,12 +532,13 @@ internal fun MainActivity.updateParameter(key: String, value: Double) {
             "wet" -> preset.copy(wet = value)
             "rt60" -> preset.copy(rt60 = value)
             "direction" -> preset.copy(direction = value)
+            "trajectory" -> preset.copy(trajectory = value.toInt().coerceIn(0, 4))
             "width" -> preset.copy(width = value)
             else -> return
         }
         val matched = matchPresetIn(SPACE_PRESETS + customPresets, preset.period, preset.elev,
             preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-            preset.direction, preset.width, preset.raw)
+            preset.direction, preset.width, preset.raw, preset.trajectory)
         if (matched != preset.name) {
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
@@ -542,6 +546,7 @@ internal fun MainActivity.updateParameter(key: String, value: Double) {
         refreshPresetSaveVisibility()
         // 滑块或方向按钮修改后，同时同步中间下拉文本、全部展开控件与预设说明。
         service?.player?.preset = preset
+        service?.controlsPreset = preset
         service?.radio?.preset = preset
         service?.radio?.denoise = transform.denoiseLevel
         savePlaybackState()

@@ -9,6 +9,26 @@
 
 int main(){
     {
+        Params p{44100,8,40,45,0,1,100,10,1.2,18,false,false,0};
+        p.trajectory=1; auto eight=ctrl(1,p,1);
+        assert(eight.dl>eight.dr);
+        p.trajectory=2; auto vertical=ctrl(2,p,1);
+        assert(std::abs(vertical.dl-vertical.dr)<1e-9 && vertical.dn>0);
+        p.trajectory=3; auto spiral=ctrl(8,p,1);
+        assert(std::abs(spiral.dl-spiral.dr)<1e-9);
+        p.trajectory=4; assert(ctrl(1,p,1).dl!=ctrl(2,p,1).dl);
+        constexpr int n=44100;
+        std::vector<float> input(n);
+        for(int i=0;i<n;i++)input[i]=.15f*std::sin(2*PI*1100*i/44100);
+        std::vector<int16_t> orbit(n*2),eightPcm(n*2);
+        p.trajectory=0; Renderer a(p); a.block(input,0,n,orbit);
+        p.trajectory=1; Renderer b(p); b.block(input,0,n,eightPcm);
+        long long energy=0,difference=0;
+        for(int i=0;i<n*2;i++){energy+=std::abs(int(eightPcm[i]));difference+=std::abs(int(eightPcm[i])-int(orbit[i]));}
+        assert(energy>n && difference>n);
+        std::cout<<"trajectory PCM energy="<<energy<<" difference="<<difference<<"\n";
+    }
+    {
         Params p{44100,8,35,45,0,1,100,10,1.2,18,false,false,0};
         Renderer normal(p); p.clarity=0; Renderer soft(p); p.clarity=100; Renderer clear(p);
         assert(std::abs(normal.shadowAmount-.35)<1e-12 && std::abs(normal.tiltAmount-.08)<1e-12);

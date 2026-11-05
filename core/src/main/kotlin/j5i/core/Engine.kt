@@ -39,12 +39,13 @@ class SpaceEngine(var sr: Double) {
         phaseDeg: Double,
         direction: Double,
         widthPct: Double,
-        raw: Boolean
+        raw: Boolean,
+        trajectory: Int = 0
     ) {
         this.period = max(1.0, period)
         this.depth01 = min(1.0, max(0.0, depthPct / 100.0))
         this.rawBypass = raw
-        bin.setParams(period, elevDeg, depthPct, phaseDeg, direction, widthPct, raw)
+        bin.setParams(period, elevDeg, depthPct, phaseDeg, direction, widthPct, raw, trajectory)
     }
 
     fun setRoom(sizeM: Double, rt60: Double, wetPct: Double) {

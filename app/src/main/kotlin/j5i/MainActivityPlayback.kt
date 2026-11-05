@@ -218,11 +218,15 @@ internal fun MainActivity.restorePlaybackState() {
         try {
             val state = JSONObject(text)
             preset = try {
-                val restored = SpacePreset("标准绕头 · 默认", "", state.getDouble("period"),
-                    state.getDouble("elev"), state.getDouble("depth"), state.getDouble("phase"),
-                    state.getDouble("direction"), state.getDouble("width"), state.getDouble("room"),
-                    state.getDouble("rt60"), state.getDouble("wet"), state.getBoolean("raw"))
-                matchingPresetOrDefault(restored, SPACE_PRESETS + customPresets)
+                val restored = SpacePreset(name = "自定义", note = "", period = state.getDouble("period"),
+                    elev = state.getDouble("elev"), depth = state.getDouble("depth"), phase = state.getDouble("phase"),
+                    direction = state.getDouble("direction"), width = state.getDouble("width"), room = state.getDouble("room"),
+                    rt60 = state.getDouble("rt60"), wet = state.getDouble("wet"), raw = state.getBoolean("raw"),
+                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4))
+                val all = SPACE_PRESETS + customPresets
+                val name = matchPresetIn(all, restored.period, restored.elev, restored.depth, restored.room,
+                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory)
+                all.firstOrNull { it.name == name } ?: restored
             } catch (_: Exception) {
                 DEFAULT_SPACE_PRESET
             }
@@ -243,6 +247,7 @@ internal fun MainActivity.savePlaybackState() {
             put("period", preset.period); put("elev", preset.elev); put("depth", preset.depth)
             put("phase", preset.phase); put("direction", preset.direction); put("width", preset.width)
             put("room", preset.room); put("rt60", preset.rt60); put("wet", preset.wet); put("raw", preset.raw)
+            put("trajectory", preset.trajectory)
             put("reverse", reverse); put("speed", transform.speed); put("semi", transform.semi); put("tape", transform.tape)
             put("denoise", transform.denoiseLevel)
         }.toString()).apply()

@@ -113,6 +113,7 @@ class BinauralRenderer(var sr: Double) {
     private var depth01 = 0.45
     private var phaseDeg = 0.0
     private var direction = 1.0
+    private var trajectory = 0
     private val itdMs = 0.63
     private val shadow = 0.85
     private val panAmount = 0.18
@@ -152,7 +153,8 @@ class BinauralRenderer(var sr: Double) {
         phaseDeg: Double,
         direction: Double,
         widthPct: Double,
-        rawBypass: Boolean
+        rawBypass: Boolean,
+        trajectory: Int = 0
     ) {
         this.period = max(1.0, period)
         this.elevDeg = min(80.0, max(0.0, elevDeg))
@@ -161,6 +163,7 @@ class BinauralRenderer(var sr: Double) {
         this.direction = if (direction > 0.0) 1.0 else if (direction < 0.0) -1.0 else 0.0
         this.width = min(1.5, max(0.0, widthPct / 100.0))
         this.rawBypass = rawBypass
+        this.trajectory = trajectory
         this.makeup = estimateMakeup()
     }
 
@@ -185,10 +188,9 @@ class BinauralRenderer(var sr: Double) {
 
     private fun computeCtrl(t: Double) {
         val tau = itdMs / 1000.0 * sr
-        val th = azimuthAt(t, period, phaseDeg, direction)
+        val (th, phi) = trajectoryAngles(t, period, phaseDeg, direction, elevDeg, trajectory)
         val s = sin(th)
         val cs = cos(th)
-        val phi = elevationAt(t, period, elevDeg, phaseDeg, direction)
         val phiDeg = phi * 180.0 / Math.PI
 
         cDl = 0.5 * tau * (1.0 + s)
@@ -196,7 +198,7 @@ class BinauralRenderer(var sr: Double) {
         cShL = min(shadow, max(0.0, shadow * (1.0 + s) * 0.5))
         cShR = min(shadow, max(0.0, shadow * (1.0 - s) * 0.5))
         // 默认绕头增加前后差异；更强的耳廓频谱线索仍随原有方位轨迹连续变化。
-        val rearCue = if (period == 8.0 && elevDeg == 35.0 && depth01 == 0.45 && phaseDeg == 0.0 && direction > 0.0) 1.8 else 1.0
+        val rearCue = if (trajectory == 0 && period == 8.0 && elevDeg == 35.0 && depth01 == 0.45 && phaseDeg == 0.0 && direction > 0.0) 1.8 else 1.0
         cRear = min(1.0, max(0.0, -cs)) * rearCue
 
         var f0 = 7200.0 - 62.0 * phiDeg

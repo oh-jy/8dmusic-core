@@ -9,8 +9,8 @@
 #define SPATIAL_PLAYER_IMPLEMENTATION
 #include "NativeSpatialExport.cpp"
 
-extern "C" JNIEXPORT jlong JNICALL Java_com_j5i_spatial8d_NativeSpatialPlayer_create(JNIEnv*,jclass,jdouble sr,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity){
-    Params p{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),false,denoise,clarity};
+extern "C" JNIEXPORT jlong JNICALL Java_com_j5i_spatial8d_NativeSpatialPlayer_create(JNIEnv*,jclass,jdouble sr,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity,jint trajectory){
+    Params p{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),false,denoise,clarity,trajectory};
     return reinterpret_cast<jlong>(new Renderer(p));
 }
 extern "C" JNIEXPORT jbyteArray JNICALL Java_com_j5i_spatial8d_NativeSpatialPlayer_render(JNIEnv*env,jclass,jlong handle,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong start,jint frames,jboolean reverse,jlong total,jlong cacheStart,jint before){

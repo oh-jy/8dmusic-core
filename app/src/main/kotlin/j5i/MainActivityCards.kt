@@ -46,7 +46,9 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                         .sortedWith(compareBy({ it.room }, { it.name }))
                     pickOption(t("space.choose"), all.map { item ->
                         val index = SPACE_PRESETS.indexOfFirst { it.name == item.name }
-                        "${if (index >= 0) AppLanguage.preset(this@spaceSettingsCard, index) else item.name.replaceFirst("标准绕头 · ", "标准模式 · ")} · ${item.room.toInt()}${t("unit.meters")}" },
+                        val name = if (index >= 0) AppLanguage.preset(this@spaceSettingsCard, index) else item.name.replaceFirst("标准绕头 · ", "标准模式 · ")
+                        val path = if (item.raw) "" else " · " + t("trajectory." + listOf("orbit", "figure8", "vertical", "spiral", "wander")[item.trajectory.coerceIn(0, 4)])
+                        "$name$path · ${item.room.toInt()}${t("unit.meters")}" },
                         all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
@@ -81,6 +83,19 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                 addView(ThemeUi.text(this@spaceSettingsCard, t("trajectory.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
             }.apply {
                 setPadding(0, ThemeUi.dp(this@spaceSettingsCard, 10f), 0, ThemeUi.dp(this@spaceSettingsCard, 4f))
+            })
+            parameterPanel.addView(ThemeUi.button(this@spaceSettingsCard, palette, t("trajectory.orbit")).apply {
+                tag = "trajectoryPicker"
+                setOnClickListener {
+                    if (preset.raw) {
+                        android.widget.Toast.makeText(this@spaceSettingsCard, t("trajectory.raw"), android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val keys = listOf("orbit", "figure8", "vertical", "spiral", "wander")
+                        pickOption(t("trajectory"), keys.map { t("trajectory.$it") }, preset.trajectory) { index ->
+                            updateParameter("trajectory", index.toDouble())
+                        }
+                    }
+                }
             })
             parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "depth", "phase") }))
             parameterPanel.addView(ThemeUi.divider(this@spaceSettingsCard, palette).apply {

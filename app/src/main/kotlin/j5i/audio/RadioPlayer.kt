@@ -462,7 +462,7 @@ class RadioPlayer(private val probe: Boolean = false) {
     private fun createRenderer(): Long {
         val p = preset
         return NativeSpatialPlayer.create(sampleRate.toDouble(), p.raw, p.period, p.elev, p.depth,
-            p.phase, p.direction, p.width, p.room, p.rt60, p.wet, denoise, 50)
+            p.phase, p.direction, p.width, p.room, p.rt60, p.wet, denoise, 50, p.trajectory)
     }
 
     private fun renderChunk(chunk: ByteArray, bpf: Int, channels: Int, floating: Boolean, frames: Int): ByteArray {
@@ -490,7 +490,7 @@ class RadioPlayer(private val probe: Boolean = false) {
             return NativeSpatialPlayer.renderStream(renderer, chunk, bpf, channels, floating, frames, playedFrames)
         }
         val current = engine ?: SpaceEngine(sampleRate.toDouble()).also {
-            it.setSpace(p.period, p.elev, p.depth, p.phase, p.direction, p.width, false)
+            it.setSpace(p.period, p.elev, p.depth, p.phase, p.direction, p.width, false, p.trajectory)
             it.setRoom(p.room, p.rt60, p.wet)
             engine = it
         }

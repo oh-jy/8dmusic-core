@@ -27,7 +27,7 @@ internal fun audioDetails(mime: String, sampleRate: Int, bitrate: Int): String {
 internal fun matchingPresetOrDefault(candidate: SpacePreset, presets: List<SpacePreset>): SpacePreset {
     val name = matchPresetIn(presets, candidate.period, candidate.elev, candidate.depth,
         candidate.room, candidate.wet, candidate.rt60, candidate.phase,
-        candidate.direction, candidate.width, candidate.raw)
+        candidate.direction, candidate.width, candidate.raw, candidate.trajectory)
     return presets.firstOrNull { it.name == name } ?: DEFAULT_SPACE_PRESET
 }
 
