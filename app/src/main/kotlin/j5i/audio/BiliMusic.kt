@@ -15,6 +15,10 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.security.MessageDigest
+import java.util.concurrent.Callable
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import android.util.Log
 
 /**
@@ -35,6 +39,7 @@ class BiliMusic(private val activity: Activity) {
 
     @Volatile private var imgKey = ""
     @Volatile private var subKey = ""
+    private val partCountCache = ConcurrentHashMap<String, Int>()
 
     val loggedIn: Boolean
         get() = runCatching { JSONObject(MusicSourceApi.sessionInfo(activity, PROVIDER)).optBoolean("loggedIn") }
@@ -55,14 +60,14 @@ class BiliMusic(private val activity: Activity) {
             "search_type" to "video",
             "keyword" to query.trim().ifEmpty { "热门歌曲" },
             "page" to page.coerceAtLeast(1).toString(),
-            "page_size" to "30"
+            "page_size" to "10"
         )
         val url = "https://api.bilibili.com/x/web-interface/wbi/search/type?" +
             Wbi.signedQuery(params, Wbi.mixinKey(imgKey, subKey), System.currentTimeMillis() / 1000)
         val r = JSONObject(api(url))
         if (r.optInt("code") != 0) throw Exception(friendly(r.optInt("code"), r.optString("message")))
         val rows = r.optJSONObject("data")?.optJSONArray("result") ?: JSONArray()
-        return (0 until rows.length()).mapNotNull { i ->
+        val base = (0 until rows.length()).mapNotNull { i ->
             val v = rows.optJSONObject(i) ?: return@mapNotNull null
             val bvid = v.optString("bvid")
             if (!bvid.startsWith("BV")) return@mapNotNull null
@@ -70,13 +75,49 @@ class BiliMusic(private val activity: Activity) {
             // 过滤几十秒的短视频片段；合集（分 P）保留，点按时展开成曲目列表。
             if (duration in 1.0..<MIN_SINGLE_SECONDS) return@mapNotNull null
             val title = cleanTitle(v.optString("title"))
-            // 只用真实分 P 数判断；标题里的「精选 / XX首」和长时长单曲都不代表多 P。
             val partCount = v.optInt("videos").coerceAtLeast(0)
+            SearchRow(bvid, title, v.optString("author").ifEmpty { "哔哩哔哩UP主" }, duration, partCount)
+        }
+        val probed = probePartCounts(base.map { it.bvid })
+        return base.map { row ->
+            val partCount = probed[row.bvid] ?: row.searchPartCount
+            partCountCache[row.bvid] = partCount
             OnlineTrack(
-                "bili:$bvid", title,
-                v.optString("author").ifEmpty { "哔哩哔哩UP主" },
-                duration, "哔哩哔哩", partCount > 1, partCount
+                "bili:${row.bvid}", row.title, row.author,
+                row.duration, "哔哩哔哩", partCount > 1, partCount
             )
+        }
+    }
+
+    private data class SearchRow(
+        val bvid: String,
+        val title: String,
+        val author: String,
+        val duration: Double,
+        val searchPartCount: Int
+    )
+
+    /** 搜索字段 videos 不稳定；以 pagelist 的真实分 P 数作为合集判定依据。 */
+    private fun probePartCounts(bvids: List<String>): Map<String, Int> {
+        val missing = bvids.distinct().filterNot { partCountCache.containsKey(it) }
+        if (missing.isEmpty()) return partCountCache
+        val pool = Executors.newFixedThreadPool(missing.size.coerceAtMost(3))
+        return try {
+            val futures = missing.associateWith { bvid ->
+                pool.submit(object : Callable<Int?> {
+                    override fun call(): Int? =
+                    runCatching { pageList(bvid).length() }
+                        .onFailure { Log.i("8DBili", "part probe failed bvid=$bvid message=${it.message}") }
+                        .getOrNull()
+                })
+            }
+            futures.forEach { (bvid, future) ->
+                runCatching { future.get(12, TimeUnit.SECONDS) }
+                    .getOrNull()?.takeIf { it > 0 }?.let { partCountCache[bvid] = it }
+            }
+            partCountCache
+        } finally {
+            pool.shutdownNow()
         }
     }
 
@@ -148,10 +189,8 @@ class BiliMusic(private val activity: Activity) {
         val bvid = track.id.substringAfter("bili:").substringBefore(':')
         require(bvid.startsWith("BV")) { "哔哩哔哩视频标识无效" }
         val pages = pageList(bvid)
+        partCountCache[bvid] = pages.length()
         Log.i("8DBili", "parts bvid=$bvid count=${pages.length()}")
-        if (pages.length() == 1 && track.compilation) {
-            Log.i("8DBili", "correct compilation flag bvid=$bvid searchVideos=${track.partCount}")
-        }
         val artist = track.artist
         return (0 until pages.length()).map { i ->
             val page = pages.getJSONObject(i)
