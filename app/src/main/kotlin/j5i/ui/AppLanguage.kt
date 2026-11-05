@@ -55,6 +55,8 @@ object AppLanguage {
         "app.name" to e("8D 空间音频", "8D 空間音訊", "8D Spatial Audio"),
         "app.subtitle" to e("HRTF 双耳引擎 · Android", "HRTF 雙耳引擎 · Android", "HRTF binaural engine · Android"),
         "language" to e("语言", "語言", "Language"),
+        "settings" to e("设置", "設定", "Settings"),
+        "theme" to e("外观颜色", "外觀顏色", "Appearance"),
         "language.system" to e("跟随系统", "跟隨系統", "System"),
         "language.simplified" to e("简体中文", "簡體中文", "Simplified Chinese"),
         "language.traditional" to e("繁体中文", "繁體中文", "Traditional Chinese"),
