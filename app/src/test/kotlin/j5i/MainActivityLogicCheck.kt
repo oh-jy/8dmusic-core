@@ -2,8 +2,6 @@ package j5i.spatial8d
 
 import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.PITCH_PRESETS
-import j5i.spatial8d.MainActivity.Companion.interleavedPitchOptions
-import j5i.spatial8d.MainActivity.Companion.matchingPresetOrDefault
 import j5i.spatial8d.audio.SpatialPlayer.Companion.shouldRestartOutput
 import j5i.spatial8d.audio.SpatialPlayer.Companion.hasReachedEndMarker
 import j5i.spatial8d.audio.SpatialPlayer.Companion.endDrainTimedOut
@@ -31,7 +29,7 @@ class MainActivityLogicCheck {
         assertContentEquals(byteArrayOf(1, 2, 3), j5i.spatial8d.audio.RadioPlayer.aacPayload(lc + byteArrayOf(1, 2, 3)))
     }
     @Test fun sliderTouchReleaseNeverRefreshesOtherSeekBars() {
-        val source = File("src/main/kotlin/j5i/MainActivity.kt").readText()
+        val source = File("src/main/kotlin/j5i/MainActivityCards.kt").readText()
         val releaseBlocks = Regex("onStopTrackingTouch\\(seekBar: SeekBar\\) \\{([\\s\\S]*?)\\n\\s{16}\\}")
             .findAll(source)
             .map { it.groupValues[1] }
