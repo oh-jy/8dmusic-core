@@ -8,6 +8,17 @@
 #include "NativeSpatialPlayer.cpp"
 
 int main(){
+    {
+        Params p{44100,8,35,45,0,1,100,10,1.2,18,false,false,0};
+        Renderer normal(p); p.clarity=0; Renderer soft(p); p.clarity=100; Renderer clear(p);
+        assert(std::abs(normal.shadowAmount-.35)<1e-12 && std::abs(normal.tiltAmount-.08)<1e-12);
+        assert(soft.shadowAmount>normal.shadowAmount && clear.shadowAmount<normal.shadowAmount);
+        std::vector<float> input(4096);
+        for(int i=0;i<4096;i++) input[i]=.1f*std::sin(2*PI*6000*i/44100);
+        std::vector<int16_t> a(8192),b(8192); soft.block(input,0,4096,a); clear.block(input,0,4096,b);
+        assert(a!=b);
+        if(std::getenv("SPATIAL_TEST_CLARITY_ONLY")){std::cout<<"clarity checks passed\n";return 0;}
+    }
     if(const char*path=std::getenv("SPATIAL_TEST_PCM")){
         // 真机导出的 44.1kHz / 16bit / 立体声原始输入，覆盖真实歌曲的启动瞬态。
         std::ifstream input(path,std::ios::binary|std::ios::ate);

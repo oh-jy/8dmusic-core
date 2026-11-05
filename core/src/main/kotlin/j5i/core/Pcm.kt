@@ -261,10 +261,12 @@ data class TransformParams(
     val semi: Double = 0.0,
     val tape: Boolean = false,
     val reverse: Boolean = false,
-    val denoise: Int = 65
+    val denoise: Int = 65,
+    val clarity: Int = 50
 ) {
     val active: Boolean get() = speed != 1.0 || semi != 0.0
     val denoiseLevel: Int get() = denoise.coerceIn(0, 100)
+    val clarityLevel: Int get() = clarity.coerceIn(0, 100)
 }
 
 fun clip16(value: Double): Short =

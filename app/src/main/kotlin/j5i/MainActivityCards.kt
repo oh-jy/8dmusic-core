@@ -333,6 +333,33 @@ internal fun MainActivity.transformCard(): LinearLayout {
                 })
             }
             transformBody.addView(denoiseSlider)
+            clarityLabel = ThemeUi.text(this@transformCard, "50%", 12f, palette, role = ThemeUi.ROLE_ACCENT)
+            transformBody.addView(ThemeUi.row(this@transformCard).apply {
+                tag = "localOnly"
+                addView(ThemeUi.text(this@transformCard, t("sound.clarity"), 12f, palette).apply {
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                })
+                addView(clarityLabel)
+            })
+            claritySlider = SeekBar(this@transformCard).apply {
+                tag = "localOnly"
+                ThemeUi.configureSeekBar(this, palette)
+                max = 100
+                progress = transform.clarityLevel
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                        if (fromUser && progress != transform.clarityLevel) {
+                            transform = transform.copy(clarity = progress)
+                            preferences.edit().putInt("soundClarity", progress).apply()
+                            applyTransform(syncControls = false)
+                            clarityLabel.text = "$progress%"
+                        }
+                    }
+                    override fun onStartTrackingTouch(seekBar: SeekBar) { draggingControl = true }
+                    override fun onStopTrackingTouch(seekBar: SeekBar) { draggingControl = false }
+                })
+            }
+            transformBody.addView(claritySlider)
             val chips = ThemeUi.row(this@transformCard)
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
                 chips.addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×\n${t("speed.realtime")}", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {

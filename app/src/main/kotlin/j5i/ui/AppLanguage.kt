@@ -105,6 +105,7 @@ object AppLanguage {
         "speed" to e("倍速", "倍速", "Speed"),
         "speed.realtime" to e("实时", "即時", "Live"),
         "denoise" to e("降噪", "降噪", "Denoise"),
+        "sound.clarity" to e("声音清晰度", "聲音清晰度", "Sound clarity"),
         "tape" to e("磁带模式", "磁帶模式", "Tape mode"),
         "tape.hint" to e("音高随时长一起变", "音高隨時長一起變", "Pitch changes with duration"),
         "new.duration" to e("新时长", "新時長", "New duration"),

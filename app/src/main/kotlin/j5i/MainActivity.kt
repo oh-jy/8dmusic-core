@@ -119,6 +119,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal lateinit var tapeSwitch: SwitchCompat
     internal lateinit var denoiseLabel: TextView
     internal lateinit var denoiseSlider: SeekBar
+    internal lateinit var clarityLabel: TextView
+    internal lateinit var claritySlider: SeekBar
     internal lateinit var pitchPicker: TextView
     internal var dirButtons = listOf<Button>()
     internal var speedChipButtons = listOf<Button>()
@@ -269,6 +271,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         dark = resolveDark()
         playbackStatus = t("ready")
         restorePlaybackState()
+        transform = transform.copy(clarity = preferences.getInt("soundClarity", 50).coerceIn(0, 100))
         palette = ThemeUi.palette(dark)
         buildUi()
         visualization.pcmClock = visualizerView.pcmClock

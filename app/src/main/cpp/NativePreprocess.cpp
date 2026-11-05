@@ -10,7 +10,7 @@ struct Resampler {
     double ratio, coef[33]={},ring[33]={},prev=0,cur=0;
     int wp=0,raw=0;long outCount=0;bool lpf=false;
     explicit Resampler(double r):ratio(r){
-        lpf=r>1.02;if(!lpf)return;double sum=0;
+        lpf=r>1.02||r<0.98;if(!lpf)return;double sum=0;
         for(int k=0;k<33;k++){double d=(k-16)/r,s=k==16?1:std::sin(3.141592653589793*d)/(3.141592653589793*d);
             coef[k]=s/r*(.54-.46*std::cos(2*3.141592653589793*k/32));sum+=coef[k];}
         for(double&c:coef)c/=sum;
@@ -50,7 +50,7 @@ struct Wsola {
     }
     void run(const std::vector<float>&in,std::vector<float>&out){q.insert(q.end(),in.begin(),in.end());while(emit(false,out)){}}
     void flush(std::vector<float>&out){size_t before=out.size();while(emit(true,out)){}int end=0;for(int i=0;i<win+hop;i++)if(den[i]>=.5)end=i+1;
-        out.resize(before+end);for(int i=0;i<end;i++)out[before+i]=float(den[i]>=1e-6?num[i]/den[i]:num[i]);}
+        out.resize(before+end);for(int i=0;i<end;i++)out[before+i]=(den[i]>=0.05f)?float(num[i]/den[i]):0.0f;}
 };
 }
 extern "C" JNIEXPORT jbyteArray JNICALL Java_com_j5i_spatial8d_NativePreprocess_run(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint channels,jboolean flt,jlong frames,jdouble speed,jdouble semis,jboolean tape){

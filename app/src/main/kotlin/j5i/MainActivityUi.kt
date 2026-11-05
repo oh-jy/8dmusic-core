@@ -163,6 +163,10 @@ internal fun MainActivity.refreshAll() {
             denoiseLabel.text = if (transform.denoiseLevel == 0) t("off") else "${transform.denoiseLevel}%"
             denoiseSlider.progress = transform.denoiseLevel
         }
+        if (isViewReady(this@refreshAll::clarityLabel)) {
+            clarityLabel.text = "${transform.clarityLevel}%"
+            claritySlider.progress = transform.clarityLevel
+        }
         updatingControls = false
         rebuildTransport()
         refreshCardState()
@@ -184,6 +188,7 @@ internal fun MainActivity.refreshControls() {
         ThemeUi.configureSeekBar(speedSlider, palette)
         ThemeUi.configureSeekBar(pitchSlider, palette)
         if (isViewReady(this@refreshControls::denoiseSlider)) ThemeUi.configureSeekBar(denoiseSlider, palette)
+        if (isViewReady(this@refreshControls::claritySlider)) ThemeUi.configureSeekBar(claritySlider, palette)
         ThemeUi.picker(presetPicker, palette)
         ThemeUi.picker(pitchPicker, palette)
     }
