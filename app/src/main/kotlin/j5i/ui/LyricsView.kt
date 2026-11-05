@@ -59,7 +59,7 @@ class LyricsView(context: Context) : ScrollView(context) {
         val p = palette
         when {
             value == null -> message(t("no.lyrics"))
-            value.instrumental -> message(t("instrumental"))
+            value.instrumental -> message(t("instrumental"), allowCorrection = true)
             value.synchronized -> value.lines.forEach { line ->
                 val row = TextView(context).apply {
                     text = line.text
@@ -80,7 +80,7 @@ class LyricsView(context: Context) : ScrollView(context) {
                 rows += row
                 content.addView(row)
             }
-            value.plainLyrics.isNotBlank() -> message(value.plainLyrics)
+            value.plainLyrics.isNotBlank() -> message(value.plainLyrics, allowCorrection = true)
             else -> message(t("song.no.lyrics"))
         }
         updatePadding()
@@ -114,12 +114,12 @@ class LyricsView(context: Context) : ScrollView(context) {
         message(t("lyrics.matching"))
     }
 
-    fun showError(fileName: String) {
+    fun showError(fileName: String, timedOut: Boolean = false) {
         setLyrics(null)
         content.removeAllViews()
         val p = palette
         // 与"长按歌词 → 修正"走同一套候选/预览流程，避免另一套单输入框的简陋 UI。
-        message(t("lyrics.not.found") + fileName)
+        message(if (timedOut) t("lyrics.timeout") else t("lyrics.not.found") + fileName)
         content.addView(ThemeUi.button(context, p, t("lyrics.edit")) {
             onManual?.invoke()
         }, LinearLayout.LayoutParams(-2, dp(36f)))
@@ -133,6 +133,9 @@ class LyricsView(context: Context) : ScrollView(context) {
         lyrics = null
         content.removeAllViews()
         message(stage)
+        content.addView(ThemeUi.button(context, palette, t("lyrics.edit")) {
+            onManual?.invoke()
+        }, LinearLayout.LayoutParams(-2, dp(48f)))
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -160,13 +163,17 @@ class LyricsView(context: Context) : ScrollView(context) {
         return super.onTouchEvent(event)
     }
 
-    private fun message(text: String) {
+    private fun message(text: String, allowCorrection: Boolean = false) {
         content.addView(TextView(context).apply {
             this.text = text
             textSize = 14f
             gravity = Gravity.CENTER
             setTextColor(palette.sub)
             setPadding(dp(24f), dp(12f), dp(24f), dp(12f))
+            if (allowCorrection) setOnLongClickListener {
+                onManual?.invoke()
+                true
+            }
         }, LinearLayout.LayoutParams(-1, -2))
     }
 

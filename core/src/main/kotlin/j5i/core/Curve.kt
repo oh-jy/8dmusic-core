@@ -61,6 +61,21 @@ fun elevationAt(
     return (elevDeg * Math.PI / 180.0) * cos(th)
 }
 
+// Keep these analytic paths in sync with NativeSpatialExport.cpp for seek/export.
+fun trajectoryAngles(t: Double, period: Double, phaseDeg: Double, direction: Double, elevDeg: Double, trajectory: Int): Pair<Double, Double> {
+    val phase = phaseDeg * Math.PI / 180.0
+    val theta = azimuthAt(t, period, phaseDeg, direction)
+    val u = theta - phase
+    val e = elevDeg * Math.PI / 180.0
+    return when (trajectory) {
+        1 -> (phase + Math.PI / 2 * sin(u)) to (e * sin(2 * u))
+        2 -> phase to (e * sin(u))
+        3 -> theta to (e * sin(u / 2))
+        4 -> (phase + 1.3 * sin(.73 * u) + sin(.37 * u)) to (e * sin(.53 * u))
+        else -> theta to (e * cos(theta))
+    }
+}
+
 fun radiusAt(t: Double, period: Double, depth01: Double): Double {
     return 1.0 + depth01 * (2.0 * farAt(t, period) - 1.0)
 }
@@ -130,10 +145,10 @@ fun frameAt(
     phaseDeg: Double,
     direction: Double,
     elevDeg: Double,
-    depth01: Double
+    depth01: Double,
+    trajectory: Int = 0
 ): SpaceFrame {
-    val th = azimuthAt(t, period, phaseDeg, direction)
-    val phi = elevationAt(t, period, elevDeg, phaseDeg, direction)
+    val (th, phi) = trajectoryAngles(t, period, phaseDeg, direction, elevDeg, trajectory)
     val f = farAt(t, period)
     val r = 1.0 + depth01 * (2.0 * f - 1.0)
     return SpaceFrame(

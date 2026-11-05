@@ -36,6 +36,9 @@ private const val SIN_T = 0.4067f
 private const val COS_T = 0.9135f
 private const val FRAME_DELAY_MS = 33L
 
+internal fun spatialRingMaxRadius(width: Float, sideLabelWidth: Float): Float =
+    (width / 2f - sideLabelWidth - 8f).coerceAtLeast(0f)
+
 abstract class AnimatedCanvasView internal constructor(context: Context) : View(context) {
     private var animationScheduled = false
     private val visibleBounds = Rect()
@@ -164,7 +167,14 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         drawSky(canvas, w, h, now)
         val elevMax = min(80.0, max(0.0, p.elev)) * Math.PI / 180.0
         val vSpan = (SIN_T + COS_T * sin(elevMax)).toFloat()
-        val r = min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f
+        paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        paint.textSize = 12f
+        val leftLabel = t("left")
+        val rightLabel = t("right")
+        val leftWidth = paint.measureText(leftLabel)
+        val rightWidth = paint.measureText(rightLabel)
+        val maxRadius = spatialRingMaxRadius(w, max(leftWidth, rightWidth))
+        val r = (min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f).coerceIn(0f, maxRadius)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.4f
         paint.color = if (dark) 0xb8becfe4.toInt() else 0xc7445871.toInt()
@@ -178,9 +188,9 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.color = if (dark) 0xe0c6d2e2.toInt() else 0xeb374558.toInt()
         canvas.drawText(t("front"), cx, 12f, paint)
         canvas.drawText(t("back"), cx, h - 2f, paint)
-        canvas.drawText(t("left"), 7f, cy + 4f, paint)
-        canvas.drawText(t("right"), w - 7f, cy + 4f, paint)
-        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
+        canvas.drawText(leftLabel, 3f + leftWidth / 2f, cy + 4f, paint)
+        canvas.drawText(rightLabel, w - 3f - rightWidth / 2f, cy + 4f, paint)
+        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0, p.trajectory)
         // 球体、拖尾和扩散外圈统一缩小；绕行轨道独立放大以避开人头像。
         val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.68f
         val planetScale = 0.45f
@@ -327,7 +337,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         for (k in 42 downTo 1) {
             val u = k / 42.0
             val age = u * (0.35 + 0.65 * u)
-            val f = clearOfHead(frameAt(t - span * age, p.period, p.phase, p.direction, p.elev, p.depth / 100.0))
+            val f = clearOfHead(frameAt(t - span * age, p.period, p.phase, p.direction, p.elev, p.depth / 100.0, p.trajectory))
             val pt = project(f, r, cx, cy)
             val taper = ((1 - u) * (1 - u)).toFloat()
             val dx = pt[0] - cx
@@ -344,7 +354,7 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.alpha = 42
         c.drawCircle(tailX + 2f * scale, tailY + 3f * scale, 2.2f * scale, paint)
         paint.alpha = 255
-        val f = clearOfHead(frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0))
+        val f = clearOfHead(frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0, p.trajectory))
         val pt = project(f, r, cx, cy)
         val pr = 8f * scale * pt[2] * if (playing) 1f + 0.05f * sin(now * 4.2).toFloat() else 1f
         if (playing) {
@@ -404,14 +414,13 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
         val range = earRange()
         val center = (range[0] + range[1]) / 2.0
         val half = max(0.0001, (range[1] - range[0]) / 2.0)
-        val angle = p.direction * 2.0 * Math.PI * t / max(1.0, p.period) + p.phase * Math.PI / 180.0
-        val gain = earGains(sin(angle))
-        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
+        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0, p.trajectory)
+        val gain = earGains(sin(f.azimuth))
         val mid = h / 2f
         return floatArrayOf(
             mid - ((gain[0] - center) / half * (h - 26f) * 0.45f).toFloat(),
             mid - ((gain[1] - center) / half * (h - 26f) * 0.45f).toFloat(),
-            mid - p.elev.toFloat() * cos(angle).toFloat() / 40f * (h - 26f) * 0.34f,
+            mid - (f.elev * 180.0 / Math.PI).toFloat() / 40f * (h - 26f) * 0.34f,
             mid - (f.far.toFloat() - 0.5f) * 2f * (p.depth.toFloat() / 100f) * (h - 26f) * 0.30f
         )
     }

@@ -132,6 +132,12 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost {
     private var lyricsGeneration = 0
     private var currentLyrics: LyricsResult? = null
     private lateinit var presetPicker: TextView
+    private lateinit var homePresetButton: Button
+    private lateinit var homePitchButton: Button
+    private var presetSheetSave: TextView? = null
+    private var displayedLanguage = ""
+    private var trackInfoUri: String? = null
+    private var trackTechnicalInfo = ""
     private lateinit var playButton: View
     private lateinit var parameterPanel: LinearLayout
     private lateinit var palette: ThemeUi.Palette
@@ -168,7 +174,7 @@ private var lastCarMode = false
 private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private lateinit var transportRow: LinearLayout
     private lateinit var playerBar: LinearLayout
-    private lateinit var exportButton: Button
+    private lateinit var exportButton: ImageButton
     private lateinit var settingsButton: ImageButton
     private lateinit var drivingButton: ImageButton
     private lateinit var disc: ImageView
@@ -254,6 +260,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        displayedLanguage = AppLanguage.resolved(this)
         musicStore = MusicStore(this)
         presetStore = PresetStore(this)
         customPresets = presetStore.load().toMutableList()
@@ -264,6 +271,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         themeMode = if (preferences.contains("themeMode")) preferences.getInt("themeMode", 0)
         else if (preferences.getBoolean("dark", true)) 0 else 1
         dark = resolveDark()
+        ThemeUi.colorTheme = preferences.getInt("colorTheme", 0).coerceIn(0, 6)
         playbackStatus = t("ready")
         restorePlaybackState()
         palette = ThemeUi.palette(dark)
@@ -284,7 +292,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             window.setDecorFitsSystemWindows(false)
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(android.view.WindowInsets.Type.systemBars())
-                view.setPadding(0, bars.top, 0, ThemeUi.dp(this, 176f) + bars.bottom)
+                view.setPadding(0, bars.top, 0, playerBar.height.coerceAtLeast(ThemeUi.dp(this, 176f)))
                 playerBar.setPadding(ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 12f), ThemeUi.dp(this, 6f) + bars.bottom)
                 insets
             }
@@ -332,17 +340,94 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             val available = (resources.displayMetrics.heightPixels / resources.displayMetrics.density - 52 - 184 - 216).coerceAtLeast(200f)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, available * 0.62f))
         }
-        root.addView(card { addView(visualization) })
+        root.addView(card { addView(visualization) }.apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ThemeUi.dp(this@MainActivity, 6f)
+        })
         status = ThemeUi.text(this, "请选择音频文件", 13f, palette.copy(faint = palette.sub), role = ThemeUi.ROLE_SUB)
-        root.addView(spaceSettingsCard())
-        root.addView(transformCard())
-        root.addView(curveCard())
+        val panelHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        val spaceCard = spaceSettingsCard()
+        val effectsCard = transformCard()
+        panelHost.addView(spaceCard)
+        panelHost.addView(effectsCard)
+        root.addView(ThemeUi.row(this).apply {
+            setPadding(ThemeUi.dp(this@MainActivity, 10f), ThemeUi.dp(this@MainActivity, 6f),
+                ThemeUi.dp(this@MainActivity, 10f), 0)
+            fun openPanel(view: View, title: String) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                val dialog = ThemeUi.showSheet(this@MainActivity, palette, title, fullHeight = true) {
+                    addView(view)
+                }
+                if (view === spaceCard) {
+                    val header = dialog.findViewById<ViewGroup>(android.R.id.content)?.findViewWithTag<FrameLayout>("sheetHeader")
+                    presetSheetSave = ThemeUi.text(this@MainActivity, t("preset.save"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        gravity = Gravity.CENTER
+                        minHeight = ThemeUi.dp(this@MainActivity, 48f)
+                        setPadding(ThemeUi.dp(this@MainActivity, 8f), 0, ThemeUi.dp(this@MainActivity, 8f), 0)
+                        setOnClickListener { saveCustomPreset() }
+                    }
+                    header?.addView(presetSheetSave, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                        rightMargin = ThemeUi.dp(this@MainActivity, 58f)
+                    })
+                }
+                dialog.setOnDismissListener {
+                    if (view === spaceCard) presetSheetSave = null
+                    (view.parent as? ViewGroup)?.removeView(view)
+                    panelHost.addView(view)
+                }
+                if (view === spaceCard) parameterOpen = true else transformOpen = true
+                refreshCardState()
+                refreshAll()
+                dialog.show()
+            }
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(ThemeUi.button(this@MainActivity, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
+                    openPanel(spaceCard, t("space.style"))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 46f)))
+                homePresetButton = ThemeUi.button(this@MainActivity, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
+                    presetPicker.performClick()
+                }
+                homePresetButton.maxLines = 1
+                homePresetButton.ellipsize = android.text.TextUtils.TruncateAt.END
+                addView(homePresetButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 46f)).apply {
+                    topMargin = ThemeUi.dp(this@MainActivity, 2f)
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(ThemeUi.button(this@MainActivity, palette, t("transform"), ThemeUi.ROLE_HOME_CONTROL) {
+                    openPanel(effectsCard, t("transform"))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 46f)))
+                homePitchButton = ThemeUi.button(this@MainActivity, palette, t("pitch"), ThemeUi.ROLE_HOME_CONTROL) {
+                    pitchPicker.performClick()
+                }
+                homePitchButton.maxLines = 1
+                homePitchButton.ellipsize = android.text.TextUtils.TruncateAt.END
+                addView(homePitchButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 46f)).apply {
+                    topMargin = ThemeUi.dp(this@MainActivity, 2f)
+                })
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                leftMargin = ThemeUi.dp(this@MainActivity, 8f)
+            })
+        })
+        root.addView(panelHost)
+        root.addView(curveCard().apply {
+            (layoutParams as LinearLayout.LayoutParams).topMargin = ThemeUi.dp(this@MainActivity, 6f)
+        })
         root.setPadding(0, ThemeUi.dp(this, 52f), 0, ThemeUi.dp(this, 176f))
         scroll.addView(root)
         val frame = FrameLayout(this)
         frame.setBackgroundColor(palette.background)
         frame.addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(nowPlayingBar())
+        playerBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) {
+                // Keep the final card above the overlay and retain the same gap as other sections.
+                root.setPadding(root.paddingLeft, root.paddingTop, root.paddingRight,
+                    bottom - top + ThemeUi.dp(this@MainActivity, 6f))
+                root.post { resizeCurveToRemainingSpace() }
+            }
+        }
         setContentView(frame)
         // 首屏用实际测量值分配曲线剩余空间，避免按屏幕高度硬减常量留下空白。
         curveContent.post { resizeCurveToRemainingSpace() }
@@ -358,10 +443,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun resizeCurveToRemainingSpace() {
         if (!::curveContent.isInitialized) return
         val card = curveContent.parent as? View ?: return
-        val extra = (card.parent as? ViewGroup)?.paddingBottom ?: 0
-        val frame = card.parent?.parent as? View ?: return
-        val remaining = frame.height - playerBar.height - root.paddingTop - root.paddingBottom - extra
-        val height = (remaining - (root.height - curveContent.height)).coerceAtLeast(ThemeUi.dp(this, 140f))
+        val scroll = root.parent as? ScrollView ?: return
+        val available = scroll.height - root.paddingBottom
+        val height = (curveContent.height + available - card.bottom).coerceAtLeast(ThemeUi.dp(this, 140f))
         if (height == curveContent.height) return
         curveContent.layoutParams = curveContent.layoutParams.apply { this.height = height }
     }
@@ -383,6 +467,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             btn.tag = if (preset.direction == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
             ThemeUi.applyButton(btn, palette)
         }
+        parameterPanel.findViewWithTag<Button>("trajectoryPicker")?.text =
+            t("trajectory." + listOf("orbit", "figure8", "vertical", "spiral", "wander")[preset.trajectory.coerceIn(0, 4)]) +
+                if (preset.raw) " · ${t("trajectory.raw.short")}" else " ▾"
         sliderControls.forEach { (key, slider) ->
             val value = parameter(key)
             val definition = SLIDERS.first { it.key == key }
@@ -405,6 +492,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         updateDriving()
         curve.invalidate()
         if (::pitchPicker.isInitialized) pitchPicker.text = pitchPickerLabel()
+        refreshHomePickers()
+        refreshPresetSaveVisibility()
         if (::pitchLabel.isInitialized) {
             pitchLabel.text = when {
                 transform.semi == 0.0 -> t("original")
@@ -420,7 +509,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (speedChipButtons.isNotEmpty()) {
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEachIndexed { i, v ->
                 val btn = speedChipButtons[i]
-                btn.text = "${formatSpeedShort(v)}×\n${t("speed.realtime")}"
+                btn.text = "${formatSpeedShort(v)}×"
                 btn.gravity = Gravity.CENTER
                 btn.setLineSpacing(0f, 0.85f)
                 btn.tag = if (transform.speed == v) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
@@ -453,6 +542,24 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         refreshPlayback()
     }
 
+    private fun refreshHomePickers() {
+        if (::homePresetButton.isInitialized) {
+            homePresetButton.text = "${presetPicker.text} ▾"
+            homePresetButton.contentDescription = "${t("space.style")}: ${presetPicker.text}"
+        }
+        if (::homePitchButton.isInitialized) {
+            homePitchButton.text = "${pitchPicker.text} ▾"
+            homePitchButton.contentDescription = "${t("pitch")}: ${pitchPicker.text}"
+        }
+    }
+
+    private fun refreshPresetSaveVisibility() {
+        if (!::parameterPanel.isInitialized) return
+        val visibility = if (preset.name == "自定义") View.VISIBLE else View.GONE
+        presetSheetSave?.visibility = visibility
+        parameterPanel.findViewWithTag<View>("savePresetRow")?.visibility = visibility
+    }
+
     private fun refreshControls() {
         ThemeUi.configureSeekBar(seek, palette, playback = true)
         sliderControls.values.forEach { ThemeUi.configureSeekBar(it, palette) }
@@ -477,7 +584,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     }
 
     private fun refreshTheme() {
+        val previous = palette
         palette = ThemeUi.palette(dark)
+        ThemeUi.applyTheme(root, palette, previous)
+        if (::playerBar.isInitialized) ThemeUi.applyTheme(playerBar, palette, previous)
         tint(root, palette.text)
         root.setBackgroundColor(palette.background)
         (root.parent?.parent as? FrameLayout)?.setBackgroundColor(palette.background)
@@ -487,15 +597,19 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         visualizerView.dark = dark
         popupVisualizer?.dark = dark
         if (::lyricsView.isInitialized) lyricsView.dark = dark
-        if (::playerBar.isInitialized) ThemeUi.bg(playerBar, if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt(), 0f)
+        if (::playerBar.isInitialized) ThemeUi.bg(playerBar, palette.surface, 0f)
         // 透明圆形应用图标自带颜色，深浅模式下都不叠 tint。
         if (::disc.isInitialized) disc.imageTintList = null
         tint(root, palette.text)
         if (::playerBar.isInitialized) ThemeUi.applyTheme(playerBar, palette)
         // PNG 图标不经过 Button 主题回刷；播放键白色，普通控制键随主题切换。
         fun tintIcons(view: View) {
-            if (view is ImageButton && !(::favoriteButton.isInitialized && view === favoriteButton)) view.imageTintList = ColorStateList.valueOf(
-                if (view.tag == ThemeUi.ROLE_ACCENT_FILL) 0xffffffff.toInt() else palette.controlText)
+            if (view is ImageButton && !(::favoriteButton.isInitialized && view === favoriteButton)) {
+                if (view.tag == ThemeUi.ROLE_ACCENT_FILL) {
+                    ThemeUi.bg(view, palette.accent, 26f)
+                    view.imageTintList = ColorStateList.valueOf(palette.darkInk)
+                } else view.imageTintList = ColorStateList.valueOf(palette.controlText)
+            }
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
         if (::playerBar.isInitialized) tintIcons(playerBar)
@@ -530,13 +644,17 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun resolveDark(): Boolean = when (themeMode) {
         0 -> true
         1 -> false
-        else -> (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+        else -> (android.content.res.Resources.getSystem().configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
             android.content.res.Configuration.UI_MODE_NIGHT_YES
     }
 
     /** 系统深浅色切换时，跟随模式自动刷新。 */
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (AppLanguage.current(this) == AppLanguage.SYSTEM && AppLanguage.resolved(this) != displayedLanguage) {
+            recreate()
+            return
+        }
         val carMode = newConfig.uiMode and android.content.res.Configuration.UI_MODE_TYPE_MASK ==
             android.content.res.Configuration.UI_MODE_TYPE_CAR
         if (carMode && !lastCarMode && !drivingAutoDismissed) showDrivingMode()
@@ -549,7 +667,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     private fun tint(view: View, color: Int) {
         window.statusBarColor = palette.background
-        window.navigationBarColor = if (dark) 0xff17191d.toInt() else 0xfff7f8fa.toInt()
+        window.navigationBarColor = palette.surface
         ThemeUi.applyTheme(view, palette)
         if (Build.VERSION.SDK_INT >= 30) {
             window.insetsController?.setSystemBarsAppearance(
@@ -571,6 +689,34 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             window.decorView.systemUiVisibility = flags
         }
     }
+
+    private fun refreshTrackTechnicalInfo() {
+        val item = currentItem
+        val uri = item?.uri?.takeUnless { isLive || it.isBlank() }
+        if (trackInfoUri == uri) return
+        trackInfoUri = uri
+        trackTechnicalInfo = ""
+        // Do not open a second network stream just to populate the information line.
+        if (uri == null || uri.startsWith("http", ignoreCase = true)) return
+        Thread {
+            val extractor = android.media.MediaExtractor()
+            val details = try {
+                extractor.setDataSource(this, Uri.parse(uri), null)
+                val format = (0 until extractor.trackCount).map(extractor::getTrackFormat)
+                    .firstOrNull { it.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                fun value(key: String): Int = if (format?.containsKey(key) == true) format.getInteger(key) else 0
+                audioDetails(format?.getString(android.media.MediaFormat.KEY_MIME).orEmpty(),
+                    value(android.media.MediaFormat.KEY_SAMPLE_RATE), value(android.media.MediaFormat.KEY_BIT_RATE))
+            } catch (_: Exception) { "" } finally { extractor.release() }
+            main.post {
+                if (!isDestroyed && !isLive && currentItem?.uri == uri && trackInfoUri == uri) {
+                    trackTechnicalInfo = details
+                    refreshPlayback()
+                }
+            }
+        }.start()
+    }
+
 
     private fun refreshPlayback() {
         val player = service?.player
@@ -595,6 +741,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (::visualizerView.isInitialized) visualizerView.setPosition(lyricPositionMs)
         popupVisualizer?.setPosition(lyricPositionMs)
         songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
+        refreshTrackTechnicalInfo()
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
         durationTime.text = time(player?.duration ?: 0.0)
@@ -620,7 +767,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
             currentLine?.takeIf { it.isNotBlank() } ?: effectiveStatus
         } else effectiveStatus
-        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text = statusLine
+        val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
+        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text =
+            if (!isLive && playing && statusLine == effectiveStatus)
+                playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
         recordingLabel.setTextColor(0xffff5d5d.toInt())
@@ -633,11 +783,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             (liveTimeline.getChildAt(1) as TextView).setTextColor(0xffff8a80.toInt())
         }
         if (::exportButton.isInitialized) {
-            exportButton.background = ThemeUi.bgDrawable(this,
-                if (dark) 0xff263e55.toInt() else 0xffe3efff.toInt(), 8f)
-            exportButton.text = if (isLive) (if (recordingKind == "playback") "停止" else "录音") else "导出"
-            exportButton.setTextColor(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.accent)
-            exportButton.contentDescription = if (isLive) "录制电台最终输出" else "导出当前音频"
+            exportButton.setImageResource(if (!isLive) R.drawable.ic_export else if (recordingKind == "playback") R.drawable.ic_record_stop else R.drawable.ic_record)
+            exportButton.imageTintList = ColorStateList.valueOf(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.controlText)
+            exportButton.contentDescription = if (!isLive) "导出当前音频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
         }
         if (::radioRefreshButton.isInitialized) radioRefreshButton.visibility = if (isLive) View.VISIBLE else View.GONE
         if (::favoriteButton.isInitialized) {
@@ -712,18 +860,20 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             "wet" -> preset.copy(wet = value)
             "rt60" -> preset.copy(rt60 = value)
             "direction" -> preset.copy(direction = value)
+            "trajectory" -> preset.copy(trajectory = value.toInt().coerceIn(0, 4))
             "width" -> preset.copy(width = value)
             else -> return
         }
         val matched = matchPresetIn(SPACE_PRESETS + customPresets, preset.period, preset.elev,
             preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-            preset.direction, preset.width, preset.raw)
+            preset.direction, preset.width, preset.raw, preset.trajectory)
         if (matched != preset.name) {
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
         }
         // 滑块或方向按钮修改后，同时同步中间下拉文本、全部展开控件与预设说明。
         service?.player?.preset = preset
+        service?.controlsPreset = preset
         service?.radio?.preset = preset
         service?.radio?.denoise = transform.denoiseLevel
         savePlaybackState()
@@ -944,11 +1094,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         try {
             val state = JSONObject(text)
             preset = try {
-                val restored = SpacePreset("标准绕头 · 默认", "", state.getDouble("period"),
-                    state.getDouble("elev"), state.getDouble("depth"), state.getDouble("phase"),
-                    state.getDouble("direction"), state.getDouble("width"), state.getDouble("room"),
-                    state.getDouble("rt60"), state.getDouble("wet"), state.getBoolean("raw"))
-                matchingPresetOrDefault(restored, SPACE_PRESETS + customPresets)
+                val restored = SpacePreset(name = "自定义", note = "", period = state.getDouble("period"),
+                    elev = state.getDouble("elev"), depth = state.getDouble("depth"), phase = state.getDouble("phase"),
+                    direction = state.getDouble("direction"), width = state.getDouble("width"), room = state.getDouble("room"),
+                    rt60 = state.getDouble("rt60"), wet = state.getDouble("wet"), raw = state.getBoolean("raw"),
+                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4))
+                val all = SPACE_PRESETS + customPresets
+                val name = matchPresetIn(all, restored.period, restored.elev, restored.depth, restored.room,
+                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory)
+                all.firstOrNull { it.name == name } ?: restored
             } catch (_: Exception) {
                 DEFAULT_SPACE_PRESET
             }
@@ -970,6 +1124,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             put("period", preset.period); put("elev", preset.elev); put("depth", preset.depth)
             put("phase", preset.phase); put("direction", preset.direction); put("width", preset.width)
             put("room", preset.room); put("rt60", preset.rt60); put("wet", preset.wet); put("raw", preset.raw)
+            put("trajectory", preset.trajectory)
             put("reverse", reverse); put("speed", transform.speed); put("semi", transform.semi); put("tape", transform.tape)
             put("denoise", transform.denoiseLevel)
             put("clarity", transform.clarityLevel)
@@ -1123,7 +1278,16 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     override fun addAudio() = openAudio.launch(arrayOf("audio/*"))
 
     private fun saveCustomPreset() {
-        saveCustomPreset("")
+        lateinit var dialog: Dialog
+        dialog = ThemeUi.showSheet(this, palette, t("preset.save"), compactPicker = true) {
+            val name = ThemeUi.input(this@MainActivity, palette, t("preset.name.hint"))
+            addView(name)
+            addView(ThemeUi.button(this@MainActivity, palette, t("preset.save"), ThemeUi.ROLE_ACCENT_FILL) {
+                saveCustomPreset(name.text.toString())
+                dialog.dismiss()
+            }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@MainActivity, 48f)))
+        }
+        dialog.show()
     }
 
     private fun saveCustomPreset(rawInput: String) {
@@ -1302,7 +1466,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         }
         fmButton = navButton("FM") { showSourceSheet() }.apply {
             visibility = if (fmUnlocked) View.VISIBLE else View.GONE
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
+            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 4f) }
         }
         bar.addView(fmButton)
         drivingButton = ImageButton(this).apply {
@@ -1312,7 +1476,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 15f)
             setPadding(ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f), 0)
             contentDescription = t("driving")
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 30f), ThemeUi.dp(this@MainActivity, 30f))
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 30f), ThemeUi.dp(this@MainActivity, 30f)).apply {
+                leftMargin = ThemeUi.dp(this@MainActivity, 4f)
+            }
             setOnClickListener { showDrivingMode() }
         }
         bar.addView(drivingButton)
@@ -1321,10 +1487,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             imageTintList = ColorStateList.valueOf(palette.controlText)
             background = ThemeUi.bgDrawable(this@MainActivity, palette.control, 15f)
-            setPadding(ThemeUi.dp(this@MainActivity, 7f), 0, ThemeUi.dp(this@MainActivity, 7f), 0)
+            setPadding(ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 6f), 0)
             contentDescription = t("settings")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 30f), ThemeUi.dp(this@MainActivity, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@MainActivity, 6f)
+                leftMargin = ThemeUi.dp(this@MainActivity, 4f)
             }
             setOnClickListener { showSettingsSheet() }
         }
@@ -1362,6 +1528,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 dialog.dismiss()
                 pickOption(t("theme"), listOf(t("theme.dark"), t("theme.light"), t("theme.system")), themeMode) {
                     themeMode = it; dark = resolveDark(); refreshTheme()
+                }
+            })
+            val colors = listOf("theme.blue", "theme.green", "theme.orange", "theme.neutral", "theme.rose", "theme.violet", "theme.slate").map { t(it) }
+            addView(settingRow("●", t("theme.color"), colors[ThemeUi.colorTheme]) {
+                dialog.dismiss()
+                pickOption(t("theme.color"), colors, ThemeUi.colorTheme) { index ->
+                    preferences.edit().putInt("colorTheme", index).apply()
+                    ThemeUi.colorTheme = index
+                    refreshTheme()
                 }
             })
             addView(settingRow("A", t("language"), language) { dialog.dismiss(); showLanguagePicker() })
@@ -1463,14 +1638,13 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun spaceSettingsCard(): LinearLayout {
         val card = card {
             val header = FrameLayout(this@MainActivity).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 32f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 40f))
             }
-            header.addView(ThemeUi.text(this@MainActivity, t("space.style"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             presetPicker = ThemeUi.text(this@MainActivity, preset.name, 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 ThemeUi.hideOverflow(this)
                 gravity = Gravity.CENTER
-                setPadding(ThemeUi.dp(this@MainActivity, 12f), 0, ThemeUi.dp(this@MainActivity, 24f), 0)
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 168f), ThemeUi.dp(this@MainActivity, 32f), Gravity.CENTER)
+                setPadding(ThemeUi.dp(this@MainActivity, 24f), 0, ThemeUi.dp(this@MainActivity, 24f), 0)
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     // 快速选择只调整展示顺序，保持内置和自定义预设原值不变。
                     val pinned = listOfNotNull(SPACE_PRESETS.firstOrNull { it.raw },
@@ -1479,7 +1653,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                         .sortedWith(compareBy({ it.room }, { it.name }))
                     pickOption(t("space.choose"), all.map { item ->
                         val index = SPACE_PRESETS.indexOfFirst { it.name == item.name }
-                        "${if (index >= 0) AppLanguage.preset(this@MainActivity, index) else item.name.replaceFirst("标准绕头 · ", "标准模式 · ")} · ${item.room.toInt()}${t("unit.meters")}" },
+                        val name = if (index >= 0) AppLanguage.preset(this@MainActivity, index) else item.name.replaceFirst("标准绕头 · ", "标准模式 · ")
+                        val path = if (item.raw) "" else " · " + t("trajectory." + listOf("orbit", "figure8", "vertical", "spiral", "wander")[item.trajectory.coerceIn(0, 4)])
+                        "$name$path · ${item.room.toInt()}${t("unit.meters")}" },
                         all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
@@ -1487,24 +1663,15 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
             header.addView(presetPicker)
             header.addView(ThemeUi.text(this@MainActivity, "▾", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 22f),
-                    ThemeUi.dp(this@MainActivity, 32f), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    rightMargin = ThemeUi.dp(this@MainActivity, 67f)
-                }
-            })
-            header.addView(ThemeUi.text(this@MainActivity, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
-                tag = "toggleP"
-                layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
-                setOnClickListener { toggleParameterOpen() }
-            })
+            }, FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 32f), -1, Gravity.END))
             addView(header)
             presetNote = ThemeUi.text(this@MainActivity, preset.note, 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 5f), 0, 0)
             }
             parameterPanel = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
             addView(parameterPanel)
-            // 折叠时与音频变换共用相同的一行头部；说明跟随展开面板展示。
             parameterPanel.addView(presetNote)
             parameterPanel.addView(ThemeUi.divider(this@MainActivity, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 1f)).apply {
@@ -1524,8 +1691,33 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }.apply {
                 setPadding(0, ThemeUi.dp(this@MainActivity, 10f), 0, ThemeUi.dp(this@MainActivity, 4f))
             })
+            parameterPanel.addView(ThemeUi.button(this@MainActivity, palette, t("trajectory.orbit")).apply {
+                tag = "trajectoryPicker"
+                setOnClickListener {
+                    if (preset.raw) {
+                        android.widget.Toast.makeText(this@MainActivity, t("trajectory.raw"), android.widget.Toast.LENGTH_SHORT).show()
+                    } else {
+                        val keys = listOf("orbit", "figure8", "vertical", "spiral", "wander")
+                        pickOption(t("trajectory"), keys.map { t("trajectory.$it") }, preset.trajectory) { index ->
+                            updateParameter("trajectory", index.toDouble())
+                        }
+                    }
+                }
+            })
             parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "depth", "phase") }))
-            val saveRow = ThemeUi.row(this@MainActivity)
+            parameterPanel.addView(ThemeUi.divider(this@MainActivity, palette).apply {
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 1f)).apply {
+                    topMargin = ThemeUi.dp(this@MainActivity, 12f); bottomMargin = ThemeUi.dp(this@MainActivity, 9f)
+                }
+            })
+            parameterPanel.addView(ThemeUi.row(this@MainActivity).apply {
+                addView(ThemeUi.text(this@MainActivity, t("room.acoustics"), 12f, palette, bold = true))
+                addView(ThemeUi.text(this@MainActivity, t("room.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
+            }.apply {
+                setPadding(0, ThemeUi.dp(this@MainActivity, 4f), 0, ThemeUi.dp(this@MainActivity, 4f))
+            })
+            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("room", "wet", "rt60", "width") }))
+            val saveRow = ThemeUi.row(this@MainActivity).apply { tag = "savePresetRow" }
             val saveInput = EditText(this@MainActivity).apply {
                 hint = "自定义风格名称"
                 setTextColor(palette.text)
@@ -1545,20 +1737,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 saveCustomPreset(saveInput.text.toString())
             })
             parameterPanel.addView(saveRow)
-            parameterPanel.addView(ThemeUi.divider(this@MainActivity, palette).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 1f)).apply {
-                    topMargin = ThemeUi.dp(this@MainActivity, 12f); bottomMargin = ThemeUi.dp(this@MainActivity, 9f)
-                }
-            })
-            parameterPanel.addView(ThemeUi.row(this@MainActivity).apply {
-                addView(ThemeUi.text(this@MainActivity, t("room.acoustics"), 12f, palette, bold = true))
-                addView(ThemeUi.text(this@MainActivity, t("room.hint"), 10f, palette, role = ThemeUi.ROLE_FAINT))
-            }.apply {
-                setPadding(0, ThemeUi.dp(this@MainActivity, 4f), 0, ThemeUi.dp(this@MainActivity, 4f))
-            })
-            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("room", "wet", "rt60", "width") }))
             parameterPanel.visibility = View.GONE
         }
+        card.setPadding(ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f))
+        (card.layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, 0, 0)
         return card
     }
 
@@ -1617,16 +1799,16 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun transformCard(): LinearLayout {
         val card = card {
             val header = FrameLayout(this@MainActivity).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 32f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 40f))
             }
-            header.addView(ThemeUi.text(this@MainActivity, t("transform"), 14f, palette, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
             pitchPicker = ThemeUi.text(this@MainActivity, "原声", 12f, palette, role = ThemeUi.ROLE_CONTROL).apply {
                 gravity = Gravity.CENTER
                 ThemeUi.hideOverflow(this)
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 168f), ThemeUi.dp(this@MainActivity, 32f), Gravity.CENTER)
+                setPadding(ThemeUi.dp(this@MainActivity, 24f), 0, ThemeUi.dp(this@MainActivity, 24f), 0)
+                layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     val options = interleavedPitchOptions(PITCH_PRESETS)
-                    pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.name, it.semi) },
+                    pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.semi) },
                         options.indexOfFirst { it.semi == transform.semi }, twoColumns = true) {
                         transform = transform.copy(semi = options[it].semi); applyTransform(); refreshAll()
                     }
@@ -1635,16 +1817,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             header.addView(pitchPicker)
             header.addView(ThemeUi.text(this@MainActivity, "▾", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
                 gravity = Gravity.CENTER
-                layoutParams = FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 22f),
-                    ThemeUi.dp(this@MainActivity, 32f), Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    rightMargin = ThemeUi.dp(this@MainActivity, 67f)
-                }
-            })
-            header.addView(ThemeUi.text(this@MainActivity, t("expand"), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
-                tag = "toggleT"
-                layoutParams = FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL)
-                setOnClickListener { toggleTransformOpen() }
-            })
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, FrameLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 32f), -1, Gravity.END))
             addView(header)
             transformBody = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
             transformBody.addView(ThemeUi.divider(this@MainActivity, palette).apply {
@@ -1816,6 +1990,8 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             addView(transformBody)
             transformBody.visibility = View.GONE
         }
+        card.setPadding(ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f), ThemeUi.dp(this, 6f), ThemeUi.dp(this, 4f))
+        (card.layoutParams as LinearLayout.LayoutParams).setMargins(0, 0, 0, 0)
         transformCardRoot = card
         return card
     }
@@ -1909,12 +2085,20 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */
     private fun loadLyrics(item: MusicItem, manualTitle: String? = null) {
         val generation = ++lyricsGeneration
+        var finished = false
         currentLyrics = null
         pushLyricsToVisualizer()
         if (::lyricsView.isInitialized) lyricsView.clear()
         val title = manualTitle ?: Lyrics.searchTitle(item.name, item.artist)
+        main.postDelayed({
+            if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) {
+                finished = true
+                if (::lyricsView.isInitialized) lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name), timedOut = true)
+            }
+        }, 25_000)
         lyrics.load(title, item.artist, item.duration / 1000.0, { result ->
-            if (generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
+            if (finished || generation != lyricsGeneration || currentItem?.uri != item.uri) return@load
+            finished = true
             result.onSuccess {
                 currentLyrics = it
                 lyricsView.setLyrics(it)
@@ -1922,7 +2106,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 updateDriving()
             }.onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
         }, { progress ->
-            if (generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
+            if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
         })
     }
 
@@ -2231,13 +2415,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
         }
         meta.addView(favoriteButton)
-        exportButton = ThemeUi.button(this, palette, "导出", ThemeUi.ROLE_ACCENT, minHeightDp = 30f).apply {
-            background = ThemeUi.bgDrawable(this@MainActivity, if (dark) 0xff263e55.toInt() else 0xffe3efff.toInt(), 8f)
-            textSize = 11f
-            setPadding(0, 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 46f), ThemeUi.dp(this@MainActivity, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@MainActivity, 8f)
-            }
+        exportButton = ImageButton(this).apply {
+            background = null
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 6f), ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 6f))
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 34f), ThemeUi.dp(this@MainActivity, 30f))
             setOnClickListener {
                 if (isLive) playerBar.findViewWithTag<TextView>("playerStatus")?.let(::togglePlaybackRecording)
                 else showExportSheet()
@@ -2337,7 +2519,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun iconControl(icon: Int, big: Boolean = false, action: () -> Unit): ImageButton = ImageButton(this).apply {
         setImageResource(icon)
         scaleType = ImageView.ScaleType.CENTER_INSIDE
-        imageTintList = ColorStateList.valueOf(if (big) 0xffffffff.toInt() else palette.controlText)
+        imageTintList = ColorStateList.valueOf(if (big) palette.darkInk else palette.controlText)
         tag = if (big) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
         bg(this, if (big) palette.accent else palette.control, if (big) 26f else 19f)
         setPadding(ThemeUi.dp(this@MainActivity, if (big) 12f else 9f), 0, ThemeUi.dp(this@MainActivity, if (big) 12f else 9f), 0)
@@ -2409,11 +2591,12 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         else -> "${if (semi > 0) "+" else ""}${semi.toInt()}"
     }
 
-    private fun formatPitchLabel(name: String, semi: Double): String =
-        "${AppLanguage.pitch(this, semi)} · ${if (semi > 0) "+" else ""}${semi.toInt()} ${t("semitone")}"
+    private fun formatPitchLabel(semi: Double): String =
+        if (semi == 0.0) "${t("original")} · ${t("label.default")}" else
+            "${AppLanguage.pitch(this, semi)} · ${if (semi > 0) "+" else ""}${semi.toInt()} ${t("semitone")}"
 
     private fun pitchPickerLabel(): String = PITCH_PRESETS.firstOrNull { it.semi == transform.semi }
-        ?.let { formatPitchLabel(it.name, it.semi) }
+        ?.let { formatPitchLabel(it.semi) }
         ?: "${t("preset.custom")} · ${if (transform.semi > 0) "+" else ""}${transform.semi.toInt()} ${t("semitone")}"
 
     /** 用户点击“退出”时彻底停掉音频链路，否则前台服务会让应用继续驻留后台。 */
@@ -2520,7 +2703,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 setPadding(0, ThemeUi.dp(this@MainActivity, 6f), 0, ThemeUi.dp(this@MainActivity, 3f))
             })
             val version = packageManager.getPackageInfo(packageName, 0)
-            addView(ThemeUi.text(this@MainActivity, "${t("app.name")}  v${version.versionName}  ·  Version Code ${version.longVersionCode}",
+            addView(ThemeUi.text(this@MainActivity, "${t("app.name")}  v${version.versionName}  ·  Version Code ${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(version)}",
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@MainActivity, 4f))
             })
@@ -2622,7 +2805,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         val filters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         filters.addView(filterScroll(t("region"), RadioCatalog.regions, sourceRegion) {
             sourceRegion = it
-            populateSourceSheet(fmDialog?.window?.decorView?.findViewWithTag("sheetBody") ?: return@filterScroll)
+            refreshStationFilter()
         })
         filters.addView(filterScroll(t("genre"), RadioCatalog.types, sourceType) { sourceType = it; refreshStationFilter() })
         body.addView(filters)
@@ -2668,7 +2851,17 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             val row = ThemeUi.row(this@MainActivity)
             values.forEach { value ->
                 row.addView(ThemeUi.button(this@MainActivity, palette, value,
-                    if (value == selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_CONTROL) { action(value) })
+                    if (value == selected) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL) {
+                    for (index in 0 until row.childCount) {
+                        (row.getChildAt(index) as? Button)?.let { button ->
+                            val active = button.text.toString() == value
+                            button.tag = if (active) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
+                            button.isSelected = active
+                            ThemeUi.applyButton(button, palette)
+                        }
+                    }
+                    action(value)
+                }.apply { isSelected = value == selected })
             }
             addView(HorizontalScrollView(this@MainActivity).apply {
                 isHorizontalScrollBarEnabled = false
@@ -2681,18 +2874,20 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         stationListBody = body
         val search = ThemeUi.input(this, palette, t("fm.search.hint")).apply {
+            tag = "stationSearch"
             setOnEditorActionListener { _, _, _ ->
                 renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, text.toString()))
                 true
             }
         }
         parent.addView(search)
-        val seq = ++sourceSearchSeq
+        ++sourceSearchSeq
         search.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             override fun afterTextChanged(s: android.text.Editable?) {
                 val q = s?.toString().orEmpty()
+                val seq = ++sourceSearchSeq
                 main.postDelayed({
                     if (seq == sourceSearchSeq && fmDialog?.isShowing == true) {
                         renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, q))
@@ -2739,7 +2934,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     private fun refreshStationFilter() {
         val body = stationListBody ?: return
-        body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType)) }
+        val query = fmDialog?.window?.decorView?.findViewWithTag<EditText>("stationSearch")?.text?.toString().orEmpty()
+        ++sourceSearchSeq
+        body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, query)) }
     }
 
     private fun renderStations(parent: LinearLayout, stations: List<RadioStation>) {
@@ -2920,7 +3117,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         internal fun matchingPresetOrDefault(candidate: SpacePreset, presets: List<SpacePreset>): SpacePreset {
             val name = matchPresetIn(presets, candidate.period, candidate.elev, candidate.depth,
                 candidate.room, candidate.wet, candidate.rt60, candidate.phase,
-                candidate.direction, candidate.width, candidate.raw)
+                candidate.direction, candidate.width, candidate.raw, candidate.trajectory)
             return presets.firstOrNull { it.name == name } ?: DEFAULT_SPACE_PRESET
         }
 

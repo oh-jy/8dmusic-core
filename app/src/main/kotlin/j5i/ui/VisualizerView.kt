@@ -757,12 +757,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             paint.typeface = android.graphics.Typeface.DEFAULT
             val baseline = height - 10f * density
             val metrics = paint.fontMetrics
-            paint.color = ThemeUi.palette(dark).surface
-            paint.alpha = 238
-            c.drawRect(0f, baseline + metrics.top - 8f * density, width.toFloat(), height.toFloat(), paint)
-            paint.alpha = ((1f - fade) * 255).toInt().coerceIn(0, 255)
             paint.color = if (dark) 0xffe8f4ff.toInt() else 0xff102a43.toInt()
+            paint.alpha = ((1f - fade) * 255).toInt().coerceIn(0, 255)
+            paint.setShadowLayer(3f * density, 0f, 0f, if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
             c.drawText(text, width / 2f, baseline, paint)
+            paint.clearShadowLayer()
             if ((System.nanoTime() / 300_000_000) % 2 == 0L) {
                 val cursorX = width / 2f + paint.measureText(text) / 2 + 2f * density
                 // 输入法式光标略高于文字上下两端。

@@ -50,6 +50,10 @@ public final class MicWavRecorder {
             thread = new Thread(this::readLoop, "Spatial8D-Mic");
             thread.start();
             return true;
+        } catch (SecurityException ignored) {
+            // Microphone permission may be revoked after the caller checks it.
+            stopInternal();
+            return false;
         } catch (Throwable ignored) {
             stopInternal();
             return false;

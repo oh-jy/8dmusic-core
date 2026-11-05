@@ -1,6 +1,7 @@
 package j5i.spatial8d.audio
 
 import android.content.Context
+import androidx.core.content.ContextCompat
 import android.icu.text.Transliterator
 import android.text.Html
 import android.util.Log
@@ -70,9 +71,9 @@ class Lyrics(context: Context) {
         callback: (Result<List<LyricsCandidate>>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
-            appContext.mainExecutor.execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
             return
         }
         progress("正在检索歌词候选…")
@@ -84,7 +85,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(IOException("暂时无法获取在线歌词", e))
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 
@@ -95,9 +96,9 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
-            appContext.mainExecutor.execute {
+            ContextCompat.getMainExecutor(appContext).execute {
                 callback(Result.failure(IllegalArgumentException("歌曲名称为空")))
             }
             return
@@ -129,14 +130,12 @@ class Lyrics(context: Context) {
                 Log.w("8DLyrics", "LRCLIB 请求失败", e)
                 Result.failure(IOException("暂时无法获取在线歌词", e))
             }
-            appContext.mainExecutor.execute {
-                synchronized(requestLock) { requests.remove(requestKey) }
+            ContextCompat.getMainExecutor(appContext).execute {
+                synchronized(requestLock) { if (requests[requestKey]?.second === callbacks) requests.remove(requestKey) }
                 synchronized(requestLock) {
                     if (result.isSuccess) failures.edit().remove(requestKey).apply()
                     else failures.edit().putInt(requestKey, (failures.getInt(requestKey, 0) + 1).coerceAtMost(5)).apply()
                 }
-                // 最终结果回调先执行；不再发送终态进度覆盖手动检索输入区。
-                if (result.isSuccess) progress("解析并缓存歌词…")
                 result.onSuccess { Log.i("8DLyrics", "歌词成功：${it.trackName} · ${it.artistName} · ${it.lines.size} 行") }
                 callbacks.forEach { it(result) }
             }
@@ -215,7 +214,7 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         progress("正在获取所选歌词…")
         thread(name = "lyrics-apply") {
             val result = try {
@@ -225,7 +224,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(e)
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 
@@ -238,7 +237,7 @@ class Lyrics(context: Context) {
         callback: (Result<LyricsResult>) -> Unit,
         onProgress: (String) -> Unit = {}
     ) {
-        fun progress(stage: String) = appContext.mainExecutor.execute { onProgress(stage) }
+        fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         progress("正在获取所选歌词…")
         thread(name = "lyrics-preview") {
             val result = try {
@@ -246,7 +245,7 @@ class Lyrics(context: Context) {
             } catch (e: Exception) {
                 Result.failure(e)
             }
-            appContext.mainExecutor.execute { callback(result) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
     }
 

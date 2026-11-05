@@ -123,7 +123,9 @@ class PlaylistDialog(
             addView(count.apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) } })
             addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
             addView(ThemeUi.text(c, t("close"), 11f, p, role = ThemeUi.ROLE_SUB).apply {
-                setPadding(dp(12), dp(8), dp(12), dp(8)); setOnClickListener { close() }
+                gravity = Gravity.CENTER
+                minWidth = dp(48); minHeight = dp(48)
+                setOnClickListener { close() }
             })
         })
         tabs = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
@@ -199,7 +201,7 @@ class PlaylistDialog(
     }
 
 
-    private fun refresh() {
+    private fun refresh(scrollToPlaying: Boolean = true) {
         if (!::list.isInitialized) return
         songs = store.view(source)
         count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
@@ -227,17 +229,15 @@ class PlaylistDialog(
         }
         tabs.addView(chip(t("playlist.add"), false) { (context as? PlaylistHost)?.addAudio() })
         sortRow.removeAllViews()
-        val actions = ThemeUi.row(context).apply {
-            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL
-        }
-        sortRow.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))
+        val actions = ThemeUi.row(context)
+        actions.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))
         listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "album" to t("sort.album"), "time" to t("sort.time"), "manual" to t("sort.manual")).forEach { (key, label) ->
-            sortRow.addView(chip(label, store.sort == key) { store.setSort(key); refresh() })
+            actions.addView(chip(label, store.sort == key) { store.setSort(key); refresh() })
         }
         // The trailing action pair remains fixed after Custom in the UTS order row.
-        if (store.sort != "manual") actions.addView(chip(if (store.ascending) "↑" else "↓", false) { store.toggleAscending(); refresh() })
-        else actions.addView(chip(if (reorderMode) "完成排序" else "整理顺序", false) {
+        val trailing = ThemeUi.row(context)
+        if (store.sort != "manual") trailing.addView(chip(if (store.ascending) "↑" else "↓", false) { store.toggleAscending(); refresh() })
+        else trailing.addView(chip(if (reorderMode) "完成排序" else "整理顺序", false) {
             reorderMode = !reorderMode
             status.text = if (reorderMode) "整理模式：上下拖动歌曲，点「完成排序」退出" else "排序已完成"
             refresh()
@@ -247,14 +247,18 @@ class PlaylistDialog(
         songs.forEachIndexed { index, song -> list.addView(row(song, index)) }
         val active = songs.indexOfFirst { it.id == currentId }
         // 等底部弹层完成布局后再滚动，提前 scrollTo 拿不到有效高度。
-        if (active >= 0) scrollToCurrent(active)
+        if (scrollToPlaying && active >= 0) scrollToCurrent(active)
         if (songs.isEmpty() && hasAudioPermission()) list.addView(ThemeUi.text(context,
             if (store.playlistIndex == FAVORITES_INDEX) "收藏为空，点播放控制处的空心爱心添加"
             else if (source.isEmpty()) "请先添加或扫描音频" else "没有匹配的音频", 12f, p, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(40), dp(16), dp(40))
         })
-        sortRow.addView(actions)
-        actions.addView(locateButton((context as? PlaylistHost)?.isLocalMusicPlaying() == true))
+        sortRow.addView(HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            addView(actions)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        sortRow.addView(trailing)
+        sortRow.addView(locateButton((context as? PlaylistHost)?.isLocalMusicPlaying() == true))
         onChanged(songs)
     }
 
@@ -275,7 +279,7 @@ class PlaylistDialog(
             contentDescription = "定位当前歌曲"
             gravity = Gravity.CENTER
             alpha = if (localPlaying) 1f else 0.4f
-            setPadding(dp(10), dp(3), dp(4), dp(3))
+            minWidth = dp(48); minHeight = dp(48)
             setOnClickListener {
                 if (localPlaying) scrollToCurrent()
                 else Toast.makeText(context, "仅本地音乐播放时可定位", Toast.LENGTH_SHORT).show()
@@ -287,10 +291,11 @@ class PlaylistDialog(
         val active = song.id == currentId
         val row = ThemeUi.row(c).apply {
             setPadding(dp(2), 0, 0, 0)
-            background = ThemeUi.bgDrawable(c, if (active) p.surfaceAlt else p.surface, 8f)
+            background = ThemeUi.bgDrawable(c, if (active) p.control else p.surfaceAlt, 8f)
             layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(4) }
+            isSelected = active
         }
-        row.addView(ThemeUi.text(c, "☰", 17f, p, role = ThemeUi.ROLE_FAINT).apply {
+        row.addView(ThemeUi.text(c, "☰", 13f, p, role = ThemeUi.ROLE_FAINT).apply {
             tag = "dragHandle"
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dp(30), dp(54))
@@ -467,9 +472,10 @@ class PlaylistDialog(
     private fun button(label: String, action: () -> Unit) = ThemeUi.button(context, p, label) { action() }.apply {
         textSize = 11f; layoutParams = LinearLayout.LayoutParams(-2, dp(32)).apply { leftMargin = dp(6) }
     }
-    private fun chip(label: String, selected: Boolean, action: () -> Unit) = ThemeUi.button(context, p, label, if (selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_CONTROL) { action() }.apply {
-        textSize = 11f; setPadding(dp(8), 0, dp(8), 0)
-        layoutParams = LinearLayout.LayoutParams(-2, dp(30)).apply { leftMargin = dp(6); topMargin = dp(4); bottomMargin = dp(4) }
+    private fun chip(label: String, selected: Boolean, action: () -> Unit) = ThemeUi.button(context, p, label, if (selected) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL) { action() }.apply {
+        isSelected = selected
+        textSize = 11f; setPadding(dp(6), 0, dp(6), 0)
+        layoutParams = LinearLayout.LayoutParams(-2, dp(30)).apply { leftMargin = dp(4); topMargin = dp(4); bottomMargin = dp(4) }
     }
     private fun dp(value: Int) = ThemeUi.dp(context, value.toFloat())
     private fun hasAudioPermission(): Boolean {

@@ -14,7 +14,7 @@ namespace {
 constexpr double PI = 3.14159265358979323846;
 constexpr double COMBS[8] = {1116,1188,1277,1356,1422,1491,1557,1617};
 constexpr double ALLP[4] = {556,441,341,225};
-struct Params { double sr,period,elev,depth,phase,direction,width,room,rt60,wet; bool raw,reverse; int denoise; int clarity=50; };
+struct Params { double sr,period,elev,depth,phase,direction,width,room,rt60,wet; bool raw,reverse; int denoise; int clarity=50; int trajectory=0; };
 
 struct Ring {
     std::vector<double> b; int w=0;
@@ -76,8 +76,10 @@ double azimuth(double t,const Params&p){if(p.direction!=0)return p.direction*2*P
     return a+(stable(k*2+31)<.5?-1:1)*2*PI/std::max(1.0,p.period)*(t-start);
 }
 struct Ctrl{double dl,dr,sl,sr,rear,dn,ng,gd,gh,pl,pr,gl,gr;};
-double rearCue(const Params&p){return p.period==8&&p.elev==35&&p.depth==45&&p.phase==0&&p.direction>0?1.8:1.0;}
-Ctrl ctrl(double t,const Params&p,double makeup){double th=azimuth(t,p),s=std::sin(th),cs=std::cos(th),phi=p.elev*PI/180*cs;
+double rearCue(const Params&p){return p.trajectory==0&&p.period==8&&p.elev==35&&p.depth==45&&p.phase==0&&p.direction>0?1.8:1.0;}
+Ctrl ctrl(double t,const Params&p,double makeup){double th=azimuth(t,p),phase=p.phase*PI/180,u=th-phase,e=p.elev*PI/180,phi=e*std::cos(th);
+    switch(p.trajectory){case 1: th=phase+PI/2*std::sin(u);phi=e*std::sin(2*u);break;case 2:th=phase;phi=e*std::sin(u);break;case 3:phi=e*std::sin(u/2);break;case 4:th=phase+1.3*std::sin(.73*u)+std::sin(.37*u);phi=e*std::sin(.53*u);break;}
+    double s=std::sin(th),cs=std::cos(th);
     double f=std::clamp(1.5*p.period,8.0,16.0),far=.5*(1+std::sin(2*PI/f*t)),d=p.depth/100;
     double f0=std::clamp(7200-62*phi*180/PI,3200.0,9800.0),ap=std::min(1.0,std::abs(phi*180/PI)/40);
     double sl=std::min(.85,std::max(0.0,.85*(1+s)*.5)),sr=std::min(.85,std::max(0.0,.85*(1-s)*.5)),w=p.width/100;
@@ -151,7 +153,7 @@ void render(const int16_t*bytes,long frames,const Params&p,int bpf,int ch,bool f
 }
 }
 #ifndef SPATIAL_PLAYER_IMPLEMENTATION
-extern "C" JNIEXPORT void JNICALL Java_com_j5i_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity,jstring path){
-    jbyte*ptr=env->GetByteArrayElements(data,nullptr);const char*p=env->GetStringUTFChars(path,nullptr);try{Params q{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),bool(reverse),denoise,clarity};render(reinterpret_cast<int16_t*>(ptr),frames,q,bpf,ch,flt,reverse,p);}catch(const std::string&e){env->ThrowNew(env->FindClass("java/io/IOException"),e.c_str());}env->ReleaseStringUTFChars(path,p);env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);
+extern "C" JNIEXPORT void JNICALL Java_com_j5i_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity,jint trajectory,jstring path){
+    jbyte*ptr=env->GetByteArrayElements(data,nullptr);const char*p=env->GetStringUTFChars(path,nullptr);try{Params q{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),bool(reverse),denoise,clarity,trajectory};render(reinterpret_cast<int16_t*>(ptr),frames,q,bpf,ch,flt,reverse,p);}catch(const std::string&e){env->ThrowNew(env->FindClass("java/io/IOException"),e.c_str());}env->ReleaseStringUTFChars(path,p);env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);
 }
 #endif

@@ -2,6 +2,7 @@ package j5i.spatial8d.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import android.content.res.Resources
 import java.util.Locale
 
 /** 应用内语言；第三方歌曲、歌手、电台与 API 内容不经过翻译。 */
@@ -15,13 +16,16 @@ object AppLanguage {
     fun current(context: Context): String =
         context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE).getString(PREF, SYSTEM) ?: SYSTEM
 
+    fun systemLanguage(locale: Locale): String = when (locale.language) {
+        "zh" -> if (locale.script == "Hant" || locale.country in setOf("TW", "HK", "MO")) TRADITIONAL else SIMPLIFIED
+        "en" -> ENGLISH
+        else -> SIMPLIFIED
+    }
+
     fun resolved(context: Context): String = when (val selected = current(context)) {
-        SYSTEM -> when (Locale.getDefault().language) {
-            "zh" -> if (Locale.getDefault().script == "Hant" || Locale.getDefault().country in setOf("TW", "HK", "MO"))
-                TRADITIONAL else SIMPLIFIED
-            else -> ENGLISH
-        }
-        else -> selected
+        SYSTEM -> systemLanguage(Resources.getSystem().configuration.locales[0] ?: Locale.SIMPLIFIED_CHINESE)
+        SIMPLIFIED, TRADITIONAL, ENGLISH -> selected
+        else -> SIMPLIFIED
     }
 
     fun select(context: Context, value: String) {
@@ -34,8 +38,6 @@ object AppLanguage {
             TRADITIONAL -> Locale.TRADITIONAL_CHINESE
             else -> Locale.ENGLISH
         }
-        // 跟随系统必须读取系统 locale，不能被上次手动选择覆盖。
-        if (current(context) != SYSTEM) Locale.setDefault(locale)
         return context.createConfigurationContext(Configuration(context.resources.configuration).apply { setLocale(locale) })
     }
 
@@ -54,6 +56,16 @@ object AppLanguage {
     private fun e(zh: String, tw: String, en: String) = Entry(zh, tw, en)
 
     private val entries = mapOf(
+        "driving.next.view" to e("切换可视化", "切換視覺化", "Change visualization"),
+        "lyrics.timeout" to e("歌词获取超时，可手动搜索", "歌詞取得逾時，可手動搜尋", "Lyrics request timed out. Search manually."),
+        "theme.slate" to e("雾霭蓝", "霧靄藍", "Misty blue"),
+        "theme.violet" to e("暮光紫", "暮光紫", "Twilight violet"),
+        "theme.rose" to e("玫瑰红", "玫瑰紅", "Rose red"),
+        "theme.neutral" to e("柔和灰", "柔和灰", "Soft gray"),
+        "theme.orange" to e("暖阳橙", "暖陽橙", "Sunny orange"),
+        "theme.green" to e("清新绿", "清新綠", "Fresh green"),
+        "theme.blue" to e("经典蓝", "經典藍", "Classic blue"),
+        "theme.color" to e("主题配色", "主題配色", "Theme color"),
         "app.name" to e("8D 空间音频", "8D 空間音訊", "8D Spatial Audio"),
         "app.subtitle" to e("HRTF 双耳引擎 · Android", "HRTF 雙耳引擎 · Android", "HRTF binaural engine · Android"),
         "language" to e("语言", "語言", "Language"),
@@ -95,6 +107,13 @@ object AppLanguage {
         "direction.hint" to e("随机模式每 2–8 秒自动切换顺/逆时针", "隨機模式每 2–8 秒自動切換順/逆時針", "Random mode changes direction every 2–8 seconds"),
         "trajectory" to e("运动轨迹", "運動軌跡", "Trajectory"),
         "trajectory.hint" to e("环绕速度 · 起伏 · 起手方位", "環繞速度 · 起伏 · 起手方位", "Orbit speed · elevation · starting position"),
+        "trajectory.orbit" to e("环绕", "環繞", "Orbit"),
+        "trajectory.figure8" to e("8 字", "8 字", "Figure eight"),
+        "trajectory.vertical" to e("垂直摆动", "垂直擺動", "Vertical"),
+        "trajectory.spiral" to e("螺旋升降", "螺旋升降", "Spiral"),
+        "trajectory.wander" to e("平滑漫游", "平滑漫遊", "Smooth wander"),
+        "trajectory.raw" to e("原始音频直通时不启用空间轨迹", "原始音訊直通時不啟用空間軌跡", "Spatial trajectories are bypassed in original audio mode"),
+        "trajectory.raw.short" to e("直通未启用", "直通未啟用", "bypassed"),
         "room.acoustics" to e("房间声学", "房間聲學", "Room acoustics"),
         "room.hint" to e("空间大小 · 混响量感与尾音", "空間大小 · 混響量感與尾音", "Room size · reverb amount and tail"),
         "preset.name.hint" to e("自定义名称，留空自动编号", "自訂名稱，留空自動編號", "Custom name (blank for auto number)"),
@@ -103,6 +122,7 @@ object AppLanguage {
         "pitch.choose" to e("选择变声风格 · 从原声开始", "選擇變聲風格 · 從原聲開始", "Choose pitch preset · start from original"),
         "pitch" to e("变声", "變聲", "Pitch"),
         "original" to e("原声", "原聲", "Original"),
+        "label.default" to e("默认", "預設", "Default"),
         "semitone" to e("半音", "半音", "semitones"),
         "reverse" to e("倒放", "倒放", "Reverse"),
         "reverse.hint" to e("从结尾向开头播放", "從結尾向開頭播放", "Play from end to beginning"),
@@ -161,7 +181,7 @@ object AppLanguage {
         "info.legend" to e("曲线图例：蓝=左耳 橙=右耳 绿=仰角 紫=远近；曲线与引擎同源。", "曲線圖例：藍=左耳 橙=右耳 綠=仰角 紫=遠近；曲線與引擎同源。", "Curve: blue=left, orange=right, green=elevation, purple=distance. Curves use the same engine data."),
         "slider.period" to e("环绕周期", "環繞週期", "Orbit period"),
         "slider.elev" to e("上下幅度", "上下幅度", "Elevation"),
-        "slider.depth" to e("远近距离", "遠近距離", "Depth"),
+        "slider.depth" to e("远近幅度", "遠近幅度", "Depth range"),
         "slider.phase" to e("起始相位", "起始相位", "Starting phase"),
         "slider.room" to e("空间大小", "空間大小", "Room size"),
         "slider.wet" to e("混响强度", "混響強度", "Reverb mix"),
@@ -273,16 +293,16 @@ object AppLanguage {
         e("转得偏快、反射早，像站在乐手前面听；适合摇滚 / 乐队现场。", "轉得偏快、反射早，像站在樂手前面聽；適合搖滾 / 樂隊現場。", "Fast orbit and early reflections for rock and live bands."),
         e("中等厅堂、尾巴 1.8s，人声有明确包围感但字头仍清楚。", "中等廳堂、尾巴 1.8s，人聲有明確包圍感但字頭仍清楚。", "A medium hall with a 1.8 s tail and clear vocals."),
         e("50 米空间 + 3.2s 尾巴，声音被拉长拉远；适合氛围 / 合唱 / 空灵段落。", "50 米空間 + 3.2s 尾巴，聲音被拉長拉遠；適合氛圍 / 合唱 / 空靈段落。", "A 50 m space with a 3.2 s tail for ambient and choral music."),
-        e("18 秒一圈、上下和远近摆幅大，像慢慢飘着绕；适合后摇 / 电子 / 助眠。", "18 秒一圈、上下和遠近擺幅大，像慢慢飄著繞；適合後搖 / 電子 / 助眠。", "An 18-second orbit with broad elevation and depth for ambient listening."),
+        e("缓慢平滑地改变方位、上下和远近，适合后摇 / 电子 / 助眠。", "緩慢平滑地改變方位、上下和遠近，適合後搖 / 電子 / 助眠。", "Slow, smooth changes of direction, height and depth for ambient listening."),
         e("1 秒一圈，左右耳高速交替；适合短片段特效，不建议整首长听。", "1 秒一圈，左右耳高速交替；適合短片段特效，不建議整首長聽。", "A one-second orbit for short effects, not extended listening."),
-        e("慢速旋转叠加大幅上下起伏，形成头顶掠过与下沉感。", "慢速旋轉疊加大幅上下起伏，形成頭頂掠過與下沉感。", "Slow orbit with strong elevation for overhead and sinking movement."),
+        e("声像在固定方位大幅上下摆动，形成升降感。", "聲像在固定方位大幅上下擺動，形成升降感。", "Broad vertical movement at a fixed direction."),
         e("近反射密、尾巴短，低频和人声周围有明显墙面感。", "近反射密、尾巴短，低頻和人聲周圍有明顯牆面感。", "Dense early reflections and short tails with nearby walls."),
         e("50 米开阔空间、稀疏延迟和长尾，远近落差明显。", "50 米開闊空間、稀疏延遲和長尾，遠近落差明顯。", "A 50 m open space with sparse delays and long echoes."),
-        e("每 2–8 秒随机切换顺/逆时针，配合较大起伏，听感不可预测。", "每 2–8 秒隨機切換順/逆時針，配合較大起伏，聽感不可預測。", "Direction changes every 2–8 seconds with broad movement."),
+        e("平滑漫游并每 2–8 秒随机换向，配合较大起伏。", "平滑漫遊並每 2–8 秒隨機換向，配合較大起伏。", "Smooth roaming with direction changes every 2–8 seconds."),
         e("34 米大空间 + 逆时针、从右侧起手，反射多而散；适合开阔感的编曲。", "34 米大空間 + 逆時針、從右側起手，反射多而散；適合開闊感的編曲。", "A 34 m space with a reverse orbit and diffuse reflections."),
         e("加快左右交替并拉宽双耳差异，保持较浅混响，突出耳边的绕行感。", "加快左右交替並拉寬雙耳差異，保持較淺混響，突出耳邊的繞行感。", "Fast interaural changes and wide stereo with light reverb."),
         e("小房间、低混响和轻微仰角，尽量保留口播、乐器的直接细节。", "小房間、低混響和輕微仰角，盡量保留口播、樂器的直接細節。", "Small room and light reverb to preserve detail."),
-        e("大幅上下起伏配合逆时针运动，形成从头顶掠过后沉入侧后方的轨迹。", "大幅上下起伏配合逆時針運動，形成從頭頂掠過後沉入側後方的軌跡。", "Strong elevation and reverse motion from above to rear-side."),
+        e("逆向环绕配合缓慢升降，形成螺旋轨迹。", "逆向環繞配合緩慢升降，形成螺旋軌跡。", "A reverse orbit with a slow rise and fall."),
         e("慢速、近距离、短尾音，适合低音量助眠，不强调夸张的左右跳跃。", "慢速、近距離、短尾音，適合低音量助眠，不強調誇張的左右跳躍。", "Slow, close and short-tailed for quiet nighttime listening."),
         e("较窄空间配合较长的混响尾巴，适合合成器、氛围和实验音效。", "較窄空間配合較長的混響尾巴，適合合成器、氛圍和實驗音效。", "A narrow space with a long tail for synth and ambient effects."),
         e("从右后方起步，以中速反向绕行，适合需要明确后脑方位的试听。", "從右後方起步，以中速反向繞行，適合需要明確後腦方位的試聽。", "A medium reverse orbit from the rear-right for clear rear imaging."),

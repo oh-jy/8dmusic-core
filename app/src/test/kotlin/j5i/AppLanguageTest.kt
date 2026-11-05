@@ -11,7 +11,8 @@ class AppLanguageTest {
     @Test fun parameterLabelsAndDescriptionsAreTranslated() {
         val keys = SLIDERS.map { "slider.${it.key}" } +
             PARAM_INFO.flatMap { listOf("slider.${it.key}", "param.${it.key}") } +
-            listOf("settings", "theme")
+            listOf("settings", "theme", "theme.color", "theme.blue", "theme.green", "theme.orange",
+                "theme.neutral", "theme.rose", "theme.violet", "theme.slate", "label.default", "trajectory.orbit")
         for (language in listOf(AppLanguage.SIMPLIFIED, AppLanguage.TRADITIONAL, AppLanguage.ENGLISH)) {
             for (key in keys) {
                 val text = AppLanguage.textForLanguage(language, key)

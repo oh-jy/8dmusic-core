@@ -33,6 +33,7 @@ object ThemeUi {
     const val ROLE_ACCENT = "role_accent"
     const val ROLE_DARK_INK = "role_dark_ink"
     const val ROLE_CONTROL = "role_control"
+    const val ROLE_HOME_CONTROL = "role_home_control"
     const val ROLE_ACCENT_FILL = "role_accent_fill"
     const val ROLE_SURFACE_ALT = "role_surface_alt"
     const val ROLE_SURFACE = "role_surface"
@@ -51,14 +52,17 @@ object ThemeUi {
         val darkInk: Int
     )
 
-    fun palette(dark: Boolean): Palette = if (dark) Palette(
+    var colorTheme: Int = 0
+
+    fun palette(dark: Boolean): Palette {
+        val base = if (dark) Palette(
         background = 0xff1b1d21.toInt(),
         surface = 0xff1e2126.toInt(),
         surfaceAlt = 0xff262a30.toInt(),
         divider = 0xff2c2f34.toInt(),
         text = 0xffeef1f5.toInt(),
-        sub = 0xff8a9099.toInt(),
-        faint = 0xff70767e.toInt(),
+        sub = 0xffa9b0ba.toInt(),
+        faint = 0xff9ba3ae.toInt(),
         control = 0xff2c3037.toInt(),
         controlText = 0xffdfe3e7.toInt(),
         accent = 0xff4ea1ff.toInt(),
@@ -69,13 +73,59 @@ object ThemeUi {
         surfaceAlt = 0xfff4f6f9.toInt(),
         divider = 0xffe8eaee.toInt(),
         text = 0xff1f2429.toInt(),
-        sub = 0xff8a93a3.toInt(),
-        faint = 0xffa0a7b1.toInt(),
+        sub = 0xff596575.toInt(),
+        faint = 0xff626d7b.toInt(),
         control = 0xffeef0f3.toInt(),
         controlText = 0xff3a3f45.toInt(),
-        accent = 0xff2e7fe6.toInt(),
+        accent = 0xff246ac4.toInt(),
         darkInk = 0xffffffff.toInt()
-    )
+        )
+        return when (colorTheme) {
+            1 -> base.copy(background = if (dark) 0xff142321.toInt() else 0xffeaf5f1.toInt(),
+                surface = if (dark) 0xff192b28.toInt() else 0xfff7fcfa.toInt(),
+                surfaceAlt = if (dark) 0xff213832.toInt() else 0xffe4f2ec.toInt(),
+                control = if (dark) 0xff29443c.toInt() else 0xffdcece5.toInt(),
+                divider = if (dark) 0xff35534a.toInt() else 0xffd0e2db.toInt(),
+                accent = if (dark) 0xff4ed4b0.toInt() else 0xff087c67.toInt(),
+                darkInk = if (dark) 0xff062d25.toInt() else Color.WHITE)
+            2 -> base.copy(background = if (dark) 0xff261e19.toInt() else 0xfffaf0e7.toInt(),
+                surface = if (dark) 0xff30241e.toInt() else 0xfffffaf6.toInt(),
+                surfaceAlt = if (dark) 0xff3e2e25.toInt() else 0xfff7e9dc.toInt(),
+                control = if (dark) 0xff4b382c.toInt() else 0xfff2e0d1.toInt(),
+                divider = if (dark) 0xff5a4436.toInt() else 0xffe9d6c7.toInt(),
+                accent = if (dark) 0xffffb66b.toInt() else 0xffa94806.toInt(),
+                darkInk = if (dark) 0xff3b1b00.toInt() else Color.WHITE)
+            3 -> base.copy(background = if (dark) 0xff22211e.toInt() else 0xfff2f0eb.toInt(),
+                surface = if (dark) 0xff2b2925.toInt() else 0xfffcfbf8.toInt(),
+                surfaceAlt = if (dark) 0xff38352f.toInt() else 0xffefede6.toInt(),
+                control = if (dark) 0xff464139.toInt() else 0xffe8e5dd.toInt(),
+                divider = if (dark) 0xff555047.toInt() else 0xffdedbd2.toInt(),
+                accent = if (dark) 0xffd4c4aa.toInt() else 0xff655844.toInt(),
+                darkInk = if (dark) 0xff30271c.toInt() else Color.WHITE)
+            4 -> base.copy(background = if (dark) 0xff281d21.toInt() else 0xfffaf0f2.toInt(),
+                surface = if (dark) 0xff322329.toInt() else 0xfffff9fa.toInt(),
+                surfaceAlt = if (dark) 0xff402c33.toInt() else 0xfff7e7eb.toInt(),
+                control = if (dark) 0xff4c343d.toInt() else 0xfff1dfe4.toInt(),
+                divider = if (dark) 0xff5c414a.toInt() else 0xffe8d1d8.toInt(),
+                accent = if (dark) 0xffffa9be.toInt() else 0xffa33250.toInt(),
+                darkInk = if (dark) 0xff3d111e.toInt() else Color.WHITE)
+            5 -> base.copy(background = if (dark) 0xff211e2c.toInt() else 0xfff1eff9.toInt(),
+                surface = if (dark) 0xff2a2638.toInt() else 0xfffaf9ff.toInt(),
+                surfaceAlt = if (dark) 0xff373148.toInt() else 0xffebe8f7.toInt(),
+                control = if (dark) 0xff443d59.toInt() else 0xffe1ddf0.toInt(),
+                divider = if (dark) 0xff544c6d.toInt() else 0xffd7d1e9.toInt(),
+                accent = if (dark) 0xffcbb6ff.toInt() else 0xff62469a.toInt(),
+                darkInk = if (dark) 0xff24153f.toInt() else Color.WHITE)
+            6 -> base.copy(background = if (dark) 0xff1b2228.toInt() else 0xffedf2f5.toInt(),
+                surface = if (dark) 0xff222c34.toInt() else 0xfff8fbfd.toInt(),
+                surfaceAlt = if (dark) 0xff2b3943.toInt() else 0xffe4edf1.toInt(),
+                control = if (dark) 0xff354753.toInt() else 0xffdbe7ed.toInt(),
+                divider = if (dark) 0xff455966.toInt() else 0xffcedde5.toInt(),
+                accent = if (dark) 0xff9bc9e4.toInt() else 0xff315f79.toInt(),
+                darkInk = if (dark) 0xff102a38.toInt() else Color.WHITE)
+            else -> base.copy(control = if (dark) 0xff344557.toInt() else 0xffd5e2f0.toInt())
+        }
+    }
 
     fun dp(context: Context, v: Float): Int =
         (v * context.resources.displayMetrics.density + 0.5f).toInt()
@@ -138,7 +188,7 @@ object ThemeUi {
             }
         }
 
-    fun applyTheme(view: View, p: Palette) {
+    fun applyTheme(view: View, p: Palette, previous: Palette? = null) {
         when (view) {
             is EditText -> {
                 view.setTextColor(p.text)
@@ -165,7 +215,7 @@ object ThemeUi {
             // Only recolor known surfaces; accent fills and other semantic colors stay intact.
             val background = view.background as? GradientDrawable
             val color = background?.color?.defaultColor
-            listOf(palette(true), palette(false)).forEach { old ->
+            (listOfNotNull(previous) + listOf(palette(true), palette(false))).forEach { old ->
                 when (color) {
                     old.surface -> background.setColor(p.surface)
                     old.control -> background.setColor(p.control)
@@ -174,7 +224,7 @@ object ThemeUi {
             }
         }
         if (view is ViewGroup) {
-            for (i in 0 until view.childCount) applyTheme(view.getChildAt(i), p)
+            for (i in 0 until view.childCount) applyTheme(view.getChildAt(i), p, previous)
         }
     }
 
@@ -193,6 +243,7 @@ object ThemeUi {
             ROLE_ACCENT_FILL -> p.accent
             ROLE_SURFACE_ALT -> p.surfaceAlt
             ROLE_SURFACE -> p.surface
+            ROLE_HOME_CONTROL -> if (colorTheme == 0) p.surface else p.control
             ROLE_TEXT -> null
             else -> p.control
         }
@@ -256,7 +307,7 @@ object ThemeUi {
         root.addView(FrameLayout(context).apply {
             layoutParams = LinearLayout.LayoutParams(-1, dp(context, 22f))
             addView(View(context).apply {
-                background = bgDrawable(context, if (p.control == 0xff2c3037.toInt())
+                background = bgDrawable(context, if ((p.background and 0xff) < 128)
                     0xff4a4f57.toInt() else 0xffd5d9df.toInt(), 2f)
                 layoutParams = FrameLayout.LayoutParams(dp(context, 36f), dp(context, 4f), Gravity.CENTER)
             })
@@ -264,10 +315,13 @@ object ThemeUi {
                 onCancel?.invoke()
                 dlg?.dismiss()
             }
+            contentDescription = AppLanguage.text(context, "close")
+            minimumHeight = dp(context, 48f)
         })
         root.addView(FrameLayout(context).apply {
+            tag = "sheetHeader"
             layoutParams = LinearLayout.LayoutParams(-1, -2)
-            addView(text(context, title, 15f, p, bold = true))
+            addView(text(context, title, 15f, p, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
         })
         if (subtitle != null) {
             root.addView(text(context, subtitle, 11f, p, role = ROLE_SUB))
@@ -302,12 +356,13 @@ object ThemeUi {
                 val close = text(context, cancelText, 12f, p, role = ROLE_ACCENT).apply {
                     gravity = Gravity.CENTER
                     setPadding(dp(context, 12f), dp(context, 8f), dp(context, 12f), dp(context, 8f))
+                    minHeight = dp(context, 48f)
                 }
                 close.setOnClickListener {
                     onCancel?.invoke()
                     dlg?.dismiss()
                 }
-                (root.getChildAt(1) as? ViewGroup)?.addView(close, FrameLayout.LayoutParams(-2, -2, Gravity.END))
+                (root.getChildAt(1) as? ViewGroup)?.addView(close, FrameLayout.LayoutParams(-2, -2, Gravity.END or Gravity.CENTER_VERTICAL))
             }
             root.addView(button(context, p, cancelText, role = ROLE_SURFACE_ALT).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(context, if (compactPicker) 34f else 42f)).apply {
@@ -426,7 +481,11 @@ object ThemeUi {
         var maxHeight = Int.MAX_VALUE
 
         override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            val boundedHeight = MeasureSpec.makeMeasureSpec(maxHeight, MeasureSpec.AT_MOST)
+            val mode = MeasureSpec.getMode(heightMeasureSpec)
+            val size = MeasureSpec.getSize(heightMeasureSpec)
+            val boundedHeight = if (maxHeight == Int.MAX_VALUE) heightMeasureSpec else
+                MeasureSpec.makeMeasureSpec(if (mode == MeasureSpec.UNSPECIFIED) maxHeight else minOf(size, maxHeight),
+                    if (mode == MeasureSpec.EXACTLY) MeasureSpec.EXACTLY else MeasureSpec.AT_MOST)
             super.onMeasure(widthMeasureSpec, boundedHeight)
         }
     }
