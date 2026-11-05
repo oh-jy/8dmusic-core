@@ -91,7 +91,7 @@ internal fun MainActivity.refreshAll() {
         // so opening a panel never leaves a deferred visual correction until the first touch.
         refreshControls()
         // 下拉、展开控件、方向、曲线共用 preset，任何入口修改后都从这里统一回灌。
-        presetPicker.text = preset.name
+        presetPicker.text = preset.name.replaceFirst("标准绕头 · ", "标准模式 · ")
         val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
         if (presetIndex >= 0) {
             presetPicker.text = AppLanguage.preset(this, presetIndex)
@@ -174,7 +174,7 @@ internal fun MainActivity.refreshAll() {
     }
 
 internal fun MainActivity.refreshPresetSummary() {
-        presetPicker.text = preset.name
+        presetPicker.text = preset.name.replaceFirst("标准绕头 · ", "标准模式 · ")
         val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
         if (presetIndex >= 0) {
             presetPicker.text = AppLanguage.preset(this, presetIndex)
@@ -482,7 +482,7 @@ internal fun MainActivity.saveCustomPreset() {
 
 internal fun MainActivity.saveCustomPreset(rawInput: String) {
         val raw = rawInput.ifBlank { "自定义 ${customPresets.size + 1}" }
-        var name = if (" · " in raw) raw else "标准绕头 · $raw"
+        var name = if (" · " in raw) raw else "标准模式 · $raw"
         val base = name
         var suffix = 2
         while (customPresets.any { it.name == name }) name = "$base ${suffix++}"
@@ -579,6 +579,7 @@ internal fun MainActivity.navbar(): LinearLayout {
                 })
                 addView(ThemeUi.text(this@navbar, "ⓘ", 18f, palette, role = ThemeUi.ROLE_SUB).apply {
                     gravity = Gravity.CENTER
+                    contentDescription = t("info")
                     layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply {
                         leftMargin = ThemeUi.dp(this@navbar, 5f)
                     }
@@ -604,7 +605,16 @@ internal fun MainActivity.navbar(): LinearLayout {
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 3f) }
         }
         bar.addView(fmButton)
-        bar.addView(navButton(t("driving")) { showDrivingMode() })
+        bar.addView(ImageButton(this).apply {
+            setImageResource(j5i.spatial8d.R.drawable.ic_driving)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            imageTintList = ColorStateList.valueOf(palette.controlText)
+            background = ThemeUi.bgDrawable(this@navbar, palette.control, 15f)
+            setPadding(ThemeUi.dp(this@navbar, 6f), 0, ThemeUi.dp(this@navbar, 6f), 0)
+            contentDescription = t("driving")
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f))
+            setOnClickListener { showDrivingMode() }
+        })
         bar.addView(ImageButton(this).apply {
             setImageResource(j5i.spatial8d.R.drawable.ic_settings)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -643,12 +653,20 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(0, 0, 0, 0)
             background = null
+            contentDescription = t("playlist")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 38f), ThemeUi.dp(this@nowPlayingBar, 38f))
         }
         disc.setOnClickListener { showPlaylist() }
         meta.addView(disc)
         songTitle = ThemeUi.text(this, "未加载音频", 14f, palette, bold = true).apply {
             ThemeUi.hideOverflow(this)
+            accessibilityDelegate = object : View.AccessibilityDelegate() {
+                override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                    info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK, t("edit.metadata")))
+                }
+            }
             setOnClickListener { showMetadataEditor() }
         }
         val sub = ThemeUi.row(this)
@@ -721,10 +739,17 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         timeline.addView(currentTime)
         seek = SeekBar(this).apply {
             max = 1000
-            contentDescription = "播放进度"
+            contentDescription = t("seek.position")
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
-                    if (fromUser) currentTime.text = time((service?.player?.duration ?: 0.0) * progress / 1000.0)
+                    if (fromUser) {
+                        val target = (service?.player?.duration ?: 0.0) * progress / 1000.0
+                        currentTime.text = time(target)
+                        // Accessibility and keyboard changes do not start a touch drag.
+                        if (!seeking && SystemClock.elapsedRealtime() >= seekGuardUntil &&
+                            kotlin.math.abs(target - (service?.player?.position ?: 0.0)) >= 0.8)
+                            service?.player?.seek(target, userInitiated = true)
+                    }
                 }
                 override fun onStartTrackingTouch(seekBar: SeekBar) { seeking = true }
                 override fun onStopTrackingTouch(seekBar: SeekBar) {
@@ -762,6 +787,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             }))
         })
         controls.addView(iconControl(j5i.spatial8d.R.drawable.ic_prev) { previous() }.apply {
+            contentDescription = t("previous")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 38f), ThemeUi.dp(this@nowPlayingBar, 38f))
         })
         playButton = iconControl(j5i.spatial8d.R.drawable.ic_play, big = true, action = { togglePlayback() }).apply {
@@ -769,12 +795,15 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         }
         controls.addView(playButton)
         controls.addView(iconControl(j5i.spatial8d.R.drawable.ic_next) { next() }.apply {
+            contentDescription = t("next")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 38f), ThemeUi.dp(this@nowPlayingBar, 38f))
         })
         controls.addView(LinearLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             gravity = Gravity.RIGHT
-            addView(iconControl(j5i.spatial8d.R.drawable.ic_list) { togglePlaylist() })
+            addView(iconControl(j5i.spatial8d.R.drawable.ic_list) { togglePlaylist() }.apply {
+                contentDescription = t("playlist")
+            })
         })
         bar.addView(controls)
         return bar

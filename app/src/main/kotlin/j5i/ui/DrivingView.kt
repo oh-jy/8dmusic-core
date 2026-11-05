@@ -63,11 +63,15 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         shade.addView(ThemeUi.row(context).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(14), 0, 0)
-            addView(bigButton("⏮") { onPrevious?.invoke() }, LinearLayout.LayoutParams(0, dp(68), 1f))
+            addView(bigButton("⏮") { onPrevious?.invoke() }.apply {
+                contentDescription = AppLanguage.text(context, "previous")
+            }, LinearLayout.LayoutParams(0, dp(68), 1f))
             addView(play.apply { textSize = 28f; setOnClickListener { onPlayPause?.invoke() } }, LinearLayout.LayoutParams(0, dp(68), 1f).apply {
                 leftMargin = dp(18); rightMargin = dp(18)
             })
-            addView(bigButton("⏭") { onNext?.invoke() }, LinearLayout.LayoutParams(0, dp(68), 1f))
+            addView(bigButton("⏭") { onNext?.invoke() }.apply {
+                contentDescription = AppLanguage.text(context, "next")
+            }, LinearLayout.LayoutParams(0, dp(68), 1f))
         })
         addView(shade, LayoutParams(-1, -2, Gravity.BOTTOM))
         addView(ThemeUi.button(context, ThemeUi.palette(true), AppLanguage.text(context, "driving.close"),
@@ -87,6 +91,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
     fun update(item: MusicItem?, result: LyricsResult?, position: Long, playing: Boolean) {
         title.text = item?.name?.substringBeforeLast('.') ?: AppLanguage.text(context, "no.song")
         play.text = if (playing) "⏸" else "▶"
+        play.contentDescription = AppLanguage.text(context, if (playing) "pause" else "play")
         lyrics = result
         positionMs = position
         if (lastPlaying != playing || kotlin.math.abs(positionMs - position) > 800) {

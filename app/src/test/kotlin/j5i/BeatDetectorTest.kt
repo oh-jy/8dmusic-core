@@ -5,6 +5,14 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class BeatDetectorTest {
+    @Test fun starBrightnessRespondsToBeatsAndKeepsContrast() {
+        val quiet = starAlpha(0.7, 0.5, 0.1, 0.0)
+        val beat = starAlpha(0.7, 0.5, 0.1, 1.0)
+        assertTrue(beat - quiet >= 100)
+        assertTrue(starAlpha(1.0, 1.0, 1.0, 1.0) == 255)
+        assertTrue(starAlpha(0.1, 0.0, 0.0, 0.0) < 10)
+    }
+
     @Test fun detectsTransientsAfterWarmupAndHonorsCooldown() {
         val detector = BeatDetector()
         val ms = 1_000_000L

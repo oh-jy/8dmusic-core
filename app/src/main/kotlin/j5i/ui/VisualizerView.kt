@@ -236,7 +236,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var phase = 0f
         private val spectrum = DoubleArray(256)
         private val spectrogramRows = ArrayDeque<IntArray>()
-        private var spectrogramLastNs = 0L
+        private var spectrumSequence = 0L
+        private var spectrogramSequence = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private data class TravelBurst(val x: Float, val y: Float, val radius: Float, val group: Int, val startedAt: Long)
@@ -245,6 +246,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val travelPrevious = FloatArray(180) { -1f }
         private val travelExploded = BooleanArray(180)
         private val travelThreshold = FloatArray(180) { .35f + travelRandom.nextFloat() * .45f }
+        private var lastTravelBeat = 0L
+        private var lastBeatBurstMs = 0L
         private var clockGeneration = pcmClock.generation
         private val sphereBounds = RectF()
         // PCM 写出比实际听感提前约 80ms；每帧只消费已到时间的样本，不能反复读取队首。
@@ -278,9 +281,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 clockGeneration = pcmClock.generation
                 visualQueue.clear()
                 delayedSpectrum.fill(0.0)
+                spectrogramRows.clear()
+                spectrogramSequence = spectrumSequence
                 travelBursts.clear()
                 travelPrevious.fill(-1f)
                 travelExploded.fill(false)
+                lastTravelBeat = 0L
+                lastBeatBurstMs = 0L
             }
             val now = System.nanoTime()
             var latest: ByteArray? = null
@@ -326,6 +333,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 smoothPeak = maxOf(smoothPeak * 0.90f, peak.toFloat())
             }
             analyze()
+            spectrumSequence++
             postInvalidateOnAnimation()
             PerfTrace.sample("visual.analyzeImmediateNs", System.nanoTime() - startedAt)
         }
@@ -503,21 +511,19 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private fun drawSpectrogram(c: Canvas) {
             label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
             val top = dp(30f)
-            // 只保留真实生成的历史，不预填充伪造内容；不足一行时用最近历史延续，避免空格。
-            val row = IntArray(128)
-            for (x in row.indices) {
-                val level = spectrum[x * 2].toFloat()
-                row[x] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
+            if (spectrumSequence != spectrogramSequence) {
+                val row = IntArray(128)
+                for (x in row.indices) {
+                    val level = spectrum[x * 2].toFloat()
+                    row[x] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
+                }
+                spectrogramRows.addFirst(row)
+                while (spectrogramRows.size > 96) spectrogramRows.removeLast()
+                spectrogramSequence = spectrumSequence
             }
-            spectrogramRows.addFirst(row)
-            while (spectrogramRows.size > 96) spectrogramRows.removeLast()
-            val now = System.nanoTime()
-            val dt = if (spectrogramLastNs == 0L) 1.0 / 60.0 else (now - spectrogramLastNs) / 1_000_000_000.0
-            spectrogramLastNs = now
             val cellW = width / 128f
             val cellH = (height - top) / 96f
-            for (y in 0 until 96) {
-                val source = spectrogramRows.getOrElse(y) { spectrogramRows.last() }
+            spectrogramRows.forEachIndexed { y, source ->
                 for (x in 0 until 128) {
                     paint.color = source[x]
                     c.drawRect(x * cellW, top + y * cellH, (x + 1) * cellW + 1,
@@ -567,11 +573,19 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             // 前进速度由响度驱动：高潮时飞驰，平缓时近乎悬停。
             val pulse = beatPulse()
             val drive = (delayedRms * 9f + delayedPeak * 1.5f).coerceIn(0f, 1f)
-            phase += frameDeltaSeconds() * (.10f + drive * .65f + pulse * .12f)
+            phase += frameDeltaSeconds() * (.10f + drive * .65f + pulse * .30f)
             val cx = width / 2f
             val cy = height * .46f
             travelPaths.forEach(Path::rewind)
-            for (i in 0 until 180) {
+            val nowMs = SystemClock.uptimeMillis()
+            travelBursts.removeAll { it.startedAt + 650L <= nowMs }
+            val beatAt = pcmClock.beatAtNs
+            val newBeat = beatAt != 0L && beatAt != lastTravelBeat && pulse > 0f
+            if (newBeat) lastTravelBeat = beatAt
+            var beatBurstPending = newBeat && nowMs - lastBeatBurstMs >= 600L && travelBursts.size < 12
+            val offset = if (beatBurstPending) travelRandom.nextInt(180) else 0
+            for (step in 0 until 180) {
+                val i = (step + offset) % 180
                 val progress = (i * .6180339f + phase * .24f) % 1f
                 val previous = travelPrevious[i]
                 if (previous >= 0f && progress < previous) {
@@ -588,8 +602,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val x = cx + rayX * depth
                 val y = cy + rayY * depth
                 // 频带能量越大尾迹越长、粒子越大，直接反映音频起伏。
-                // 更短的彗尾：随能量伸长，但始终比旧版收窄。
-                val tailStretch = .015f + depth * (.045f + energy * .28f + drive * .10f + pulse * .025f)
+                val tailStretch = .015f + depth * (.045f + energy * .28f + drive * .10f + pulse * .08f)
                 val tailDepth = (depth - tailStretch).coerceAtLeast(.015f)
                 val tailX = cx + rayX * tailDepth
                 val tailY = cy + rayY * tailDepth
@@ -622,28 +635,31 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     tail.lineTo(segmentX + dy / length * half, segmentY - dx / length * half)
                 }
                 tail.close()
-                if (previous >= 0f && previous < travelThreshold[i] && progress >= travelThreshold[i] &&
-                    !travelExploded[i] && travelBursts.size < 12 &&
-                    travelRandom.nextFloat() < .25f + pulse * .15f) {
+                val beatBurst = beatBurstPending && previous >= 0f && progress in .35f..0.8f && !travelExploded[i]
+                val randomBurst = previous >= 0f && previous < travelThreshold[i] && progress >= travelThreshold[i] &&
+                    !travelExploded[i] && travelRandom.nextFloat() < .25f
+                if ((beatBurst || randomBurst) && travelBursts.size < 12) {
                     // The explosion is anchored ahead of the moving head, not at the end of its path.
                     travelBursts += TravelBurst(x + dx / length * size * 2f,
                         y + dy / length * size * 2f, max(size, dp(1f)), group, SystemClock.uptimeMillis())
                     travelExploded[i] = true
+                    if (beatBurst) {
+                        beatBurstPending = false
+                        lastBeatBurstMs = nowMs
+                    }
                 }
                 if (!travelExploded[i]) {
                     travelPaths[group].addPath(tail)
                     drawSphere(c, x, y, size, group, drive)
                 }
             }
-            val nowMs = SystemClock.uptimeMillis()
-            travelBursts.removeAll { it.startedAt + 650L <= nowMs }
             travelPaths.indices.forEach { group ->
                 // 在原有蓝绿黄基础上补充橙、淡紫、淡红和淡青，保持柔和不发白。
                 val colors = listOf(205f to .68f, 145f to .58f, 48f to .62f,
                     27f to .68f, 270f to .38f, 350f to .42f, 178f to .48f)
                 val colorIndex = (group + (phase * .35f).toInt() % colors.size + colors.size) % colors.size
                 val (hue, saturation) = colors[colorIndex]
-                paint.alpha = (10 + group * 8 + (drive * 40).toInt()).coerceIn(0, 255)
+                paint.alpha = (10 + group * 8 + (drive * 40 + pulse * 65).toInt()).coerceIn(0, 255)
                 paint.color = Color.HSVToColor(floatArrayOf(hue, saturation, .95f))
                 c.drawPath(travelPaths[group], paint)
             }

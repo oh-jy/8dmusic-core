@@ -47,7 +47,7 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                         .sortedWith(compareBy({ it.room }, { it.name }))
                     pickOption(t("space.choose"), all.map { item ->
                         val index = SPACE_PRESETS.indexOfFirst { it.name == item.name }
-                        "${if (index >= 0) AppLanguage.preset(this@spaceSettingsCard, index) else item.name} · ${item.room.toInt()}${t("unit.meters")}" },
+                        "${if (index >= 0) AppLanguage.preset(this@spaceSettingsCard, index) else item.name.replaceFirst("标准绕头 · ", "标准模式 · ")} · ${item.room.toInt()}${t("unit.meters")}" },
                         all.indexOf(preset), twoColumns = true) {
                         preset = all[it]; applyPreset()
                     }
@@ -145,6 +145,7 @@ internal fun MainActivity.sliderGroup(definitions: List<j5i.spatial8d.core.Slide
             group.addView(row)
             val slider = SeekBar(this).apply {
                 ThemeUi.configureSeekBar(this, palette)
+                contentDescription = t("slider.${definition.key}")
                 max = ((definition.max - definition.min) * 10.0.pow(definition.digits)).roundToInt()
                 progress = ((initialValue - definition.min) * 10.0.pow(definition.digits)).roundToInt()
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -235,6 +236,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
             transformBody.addView(pitchRow)
             pitchSlider = SeekBar(this@transformCard).apply {
                 ThemeUi.configureSeekBar(this, palette)
+                contentDescription = t("pitch")
                 max = 24
                 progress = (transform.semi.roundToInt() + 12).coerceIn(0, 24)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -292,6 +294,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
             })
             speedSlider = SeekBar(this@transformCard).apply {
                 ThemeUi.configureSeekBar(this, palette)
+                contentDescription = t("speed")
                 max = 30
                 progress = ((transform.speed - 0.5) / 0.05).roundToInt()
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -318,6 +321,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
             })
             denoiseSlider = SeekBar(this@transformCard).apply {
                 ThemeUi.configureSeekBar(this, palette)
+                contentDescription = t("denoise")
                 max = 100
                 progress = transform.denoiseLevel
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -344,6 +348,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
             claritySlider = SeekBar(this@transformCard).apply {
                 tag = "localOnly"
                 ThemeUi.configureSeekBar(this, palette)
+                contentDescription = t("sound.clarity")
                 max = 100
                 progress = transform.clarityLevel
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {

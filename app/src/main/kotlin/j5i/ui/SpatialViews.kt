@@ -212,22 +212,25 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         val dynamicRange = (energyPeak - energyBaseline).coerceAtLeast(0.015)
         val intensity = ((smoothEnergy - energyBaseline) / dynamicRange).coerceIn(0.0, 1.0)
         val nowMs = SystemClock.uptimeMillis()
+        val beatAt = pcmClock.beatAtNs
+        val beatAge = System.nanoTime() - beatAt
+        val beatPulse = if (playing && beatAt != 0L && beatAge in 0..300_000_000L)
+            1.0 - beatAge / 300_000_000.0 else 0.0
         stars.forEachIndexed { index, star ->
             // 每颗星的生灭周期和相位独立，不使用整片星空的统一随机换位或闪烁阈值。
             val age = (now / star[8].toDouble() + star[7].toDouble()) % 1.0
             val envelope = sin(age * Math.PI).pow(1.8)
-            val twinkle = (sin(now * star[4] * (1.0 + intensity) + star[3]) + 1.0) * 0.5
+            val twinkle = (sin(now * star[4] * (1.0 + intensity * 1.7) + star[3]) + 1.0) * 0.5
             paint.color = starColor
-            paint.alpha = (envelope * (45 + twinkle * 100 + intensity * 70)).toInt().coerceAtMost(210)
+            paint.alpha = starAlpha(envelope, twinkle, intensity, beatPulse)
             val travel = (now * star[6] + star[7]) % 1.0
             val x = ((star[0] + travel) % 1f) * w
             val y = ((star[1] + travel * 0.37f + sin(now * 0.23 + star[5]) * 0.035f) % 1f) * h
             c.drawCircle(x.toFloat(), y.toFloat(),
-                (star[2] * (1f + intensity * 0.5f)).toFloat(), paint)
+                (star[2] * (1f + intensity * 0.5f + beatPulse * 0.35f)).toFloat(), paint)
         }
         val meteorLimit = 1
-        val beatAge = System.nanoTime() - pcmClock.beatAtNs
-        val beatMeteor = pcmClock.beatAtNs != 0L && beatAge in 0..180_000_000L
+        val beatMeteor = beatAt != 0L && beatAge in 0..180_000_000L
         val responsiveMeteor = intensity > 0.82 || beatMeteor
         if (playing && meteors.size < meteorLimit &&
             (nowMs >= nextMeteorAt || (responsiveMeteor && nowMs - lastMeteorAt >= 900L))) {

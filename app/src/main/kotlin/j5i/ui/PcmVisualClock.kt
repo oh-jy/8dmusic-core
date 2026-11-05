@@ -5,6 +5,11 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.sqrt
 
+internal fun starAlpha(envelope: Double, twinkle: Double, intensity: Double, pulse: Double): Int {
+    val glow = envelope * (28.0 + twinkle * 130.0 + intensity * 75.0)
+    return (glow + pulse * (55.0 + envelope * 80.0)).toInt().coerceIn(0, 255)
+}
+
 /** 所有 PCM 动效共用同一延迟队列，避免顶部和可视化各自积压不同的音频历史。 */
 internal class BeatDetector {
     private var average = 0.0

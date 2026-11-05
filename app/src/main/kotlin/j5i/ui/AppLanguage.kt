@@ -182,6 +182,8 @@ object AppLanguage {
         "status.ready" to e("已就绪，可播放", "已就緒，可播放", "Ready to play"),
         "status.auto.next" to e("自动续播", "自動續播", "Auto next"),
         "playlist" to e("播放列表", "播放清單", "Playlist"),
+        "edit.metadata" to e("编辑歌曲信息", "編輯歌曲資訊", "Edit song information"),
+        "seek.position" to e("播放进度", "播放進度", "Playback position"),
         "playlist.filter" to e("过滤：歌名 / 歌手 / 专辑", "篩選：歌名 / 歌手 / 專輯", "Filter: title / artist / album"),
         "playlist.all" to e("全部", "全部", "All"),
         "playlist.favorites" to e("收藏", "收藏", "Favorites"),
@@ -245,7 +247,7 @@ object AppLanguage {
 
     private val presetNames = listOf(
         e("原始音频 · 直通", "原始音訊 · 直通", "Original audio · Passthrough"),
-        e("标准绕头 · 默认", "標準繞頭 · 預設", "Standard orbit · Default"),
+        e("标准模式 · 默认", "標準模式 · 預設", "Standard mode · Default"),
         e("室内客厅 · 宽场", "室內客廳 · 寬場", "Living room · Wide"),
         e("贴身耳语 · 小房间", "貼身耳語 · 小房間", "Close whisper · Small room"),
         e("舞台前排 · 现场", "舞台前排 · 現場", "Front row · Live"),
