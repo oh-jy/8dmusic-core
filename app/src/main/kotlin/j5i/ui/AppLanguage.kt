@@ -110,6 +110,7 @@ object AppLanguage {
         "pitch.choose" to e("选择变声风格 · 从原声开始", "選擇變聲風格 · 從原聲開始", "Choose pitch preset · start from original"),
         "pitch" to e("变声", "變聲", "Pitch"),
         "original" to e("原声", "原聲", "Original"),
+        "label.default" to e("默认", "預設", "Default"),
         "semitone" to e("半音", "半音", "semitones"),
         "reverse" to e("倒放", "倒放", "Reverse"),
         "reverse.hint" to e("从结尾向开头播放", "從結尾向開頭播放", "Play from end to beginning"),

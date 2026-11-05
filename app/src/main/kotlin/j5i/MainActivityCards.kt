@@ -193,7 +193,7 @@ internal fun MainActivity.transformCard(): LinearLayout {
                 layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     val options = interleavedPitchOptions(PITCH_PRESETS)
-                    pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.name, it.semi) },
+                    pickOption(t("pitch.choose"), options.map { formatPitchLabel(it.semi) },
                         options.indexOfFirst { it.semi == transform.semi }, twoColumns = true) {
                         transform = transform.copy(semi = options[it].semi); applyTransform(); refreshAll()
                     }
@@ -544,11 +544,12 @@ internal fun MainActivity.semiName(semi: Double): String = when (semi) {
         else -> "${if (semi > 0) "+" else ""}${semi.toInt()}"
     }
 
-internal fun MainActivity.formatPitchLabel(name: String, semi: Double): String =
-        "${AppLanguage.pitch(this, semi)} · ${if (semi > 0) "+" else ""}${semi.toInt()} ${t("semitone")}"
+internal fun MainActivity.formatPitchLabel(semi: Double): String =
+        if (semi == 0.0) "${t("original")} · ${t("label.default")}" else
+            "${AppLanguage.pitch(this, semi)} · ${if (semi > 0) "+" else ""}${semi.toInt()} ${t("semitone")}"
 
 internal fun MainActivity.pitchPickerLabel(): String = PITCH_PRESETS.firstOrNull { it.semi == transform.semi }
-        ?.let { formatPitchLabel(it.name, it.semi) }
+        ?.let { formatPitchLabel(it.semi) }
         ?: "${t("preset.custom")} · ${if (transform.semi > 0) "+" else ""}${transform.semi.toInt()} ${t("semitone")}"
 
     /** 用户点击“退出”时彻底停掉音频链路，否则前台服务会让应用继续驻留后台。 */

@@ -36,6 +36,9 @@ private const val SIN_T = 0.4067f
 private const val COS_T = 0.9135f
 private const val FRAME_DELAY_MS = 33L
 
+internal fun spatialRingMaxRadius(width: Float, sideLabelWidth: Float): Float =
+    (width / 2f - sideLabelWidth - 8f).coerceAtLeast(0f)
+
 abstract class AnimatedCanvasView internal constructor(context: Context) : View(context) {
     private var animationScheduled = false
     private val visibleBounds = Rect()
@@ -164,8 +167,16 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         drawSky(canvas, w, h, now)
         val elevMax = min(80.0, max(0.0, p.elev)) * Math.PI / 180.0
         val vSpan = (SIN_T + COS_T * sin(elevMax)).toFloat()
+        paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        paint.textSize = 12f
+        val leftLabel = t("left")
+        val rightLabel = t("right")
+        val leftWidth = paint.measureText(leftLabel)
+        val rightWidth = paint.measureText(rightLabel)
+        // Reserve space for the widest translated label and a gap outside the orbit.
+        val maxRadius = spatialRingMaxRadius(w, max(leftWidth, rightWidth))
         val r = (min(w * 0.5f - 3f, (h * 0.5f - 3f) / max(0.45f, vSpan)) * 1.12f)
-            .coerceIn(0f, (w * 0.5f - 3f).coerceAtLeast(0f))
+            .coerceIn(0f, maxRadius)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.4f
         paint.color = if (dark) 0xb8becfe4.toInt() else 0xc7445871.toInt()
@@ -179,8 +190,8 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         paint.color = if (dark) 0xe0c6d2e2.toInt() else 0xeb374558.toInt()
         canvas.drawText(t("front"), cx, 12f, paint)
         canvas.drawText(t("back"), cx, h - 2f, paint)
-        canvas.drawText(t("left"), 7f, cy + 4f, paint)
-        canvas.drawText(t("right"), w - 7f, cy + 4f, paint)
+        canvas.drawText(leftLabel, 3f + leftWidth / 2f, cy + 4f, paint)
+        canvas.drawText(rightLabel, w - 3f - rightWidth / 2f, cy + 4f, paint)
         val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0)
         // 球体、拖尾和扩散外圈统一缩小；绕行轨道独立放大以避开人头像。
         val sourceR = r / (1.0 + p.depth.coerceIn(0.0, 100.0) / 100.0).toFloat() * 0.68f
