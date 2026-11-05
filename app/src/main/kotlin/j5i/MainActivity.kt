@@ -173,7 +173,7 @@ private var lastCarMode = false
 private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private lateinit var transportRow: LinearLayout
     private lateinit var playerBar: LinearLayout
-    private lateinit var themeButton: Button
+    private lateinit var themeButton: TextView
     private lateinit var exportButton: Button
     private lateinit var disc: ImageView
     private lateinit var modeTextView: TextView
@@ -538,7 +538,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             if (view is ViewGroup) for (i in 0 until view.childCount) tintIcons(view.getChildAt(i))
         }
         if (::playerBar.isInitialized) tintIcons(playerBar)
-        if (::themeButton.isInitialized) themeButton.text = when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }
+        if (::themeButton.isInitialized) {
+            themeButton.text = themeGlyph()
+            themeButton.contentDescription = themeLabel()
+        }
         tint(root, palette.text)
         for (i in 0 until root.childCount) {
             val child = root.getChildAt(i)
@@ -1401,6 +1404,24 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     }
                     setOnClickListener { showInfoSheet() }
                 })
+            // 主题与语言收纳为纯图标，和说明入口并列，给右侧主导航让出空间。
+            fun icon(glyph: String, desc: String, action: () -> Unit) =
+                ThemeUi.text(this@MainActivity, glyph, 17f, palette, role = ThemeUi.ROLE_SUB).apply {
+                    gravity = Gravity.CENTER
+                    contentDescription = desc
+                    layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 30f), ThemeUi.dp(this@MainActivity, 30f)).apply {
+                        leftMargin = ThemeUi.dp(this@MainActivity, 2f)
+                    }
+                    setOnClickListener { action() }
+                }
+            themeButton = icon(themeGlyph(), themeLabel()) {
+                // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
+                themeMode = (themeMode + 1) % 3
+                dark = resolveDark()
+                refreshTheme()
+            }
+            addView(themeButton)
+            addView(icon("A", t("language")) { showLanguagePicker() })
             })
             addView(ThemeUi.text(this@MainActivity, t("app.subtitle"), 10f, palette, role = ThemeUi.ROLE_FAINT))
         }.apply {
@@ -1422,22 +1443,12 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         }
         bar.addView(fmButton)
         bar.addView(navButton(t("driving")) { showDrivingMode() })
-        themeButton = navButton(when (themeMode) { 0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system") }) {
-            // 三态循环：深色 → 浅色 → 跟随系统 → 深色。
-            themeMode = (themeMode + 1) % 3
-            dark = resolveDark()
-            refreshTheme()
-        }
-        themeButton.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply { leftMargin = ThemeUi.dp(this@MainActivity, 3f) }
-        }
-        bar.addView(themeButton)
-        bar.addView(navButton(t("language")) { showLanguagePicker() }.apply {
-            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@MainActivity, 30f)).apply {
-                leftMargin = ThemeUi.dp(this@MainActivity, 3f)
-            }
-        })
         return bar
+    }
+
+    private fun themeGlyph() = when (themeMode) { 0 -> "☾"; 1 -> "☀"; else -> "◐" }
+    private fun themeLabel() = when (themeMode) {
+        0 -> t("theme.dark"); 1 -> t("theme.light"); else -> t("theme.system")
     }
 
     private fun showLanguagePicker() {

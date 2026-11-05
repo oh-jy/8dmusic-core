@@ -36,7 +36,7 @@ android {
         targetSdk = 34
         // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.7.5"
+        versionName = "2.7.6"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
