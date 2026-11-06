@@ -191,7 +191,7 @@ internal fun MainActivity.refreshAll() {
             slider.progress = ((value - definition.min) * 10.0.pow(definition.digits)).roundToInt()
             sliderValues[key]?.text = formatValue(key, value).removeSuffix(definition.unit) + when (key) {
                 "period", "rt60" -> t("unit.seconds")
-                "room" -> t("unit.meters")
+                "room", "sourceDistance" -> t("unit.meters")
                 else -> ""
             }
         }
@@ -225,8 +225,9 @@ internal fun MainActivity.refreshAll() {
                 btn.text = "${formatSpeedShort(v)}×"
                 btn.gravity = Gravity.CENTER
                 btn.setLineSpacing(0f, 0.85f)
-                btn.tag = if (transform.speed == v) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
-                ThemeUi.applyButton(btn, palette)
+                btn.setTextColor(if (transform.speed == v) palette.accent else palette.faint)
+                ((btn.parent as? LinearLayout)?.getChildAt(0))?.setBackgroundColor(
+                    if (transform.speed == v) palette.accent else palette.faint)
             }
         }
         pitchTicks.forEachIndexed { index, button ->
@@ -527,6 +528,7 @@ internal fun MainActivity.updateParameter(key: String, value: Double) {
             "period" -> preset.copy(period = value)
             "elev" -> preset.copy(elev = value)
             "depth" -> preset.copy(depth = value)
+            "sourceDistance" -> preset.copy(sourceDistance = value)
             "phase" -> preset.copy(phase = value)
             "room" -> preset.copy(room = value)
             "wet" -> preset.copy(wet = value)
@@ -538,7 +540,7 @@ internal fun MainActivity.updateParameter(key: String, value: Double) {
         }
         val matched = matchPresetIn(SPACE_PRESETS + customPresets, preset.period, preset.elev,
             preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-            preset.direction, preset.width, preset.raw, preset.trajectory)
+            preset.direction, preset.width, preset.raw, preset.trajectory, preset.sourceDistance)
         if (matched != preset.name) {
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
@@ -557,6 +559,7 @@ internal fun MainActivity.parameter(key: String): Double = when (key) {
         "period" -> preset.period
         "elev" -> preset.elev
         "depth" -> preset.depth
+        "sourceDistance" -> preset.sourceDistance
         "phase" -> preset.phase
         "room" -> preset.room
         "wet" -> preset.wet

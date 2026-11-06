@@ -83,7 +83,7 @@ class PipelineTest {
         assertEquals("35 °", formatValue("elev", 35.0))
         val preset = DEFAULT_SPACE_PRESET
         assertEquals(preset.name, matchPreset(preset.period, preset.elev, preset.depth,
-            preset.room, preset.wet, preset.rt60, preset.phase, preset.direction, preset.width, preset.raw))
+            preset.room, preset.wet, preset.rt60, preset.phase, preset.direction, preset.width, preset.raw, preset.trajectory, preset.sourceDistance))
     }
 }
 

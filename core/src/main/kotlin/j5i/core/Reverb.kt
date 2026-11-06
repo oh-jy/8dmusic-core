@@ -190,6 +190,10 @@ class RealtimeReverb(var sr: Double) {
 
     private var dryEnv = 0.0
     private var wetEnv = 0.0
+    private var wetLeftEnv = 0.0
+    private var wetRightEnv = 0.0
+    private var wetLeftBalance = 1.0
+    private var wetRightBalance = 1.0
     private var autoGain = 1.0
     private var envA = 0.0
     private var gainA = 0.0
@@ -251,6 +255,10 @@ class RealtimeReverb(var sr: Double) {
         ah4 = 0.0
         dryEnv = 0.0
         wetEnv = 0.0
+        wetLeftEnv = 0.0
+        wetRightEnv = 0.0
+        wetLeftBalance = 1.0
+        wetRightBalance = 1.0
         autoGain = 1.0
     }
 
@@ -280,6 +288,16 @@ class RealtimeReverb(var sr: Double) {
             var l = left.process(x)
             var r = right.process(x)
 
+            wetLeftEnv = wetLeftEnv * ea + l * l * (1.0 - ea)
+            wetRightEnv = wetRightEnv * ea + r * r * (1.0 - ea)
+            if (wetLeftEnv > 1e-9 && wetRightEnv > 1e-9) {
+                val mean = (wetLeftEnv + wetRightEnv) * 0.5
+                val leftTarget = min(2.0, max(0.5, sqrt(mean / wetLeftEnv)))
+                val rightTarget = min(2.0, max(0.5, sqrt(mean / wetRightEnv)))
+                wetLeftBalance = wetLeftBalance * ga + leftTarget * (1.0 - ga)
+                wetRightBalance = wetRightBalance * ga + rightTarget * (1.0 - ga)
+            }
+
             dryEnv = dryEnv * ea + x * x * (1.0 - ea)
             val wp = (l * l + r * r) * 0.5
             wetEnv = wetEnv * ea + wp * (1.0 - ea)
@@ -288,8 +306,8 @@ class RealtimeReverb(var sr: Double) {
                 autoGain = autoGain * ga + want * (1.0 - ga)
             }
             val g = min(2.0, max(0.35, autoGain)) * target
-            wetL[i] = l * g
-            wetR[i] = r * g
+            wetL[i] = l * g * wetLeftBalance
+            wetR[i] = r * g * wetRightBalance
         }
     }
 }

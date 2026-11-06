@@ -236,8 +236,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var phase = 0f
         private val spectrum = DoubleArray(256)
         private val spectrogramRows = ArrayDeque<IntArray>()
-        private var spectrumSequence = 0L
-        private var spectrogramSequence = 0L
+        private var spectrogramGeneration = pcmClock.generation
+        private var lastSpectrogramAt = 0L
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private data class TravelBurst(val x: Float, val y: Float, val radius: Float, val group: Int, val startedAt: Long)
@@ -281,8 +281,6 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 clockGeneration = pcmClock.generation
                 visualQueue.clear()
                 delayedSpectrum.fill(0.0)
-                spectrogramRows.clear()
-                spectrogramSequence = spectrumSequence
                 travelBursts.clear()
                 travelPrevious.fill(-1f)
                 travelExploded.fill(false)
@@ -333,7 +331,21 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 smoothPeak = maxOf(smoothPeak * 0.90f, peak.toFloat())
             }
             analyze()
-            spectrumSequence++
+            if (spectrogramGeneration != pcmClock.generation) {
+                spectrogramGeneration = pcmClock.generation
+                spectrogramRows.clear()
+                lastSpectrogramAt = 0L
+            }
+            if (startedAt - lastSpectrogramAt >= 100_000_000L) {
+                val row = IntArray(128)
+                for (x in row.indices) {
+                    val level = spectrum[x * 2].toFloat()
+                    row[x] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
+                }
+                spectrogramRows.addFirst(row)
+                while (spectrogramRows.size > 96) spectrogramRows.removeLast()
+                lastSpectrogramAt = startedAt
+            }
             postInvalidateOnAnimation()
             PerfTrace.sample("visual.analyzeImmediateNs", System.nanoTime() - startedAt)
         }
@@ -397,7 +409,6 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val normalized = ((db + 70) / 70).coerceIn(0.0, 1.0)
                 spectrum[band] = sqrt(normalized)
             }
-            // 声谱在绘制线程消费最新频谱，不在 PCM 回调里移动历史槽位。
         }
 
         override fun onDraw(c: Canvas) {
@@ -511,15 +522,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private fun drawSpectrogram(c: Canvas) {
             label(c, AppLanguage.text(context, "visual.spectrogram"), height.toFloat())
             val top = dp(30f)
-            if (spectrumSequence != spectrogramSequence) {
-                val row = IntArray(128)
-                for (x in row.indices) {
-                    val level = spectrum[x * 2].toFloat()
-                    row[x] = Color.HSVToColor(floatArrayOf(240f - level * 240f, .85f, .12f + level * .88f))
-                }
-                spectrogramRows.addFirst(row)
-                while (spectrogramRows.size > 96) spectrogramRows.removeLast()
-                spectrogramSequence = spectrumSequence
+            if (spectrogramGeneration != pcmClock.generation) {
+                spectrogramGeneration = pcmClock.generation
+                spectrogramRows.clear()
+                lastSpectrogramAt = 0L
             }
             val cellW = width / 128f
             val cellH = (height - top) / 96f

@@ -28,8 +28,9 @@ import android.util.Log
 class BiliMusic(private val activity: Activity) {
     companion object {
         private const val PROVIDER = "bilibili"
-        private const val UA =
-            "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36"
+        // The web DASH CDN rejects Android browser UAs even for otherwise accessible tracks.
+        private const val CDN_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         private const val REFERER = "https://www.bilibili.com/"
         private const val LOGIN_URL =
             "https://passport.bilibili.com/login?goto=https%3A%2F%2Fwww.bilibili.com%2F"
@@ -323,6 +324,7 @@ class BiliMusic(private val activity: Activity) {
                 // 个别视频只有一条非 mp4a 标识的音频轨，仍尝试交给系统解码器。
                 (0 until tracks.length()).map { tracks.getJSONObject(it) }
             }
+        Log.i("8DBili", "audio tracks=" + choices.joinToString { "id=${it.optInt("id")} bandwidth=${it.optInt("bandwidth")} codec=${it.optString("codecs").substringBefore('.') }" })
         return choices.flatMap { track ->
             listOf(track.optString("baseUrl")) +
                 (track.optJSONArray("backupUrl")?.let { backup ->
@@ -340,7 +342,7 @@ class BiliMusic(private val activity: Activity) {
                 connectTimeout = 10_000
                 readTimeout = 20_000
                 instanceFollowRedirects = true
-                setRequestProperty("User-Agent", UA)
+                setRequestProperty("User-Agent", CDN_UA)
                 setRequestProperty("Referer", REFERER)
                 setRequestProperty("Accept", "*/*")
                 MusicSourceApi.sessionCookie(activity, PROVIDER).takeIf { it.isNotEmpty() }

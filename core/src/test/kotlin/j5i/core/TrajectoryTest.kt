@@ -45,7 +45,7 @@ class TrajectoryTest {
         assertEquals(0, DEFAULT_SPACE_PRESET.trajectory)
         for (p in SPACE_PRESETS) {
             assertEquals(p.name, matchPresetIn(SPACE_PRESETS, p.period, p.elev, p.depth, p.room,
-                p.wet, p.rt60, p.phase, p.direction, p.width, p.raw, p.trajectory))
+                p.wet, p.rt60, p.phase, p.direction, p.width, p.raw, p.trajectory, p.sourceDistance))
         }
     }
 }

@@ -18,7 +18,8 @@ data class SpacePreset(
     val direction: Double,
     val width: Double = 100.0,
     val raw: Boolean = false,
-    val trajectory: Int = 0
+    val trajectory: Int = 0,
+    val sourceDistance: Double = 1.0
 )
 
 data class SliderDef(
@@ -51,19 +52,20 @@ private fun mk(
     direction: Double,
     width: Double = 100.0,
     raw: Boolean = false,
-    trajectory: Int = 0
-) = SpacePreset(name, note, period, elev, depth, room, wet, rt60, phase, direction, width, raw, trajectory)
+    trajectory: Int = 0,
+    sourceDistance: Double = 1.0
+) = SpacePreset(name, note, period, elev, depth, room, wet, rt60, phase, direction, width, raw, trajectory, sourceDistance)
 
 val SPACE_PRESETS: List<SpacePreset> = listOf(
     mk("原始音频 · 直通", "不做 HRTF、不加混响，左右声道保持原始素材，用来 A/B 对比。", 8.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 1.0, 100.0, true),
-    mk("标准绕头 · 默认", "最通用的 8 秒一圈，头前上方掠过；加强前后耳廓线索，先听这个判断素材是否合适。", 8.0, 35.0, 45.0, 10.0, 18.0, 1.2, 0.0, 1.0),
+    mk("标准绕头 · 默认", "最通用的 8 秒一圈，头前上方掠过；加强前后耳廓线索，先听这个判断素材是否合适。", 8.0, 35.0, 45.0, 10.0, 18.0, 1.2, 0.0, 1.0, sourceDistance = 3.0),
     mk("室内客厅 · 宽场", "15 米居家客厅空间，混响短、空间开阔；适合日常听歌与人声播客。", 10.0, 35.0, 40.0, 15.0, 22.0, 1.0, 0.0, 1.0, trajectory = 1),
     mk("贴身耳语 · 小房间", "人声贴耳、几乎没有尾巴；空间极小，适合 ASMR / 睡前 / 独白。", 14.0, 12.0, 10.0, 4.0, 8.0, 0.5, 0.0, 1.0, 90.0),
     mk("舞台前排 · 现场", "转得偏快、反射早，像站在乐手前面听；适合摇滚 / 乐队现场。", 4.0, 30.0, 25.0, 16.0, 24.0, 1.0, 0.0, 1.0, 115.0),
     mk("音乐厅包厢 · 包围", "中等厅堂、尾巴 1.8s，人声有明确包围感但字头仍清楚。", 10.0, 45.0, 60.0, 26.0, 34.0, 1.8, 0.0, 1.0, 105.0, trajectory = 1),
     mk("大教堂穹顶 · 极空", "50 米空间 + 3.2s 尾巴，声音被拉长拉远；适合氛围 / 合唱 / 空灵段落。", 14.0, 60.0, 75.0, 50.0, 52.0, 3.2, 0.0, 1.0, 110.0),
     mk("慢速漂浮 · 迷幻", "缓慢平滑地改变方位、上下和远近，适合后摇 / 电子 / 助眠。", 18.0, 50.0, 65.0, 18.0, 30.0, 1.6, 0.0, 1.0, 100.0, trajectory = 4),
-    mk("极速环绕 · 眩晕", "1 秒一圈，左右耳高速交替；适合短片段特效，不建议整首长听。", 1.0, 55.0, 35.0, 9.0, 16.0, 0.7, 0.0, 1.0, 130.0),
+    mk("极速环绕 · 眩晕", "3 秒一圈，左右耳快速交替；适合短片段特效。", 3.0, 55.0, 35.0, 9.0, 16.0, 0.7, 0.0, 1.0, 130.0),
     mk("头顶升降 · 垂直", "声像在固定方位大幅上下摆动，形成升降感。", 6.0, 80.0, 20.0, 8.0, 20.0, 1.0, 0.0, 1.0, 95.0, trajectory = 2),
     mk("地下车库 · 近混响", "近反射密、尾巴短，低频和人声周围有明显墙面感。", 7.0, 35.0, 35.0, 20.0, 48.0, 1.4, 0.0, -1.0, 110.0, trajectory = 1),
     mk("山谷回声 · 远反射", "50 米开阔空间、稀疏延迟和长尾，远近落差明显。", 16.0, 55.0, 70.0, 50.0, 46.0, 3.8, 0.0, 1.0, 120.0, trajectory = 4),
@@ -89,7 +91,8 @@ const val CUSTOM_SPACE = "自定义"
 val SLIDERS: List<SliderDef> = listOf(
     SliderDef("period", "环绕周期", 1.0, 20.0, " 秒", 1),
     SliderDef("elev", "上下幅度", 0.0, 80.0, " °", 0),
-    SliderDef("depth", "远近距离", 0.0, 100.0, " %", 0),
+    SliderDef("sourceDistance", "声源距离", 1.0, 5.0, " 米", 1),
+    SliderDef("depth", "远近幅度", 0.0, 100.0, " %", 0),
     SliderDef("phase", "起始相位", 0.0, 360.0, " °", 0),
     SliderDef("room", "空间大小", 3.0, 50.0, " 米", 0),
     SliderDef("wet", "混响强度", 0.0, 100.0, " %", 0),
@@ -100,6 +103,7 @@ val SLIDERS: List<SliderDef> = listOf(
 val PARAM_INFO: List<ParamInfo> = listOf(
     ParamInfo("period", "环绕周期", "1–20 秒一圈。改小 = 转得更快。只改变左右耳能量/时间差交替的快慢，音色、响度都不变，是纯「运动速度」参数。"),
     ParamInfo("elev", "上下幅度", "0–80°。0° = 只在水平面绕圈；加大 = 耳廓陷波（3.2–9.8kHz 窄带）随仰角前后移动，出现「头顶掠过 / 沉到脚下」的感觉。只动那一小段高频，不改整体亮度。"),
+    ParamInfo("sourceDistance", "声源距离", "虚拟声源的距离基准：1 米保持原有声音，增大可降低直达声并提高环境声比例。数值用于调节，不代表经耳机校准的真实距离。"),
     ParamInfo("depth", "远近距离", "0% = 等距绕圈；加大 = 声源周期性退远再拉近。三件事同时变：①电平下降（100% 时最远处约 -18dB）②5kHz 以上被空气吸收（最多 -14dB，声音变暗）③直达声压低、混响占比抬高（干湿比落差约 12dB，这是人耳判断距离最硬的线索）。呼吸周期固定 8–16 秒（= 1.5 × 环绕周期），所以再慢的预设也能在一首歌里听出几个来回。"),
     ParamInfo("room", "空间大小", "3–50 米决定混响首反射时间（4m≈12ms / 32m≈93ms / 50m≈146ms）与尾音密度。加大 = 更空旷、反射更晚、尾巴更暗；直达声电平不变。"),
     ParamInfo("wet", "混响强度", "湿声比例。0% = 全干、贴脸但没空间；加大 = 包围感强，过头会发糊。"),
@@ -169,9 +173,10 @@ fun matchPreset(
     direction: Double,
     width: Double,
     raw: Boolean,
-    trajectory: Int = 0
+    trajectory: Int = 0,
+    sourceDistance: Double = 1.0
 ): String = matchPresetIn(
-    SPACE_PRESETS, period, elev, depth, room, wet, rt60, phase, direction, width, raw, trajectory
+    SPACE_PRESETS, period, elev, depth, room, wet, rt60, phase, direction, width, raw, trajectory, sourceDistance
 )
 
 fun matchPresetIn(
@@ -186,7 +191,8 @@ fun matchPresetIn(
     direction: Double,
     width: Double,
     raw: Boolean,
-    trajectory: Int = 0
+    trajectory: Int = 0,
+    sourceDistance: Double = 1.0
 ): String {
     for (p in presets) {
         if (
@@ -199,7 +205,7 @@ fun matchPresetIn(
             abs(p.phase - phase) < 0.51 &&
             p.direction == direction &&
             abs(p.width - width) < 0.51 &&
-            p.raw == raw && p.trajectory == trajectory
+            p.raw == raw && p.trajectory == trajectory && abs(p.sourceDistance - sourceDistance) < 0.051
         ) return p.name
     }
     return CUSTOM_SPACE

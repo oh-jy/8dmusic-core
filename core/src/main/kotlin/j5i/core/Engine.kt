@@ -11,6 +11,7 @@ class SpaceEngine(var sr: Double) {
 
     private var period = 8.0
     private var depth01 = 0.45
+    private var sourceDistance = 1.0
     private var rawBypass = false
 
     private var dryL = DoubleArray(0)
@@ -40,10 +41,12 @@ class SpaceEngine(var sr: Double) {
         direction: Double,
         widthPct: Double,
         raw: Boolean,
-        trajectory: Int = 0
+        trajectory: Int = 0,
+        sourceDistance: Double = 1.0
     ) {
         this.period = max(1.0, period)
         this.depth01 = min(1.0, max(0.0, depthPct / 100.0))
+        this.sourceDistance = sourceDistance.coerceIn(1.0, 5.0)
         this.rawBypass = raw
         bin.setParams(period, elevDeg, depthPct, phaseDeg, direction, widthPct, raw, trajectory)
     }
@@ -83,6 +86,7 @@ class SpaceEngine(var sr: Double) {
         rev.process(input, wetL, wetR, n)
 
         val d = depth01
+        val distance = (sourceDistance - 1.0) / 4.0
         val BLK = 64
         var i = 0
         while (i < n) {
@@ -99,8 +103,8 @@ class SpaceEngine(var sr: Double) {
                 val gd = gd0 + (gd1 - gd0) * u
                 val gw = gw0 + (gw1 - gw0) * u
                 val j = i + k
-                outL[j] = dryL[j] * gd + wetL[j] * gw
-                outR[j] = dryR[j] * gd + wetR[j] * gw
+                outL[j] = dryL[j] * gd * (1.0 - .35 * distance) + wetL[j] * gw * (1.0 + .4 * distance)
+                outR[j] = dryR[j] * gd * (1.0 - .35 * distance) + wetR[j] * gw * (1.0 + .4 * distance)
             }
             i += m
         }

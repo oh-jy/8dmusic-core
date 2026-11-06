@@ -97,7 +97,7 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                     }
                 }
             })
-            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "depth", "phase") }))
+            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "sourceDistance", "depth", "phase") }))
             parameterPanel.addView(ThemeUi.divider(this@spaceSettingsCard, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@spaceSettingsCard, 1f)).apply {
                     topMargin = ThemeUi.dp(this@spaceSettingsCard, 12f); bottomMargin = ThemeUi.dp(this@spaceSettingsCard, 9f)
@@ -313,22 +313,29 @@ internal fun MainActivity.transformCard(): LinearLayout {
             speedSlider.tag = "localOnly"
             transformBody.addView(speedSlider)
             val chips = ThemeUi.row(this@transformCard)
+            val speedButtons = mutableListOf<Button>()
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
-                chips.addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 48f), 1f).apply {
-                        leftMargin = ThemeUi.dp(this@transformCard, 3f)
-                    }
-                    textSize = 9f
+                chips.addView(LinearLayout(this@transformCard).apply {
+                    orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
-                    setLineSpacing(0f, 0.85f)
-                    setPadding(0, 0, 0, 0)
-                    setOnClickListener {
+                    addView(View(this@transformCard).apply {
+                        setBackgroundColor(palette.faint)
+                        layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@transformCard, 2f), ThemeUi.dp(this@transformCard, 3f))
+                    })
+                    addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×", role = ThemeUi.ROLE_TEXT) {
                         transform = transform.copy(speed = value)
                         applyTransform()
-                    }
+                        refreshAll()
+                    }.apply {
+                        textSize = 9f
+                        minHeight = 0; minimumHeight = 0
+                        setPadding(0, 0, 0, 0)
+                        speedButtons.add(this)
+                    })
+                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 28f), 1f)
                 })
             }
-            speedChipButtons = (0 until chips.childCount).map { chips.getChildAt(it) as Button }
+            speedChipButtons = speedButtons
             chips.tag = "localOnly"
             transformBody.addView(chips)
             denoiseLabel = ThemeUi.text(this@transformCard, "65%", 12f, palette, role = ThemeUi.ROLE_ACCENT)
@@ -483,13 +490,16 @@ internal fun MainActivity.curveCard(): LinearLayout {
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
 
 internal fun MainActivity.installPcmRenderer() {
+        var lastHistoryAt = 0L
         val render: (ByteArray, Int) -> Unit = { data, bytes ->
             val startedAt = System.nanoTime()
             visualizerView.pcmClock.accept(data, bytes)
             if (isViewReady(this@installPcmRenderer::visualization)) visualization.acceptPcm(data, bytes)
-            if (isViewReady(this@installPcmRenderer::visualizerView) && curvePanel == 1) visualizerView.accept(data, bytes)
-            if (drivingDialog?.isShowing == true) visualizerView.accept(data, bytes)
-            popupVisualizer?.accept(data, bytes)
+            val visible = curvePanel == 1 || drivingDialog?.isShowing == true || popupVisualizer != null
+            if (isViewReady(this@installPcmRenderer::visualizerView) && (visible || startedAt - lastHistoryAt >= 100_000_000L)) {
+                visualizerView.accept(data, bytes)
+                lastHistoryAt = startedAt
+            }
         PerfTrace.sample("visual.fanoutNs", System.nanoTime() - startedAt)
         }
         service?.player?.onPcm = render

@@ -222,10 +222,11 @@ internal fun MainActivity.restorePlaybackState() {
                     elev = state.getDouble("elev"), depth = state.getDouble("depth"), phase = state.getDouble("phase"),
                     direction = state.getDouble("direction"), width = state.getDouble("width"), room = state.getDouble("room"),
                     rt60 = state.getDouble("rt60"), wet = state.getDouble("wet"), raw = state.getBoolean("raw"),
-                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4))
+                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4),
+                    sourceDistance = state.optDouble("sourceDistance", 1.0).coerceIn(1.0, 5.0))
                 val all = SPACE_PRESETS + customPresets
                 val name = matchPresetIn(all, restored.period, restored.elev, restored.depth, restored.room,
-                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory)
+                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory, restored.sourceDistance)
                 all.firstOrNull { it.name == name } ?: restored
             } catch (_: Exception) {
                 DEFAULT_SPACE_PRESET
@@ -247,7 +248,7 @@ internal fun MainActivity.savePlaybackState() {
             put("period", preset.period); put("elev", preset.elev); put("depth", preset.depth)
             put("phase", preset.phase); put("direction", preset.direction); put("width", preset.width)
             put("room", preset.room); put("rt60", preset.rt60); put("wet", preset.wet); put("raw", preset.raw)
-            put("trajectory", preset.trajectory)
+            put("trajectory", preset.trajectory); put("sourceDistance", preset.sourceDistance)
             put("reverse", reverse); put("speed", transform.speed); put("semi", transform.semi); put("tape", transform.tape)
             put("denoise", transform.denoiseLevel)
         }.toString()).apply()
