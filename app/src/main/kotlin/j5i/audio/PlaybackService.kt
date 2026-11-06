@@ -427,7 +427,6 @@ class PlaybackService : Service() {
         decodeExecutor.shutdownNow()
         player.close()
         radio.stop()
-        radio.stopRecording()
         val manager = getSystemService(AudioManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) manager.abandonAudioFocusRequest(focusRequest)
         else @Suppress("DEPRECATION") manager.abandonAudioFocus(focusListener)

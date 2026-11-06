@@ -344,6 +344,8 @@ class Lyrics(context: Context) {
         return score
     }
 
+    fun cancelPrefetch() { prefetchGeneration.incrementAndGet() }
+
     /** 后台串行预取整个曲库；仅自动任务受失败次数限制，手动搜索始终可用。 */
     fun prefetch(songs: List<MusicItem>) {
         val generation = prefetchGeneration.incrementAndGet()

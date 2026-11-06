@@ -53,7 +53,6 @@ import j5i.spatial8d.ui.WaveformView
 import j5i.spatial8d.ui.VisualizerView
 import com.j5i.spatial8d.HttpMediaDataSource
 import com.j5i.spatial8d.TsAdtsMediaDataSource
-import com.j5i.spatial8d.MicWavRecorder
 import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.RadioCatalog
 import j5i.spatial8d.core.RadioStation
@@ -194,9 +193,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private var stationListBody: LinearLayout? = null
     private var curvePanel = 0
     private var sourceSearchSeq = 0
-    private var recordingKind = ""
-    private var recordingPath = ""
-    private var recordingStartedAt = 0L
     private var fmDialog: Dialog? = null
     private var fmUnlocked = false
     private var sourceTapCount = 0
@@ -208,9 +204,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private var sourceStatusView: TextView? = null
     private var playlistDialog: PlaylistDialog? = null
     private var seekGuardUntil = 0L
-    private var micRecorder: MicWavRecorder? = null
     private lateinit var liveTimeline: LinearLayout
-    private lateinit var recordingLabel: TextView
     private lateinit var transformCardRoot: LinearLayout
     private var lastStateSavedAt = 0L
 
@@ -252,9 +246,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     }
     private val requestAudio = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) scanMusic() else toast("未授予音乐库权限，仍可通过“添加音频”选择文件")
-    }
-    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startMicRecording() else toast("没有麦克风录音权限，请到系统设置开启")
     }
     private val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -309,9 +300,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     override fun onDestroy() {
         main.removeCallbacks(prefetchLyrics)
-        service?.player?.stopRecording()
-        service?.radio?.stopRecording()
-        micRecorder?.stop()
         main.removeCallbacks(ticker)
         service?.controls = null
         service?.onTrackChanged = null
@@ -772,9 +760,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.text =
             if (!isLive && playing && statusLine == effectiveStatus)
                 playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
-        recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
-        recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
-        recordingLabel.setTextColor(0xffff5d5d.toInt())
         if (::liveTimeline.isInitialized) {
             seek.visibility = if (isLive) View.GONE else View.VISIBLE
             currentTime.visibility = if (isLive) View.GONE else View.VISIBLE
@@ -784,9 +769,10 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             (liveTimeline.getChildAt(1) as TextView).setTextColor(0xffff8a80.toInt())
         }
         if (::exportButton.isInitialized) {
-            exportButton.setImageResource(if (!isLive) R.drawable.ic_export else if (recordingKind == "playback") R.drawable.ic_record_stop else R.drawable.ic_record)
-            exportButton.imageTintList = ColorStateList.valueOf(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.controlText)
-            exportButton.contentDescription = if (!isLive) "导出当前音频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
+            exportButton.visibility = if (isLive) View.GONE else View.VISIBLE
+            exportButton.setImageResource(R.drawable.ic_export)
+            exportButton.imageTintList = ColorStateList.valueOf(palette.controlText)
+            exportButton.contentDescription = "导出当前音频"
         }
         if (::radioRefreshButton.isInitialized) radioRefreshButton.visibility = if (isLive) View.VISIBLE else View.GONE
         if (::favoriteButton.isInitialized) {
@@ -942,6 +928,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     private fun scheduleLyricsPrefetch() {
         main.removeCallbacks(prefetchLyrics)
+        if (!preferences.getBoolean("onlineLyrics", false)) return
         // 冷启动先完成恢复与当前歌词请求，再串行补曲库缓存，避免争抢首屏网络。
         main.postDelayed(prefetchLyrics, 8_000)
     }
@@ -952,7 +939,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     private fun load(item: MusicItem, autoplay: Boolean) {
         // 所有选歌、切歌和冷启动恢复共用同一条加载链路，旧代号回调全部丢弃。
-        if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
         if (::visualizerView.isInitialized) visualizerView.pcmClock.reset()
         val generation = ++loadGeneration
         ++radioGeneration
@@ -1544,6 +1530,20 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 }
             })
             addView(settingRow("A", t("language"), language) { dialog.dismiss(); showLanguagePicker() })
+            val onlineLyrics = preferences.getBoolean("onlineLyrics", false)
+            addView(settingRow("♫", t("lyrics.online"), if (onlineLyrics) t("lyrics.online.on") else t("lyrics.online.off")) {
+                preferences.edit().putBoolean("onlineLyrics", !onlineLyrics).apply()
+                if (onlineLyrics) {
+                    main.removeCallbacks(prefetchLyrics)
+                    lyrics.cancelPrefetch()
+                    ++lyricsGeneration
+                } else {
+                    scheduleLyricsPrefetch()
+                    if (!isLive) currentItem?.let { loadLyrics(it) }
+                }
+                dialog.dismiss()
+                showSettingsSheet()
+            })
         }
         dialog.show()
     }
@@ -2103,6 +2103,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         currentLyrics = null
         pushLyricsToVisualizer()
         if (::lyricsView.isInitialized) lyricsView.clear()
+        if (manualTitle == null && !preferences.getBoolean("onlineLyrics", false)) return
         val title = manualTitle ?: Lyrics.searchTitle(item.name, item.artist)
         main.postDelayed({
             if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) {
@@ -2370,16 +2371,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         position = ThemeUi.text(this, "00:00 / 00:00", 11f, palette, role = ThemeUi.ROLE_SUB)
         position.layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this, 76f), ViewGroup.LayoutParams.WRAP_CONTENT)
         modeTextView = ThemeUi.text(this, "", 11f, palette, role = ThemeUi.ROLE_SUB)
-        recordingLabel = ThemeUi.text(this, "", 10f, palette).apply {
-            setTextColor(0xffff5d5d.toInt()); visibility = View.GONE
-            setPadding(ThemeUi.dp(this@MainActivity, 6f), 0, 0, 0)
-        }
         sub.addView(position)
         sub.addView(modeTextView.apply {
             setPadding(ThemeUi.dp(this@MainActivity, 8f), 0, 0, 0)
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 56f), ViewGroup.LayoutParams.WRAP_CONTENT)
         })
-        sub.addView(recordingLabel)
         // 状态栏（含当前行歌词）独立成行，跟歌曲名左缘对齐，不再被时间/模式字段挤到右边。
         val statusTxt = ThemeUi.text(this, status.text.toString(), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
             tag = "playerStatus"
@@ -2404,8 +2400,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             visibility = View.GONE
             contentDescription = "重新连接当前电台"
             setOnClickListener {
-                if (recordingKind.isNotEmpty()) toast("请先停止录音，再重新连接电台")
-                else if (isLive && radioSources.isNotEmpty()) tryRadioSource(radioSourceIndex.coerceAtLeast(0))
+                if (isLive && radioSources.isNotEmpty()) tryRadioSource(radioSourceIndex.coerceAtLeast(0))
             }
         }
         meta.addView(radioRefreshButton)
@@ -2435,8 +2430,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             setPadding(ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 6f), ThemeUi.dp(this@MainActivity, 8f), ThemeUi.dp(this@MainActivity, 6f))
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 34f), ThemeUi.dp(this@MainActivity, 30f))
             setOnClickListener {
-                if (isLive) playerBar.findViewWithTag<TextView>("playerStatus")?.let(::togglePlaybackRecording)
-                else showExportSheet()
+                showExportSheet()
             }
         }
         meta.addView(exportButton)
@@ -2615,8 +2609,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     /** 用户点击“退出”时彻底停掉音频链路，否则前台服务会让应用继续驻留后台。 */
     private fun shutdownForExit() {
-        service?.player?.stopRecording()
-        service?.radio?.stopRecording()
         service?.radio?.stop()
         service?.stopLocal()
         try {
@@ -2764,7 +2756,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     private fun showExportSheet() {
         if (exportDialog?.isShowing == true) return
         if (exporting) { toast("正在导出，请等待完成"); return }
-        if (isLive) { toast("电台直播没有完整时间轴，请先录音再导出"); return }
+        if (isLive) { toast("电台直播不支持导出"); return }
         if (service?.player?.duration ?: 0.0 <= 0.0) { toast("请先加载音频"); return }
         val sheet = ThemeUi.showSheet(this, palette, "导出 WAV", subtitle = "无损音质 · 仅导出你拥有权利的本地音频") {
             fun destination(title: String, description: String, actionLabel: String, action: () -> Unit) = ThemeUi.row(this@MainActivity).apply {
@@ -2909,7 +2901,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 }, 160)
             }
         })
-        // 电台目录占据剩余空间，自定义流与录音固定底部，不再被目录推到屏外。
+        // 电台目录占据剩余空间，自定义流固定底部，不再被目录推到屏外。
         parent.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
         renderStations(body, stations)
         val footer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -2933,13 +2925,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 playCustom(input.text.toString())
             })
         })
-        details.addView(ThemeUi.button(this, palette,
-            if (recordingKind == "mic") "● 停止麦克风录音" else "● 麦克风录音") {
-            if (recordingKind == "mic") sourceStatusView?.let(::finishMicRecording)
-            else requestMic.launch(Manifest.permission.RECORD_AUDIO)
-        })
-        details.addView(ThemeUi.text(this, t("fm.recording.note"),
-            11f, palette, role = ThemeUi.ROLE_SUB))
         footer.addView(toggle)
         footer.addView(details)
         details.visibility = View.GONE
@@ -2996,7 +2981,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
     }
 
     private fun playRadio(station: RadioStation) {
-        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音，再切换音源"); return }
         if (::visualizerView.isInitialized) visualizerView.pcmClock.reset()
         ++loadGeneration
         service?.stopLocal()
@@ -3049,82 +3033,6 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         if (stations.isEmpty()) return
         val current = stations.indexOfFirst { it.id == currentStationId }
         playRadio(stations[(current + direction + stations.size) % stations.size])
-    }
-
-    private fun togglePlaybackRecording(statusView: TextView) {
-        if (recordingKind == "playback") {
-            service?.player?.stopRecording(); service?.radio?.stopRecording()
-            finishRecording("播放录音", statusView)
-            return
-        }
-        if (recordingKind.isNotEmpty()) { toast("请先停止麦克风录音"); return }
-        val playing = if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
-        if (!playing) { statusView.text = "先播放本地音乐或电台，再开始录制最终输出"; return }
-        val path = java.io.File(cacheDir, "rec_${System.currentTimeMillis()}.wav").absolutePath
-        val started = if (isLive) service?.radio?.startRecording(path) == true else service?.player?.startRecording(path) == true
-        if (!started) { statusView.text = "录音启动失败，请稍后重试"; return }
-        beginRecording("playback", path, statusView)
-    }
-
-    private fun startMicRecording() {
-        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音"); return }
-        service?.player?.pause(); service?.radio?.pause()
-        val path = java.io.File(cacheDir, "mic_${System.currentTimeMillis()}.wav").absolutePath
-        Thread {
-            val recorder = MicWavRecorder()
-            if (!recorder.start(path, 44100, 1)) {
-                main.post { toast("麦克风初始化失败，可能被其它应用占用") }
-                return@Thread
-            }
-            micRecorder = recorder
-            main.post { sourceStatusView?.let { beginRecording("mic", path, it) } }
-        }.start()
-    }
-
-    private fun beginRecording(kind: String, path: String, statusView: TextView) {
-        recordingKind = kind; recordingPath = path; recordingStartedAt = SystemClock.elapsedRealtime()
-        statusView.text = "${if (kind == "mic") "麦克风" else "播放"}录音已开始"
-        dismissSource()
-        refreshPlayback()
-    }
-
-    private fun finishMicRecording(statusView: TextView) {
-        val recorder = micRecorder ?: return
-        micRecorder = null
-        Thread {
-            recorder.stop()
-            main.post { finishRecording("麦克风录音", statusView) }
-        }.start()
-    }
-
-    private fun finishRecording(label: String, statusView: TextView) {
-        val path = recordingPath
-        recordingKind = ""; recordingPath = ""
-        statusView.text = "$label 已停止，正在保存…"
-        dismissSource()
-        publishRecording(java.io.File(path))
-        refreshPlayback()
-    }
-
-    private fun publishRecording(file: java.io.File) {
-        val values = ContentValues().apply {
-            put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
-            put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
-            put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/8D")
-            put(MediaStore.Audio.Media.IS_PENDING, 1)
-        }
-        val uri = contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-        try {
-            if (uri == null) error("无法创建音乐库条目")
-            contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
-                ?: error("无法写入录音")
-            values.clear(); values.put(MediaStore.Audio.Media.IS_PENDING, 0)
-            contentResolver.update(uri, values, null, null)
-            playbackStatus = "录音已保存到 Music/8D/${file.name}"
-        } catch (e: Exception) {
-            if (uri != null) contentResolver.delete(uri, null, null)
-            playbackStatus = "录音保存失败：${e.message}"
-        } finally { file.delete(); refreshPlayback() }
     }
 
     companion object {

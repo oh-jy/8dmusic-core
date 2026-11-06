@@ -15,7 +15,6 @@ import android.util.Log
 import com.j5i.spatial8d.NativePreprocess
 import com.j5i.spatial8d.NativeSpatialExport
 import com.j5i.spatial8d.NativeSpatialPlayer
-import com.j5i.spatial8d.PcmWavRecorder
 import j5i.spatial8d.core.PcmBuffer
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
@@ -99,7 +98,6 @@ class SpatialPlayer(context: Context) {
     private var playedOnce = false
     private var endMarkerArmed = false
     private var drainStartedAt = 0L
-    private var recorder: PcmWavRecorder? = null
     // 每次 seek/切歌/缓存失效递增代号，旧线程和旧回调立即作废。
     @Volatile private var generation = 0
     private val cacheEpoch = AtomicLong()
@@ -346,8 +344,7 @@ class SpatialPlayer(context: Context) {
                 }
                 if (own != generation || paused) continue
                 onPcm?.invoke(output, count * 4)
-                // 在最终 8D PCM 写出后 tee 一份，录音与耳机听到的效果完全一致。
-                recorder?.write(output, 0, count * 4)
+
                 current.consume(count)
                 playPos = if (reverse) (current.startFrame - current.consumed).coerceAtLeast(0)
                     else current.startFrame + current.consumed
@@ -533,20 +530,6 @@ class SpatialPlayer(context: Context) {
     }
 
     private fun report(message: String) = main.post { onError?.invoke(message) }
-
-    fun startRecording(path: String): Boolean {
-        if (!isPlaying || recorder?.isRecording == true) return false
-        val writer = PcmWavRecorder()
-        if (!writer.start(path, sampleRate, 2, 16)) return false
-        recorder = writer
-        return true
-    }
-
-    fun stopRecording() {
-        val writer = recorder
-        recorder = null
-        writer?.stop()
-    }
 
     fun export(stream: OutputStream, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val source = decoded

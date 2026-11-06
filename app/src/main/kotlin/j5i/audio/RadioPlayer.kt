@@ -14,7 +14,6 @@ import com.j5i.spatial8d.HttpMediaDataSource
 import com.j5i.spatial8d.Mp3MediaDataSource
 import com.j5i.spatial8d.TsAdtsMediaDataSource
 import com.j5i.spatial8d.NativeSpatialPlayer
-import com.j5i.spatial8d.PcmWavRecorder
 import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.SpaceEngine
 import j5i.spatial8d.core.SpacePreset
@@ -62,7 +61,6 @@ class RadioPlayer(private val probe: Boolean = false) {
     private val trackLock = Any()
     private var renderer = 0L
     private val rendererLock = Any()
-    private var recorder: PcmWavRecorder? = null
     // FM 与 UTS 一样使用持续 SpaceEngine，而不是本地整轨渲染的淡出/输出限幅链。
     private var engine: SpaceEngine? = null
     private val mono = DoubleArray(CHUNK)
@@ -151,20 +149,6 @@ class RadioPlayer(private val probe: Boolean = false) {
         releaseTrack()
         resetRenderer()
         resetNoiseReducer()
-    }
-
-    fun startRecording(path: String): Boolean {
-        if (recorder?.isRecording == true || !running) return false
-        val writer = PcmWavRecorder()
-        if (!writer.start(path, sampleRate, 2, 16)) return false
-        recorder = writer
-        return true
-    }
-
-    fun stopRecording() {
-        val writer = recorder
-        recorder = null
-        writer?.stop()
     }
 
     private fun run(url: String, own: Int) {
@@ -447,7 +431,7 @@ class RadioPlayer(private val probe: Boolean = false) {
             if (own != generation || !running || paused) return
             PerfTrace.interval("radio.pcmGap")
             PerfTrace.timed("radio.onPcmNs") { onPcm?.invoke(output, output.size) }
-            recorder?.write(output, 0, output.size)
+
             playedFrames += frames
             if (shouldStartTrack(trackStarted, playedFrames)) {
                 synchronized(trackLock) {
