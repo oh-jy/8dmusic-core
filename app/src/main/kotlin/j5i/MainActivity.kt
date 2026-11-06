@@ -478,7 +478,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             slider.progress = ((value - definition.min) * 10.0.pow(definition.digits)).roundToInt()
             sliderValues[key]?.text = formatValue(key, value).removeSuffix(definition.unit) + when (key) {
                 "period", "rt60" -> t("unit.seconds")
-                "room" -> t("unit.meters")
+                "room", "sourceDistance" -> t("unit.meters")
                 else -> ""
             }
         }
@@ -512,8 +512,9 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                 btn.text = "${formatSpeedShort(v)}×"
                 btn.gravity = Gravity.CENTER
                 btn.setLineSpacing(0f, 0.85f)
-                btn.tag = if (transform.speed == v) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL
-                ThemeUi.applyButton(btn, palette)
+                btn.setTextColor(if (transform.speed == v) palette.accent else palette.faint)
+                ((btn.parent as? LinearLayout)?.getChildAt(0))?.setBackgroundColor(
+                    if (transform.speed == v) palette.accent else palette.faint)
             }
         }
         pitchTicks.forEachIndexed { index, button ->
@@ -855,6 +856,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             "period" -> preset.copy(period = value)
             "elev" -> preset.copy(elev = value)
             "depth" -> preset.copy(depth = value)
+            "sourceDistance" -> preset.copy(sourceDistance = value)
             "phase" -> preset.copy(phase = value)
             "room" -> preset.copy(room = value)
             "wet" -> preset.copy(wet = value)
@@ -866,7 +868,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         }
         val matched = matchPresetIn(SPACE_PRESETS + customPresets, preset.period, preset.elev,
             preset.depth, preset.room, preset.wet, preset.rt60, preset.phase,
-            preset.direction, preset.width, preset.raw, preset.trajectory)
+            preset.direction, preset.width, preset.raw, preset.trajectory, preset.sourceDistance)
         if (matched != preset.name) {
             preset = preset.copy(name = matched,
                 note = if (matched == "自定义") "当前参数为手动调整，未匹配任何预设。" else preset.note)
@@ -884,6 +886,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         "period" -> preset.period
         "elev" -> preset.elev
         "depth" -> preset.depth
+        "sourceDistance" -> preset.sourceDistance
         "phase" -> preset.phase
         "room" -> preset.room
         "wet" -> preset.wet
@@ -1098,10 +1101,11 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     elev = state.getDouble("elev"), depth = state.getDouble("depth"), phase = state.getDouble("phase"),
                     direction = state.getDouble("direction"), width = state.getDouble("width"), room = state.getDouble("room"),
                     rt60 = state.getDouble("rt60"), wet = state.getDouble("wet"), raw = state.getBoolean("raw"),
-                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4))
+                    trajectory = state.optInt("trajectory", 0).coerceIn(0, 4),
+                    sourceDistance = state.optDouble("sourceDistance", 1.0).coerceIn(1.0, 5.0))
                 val all = SPACE_PRESETS + customPresets
                 val name = matchPresetIn(all, restored.period, restored.elev, restored.depth, restored.room,
-                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory)
+                    restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory, restored.sourceDistance)
                 all.firstOrNull { it.name == name } ?: restored
             } catch (_: Exception) {
                 DEFAULT_SPACE_PRESET
@@ -1124,7 +1128,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             put("period", preset.period); put("elev", preset.elev); put("depth", preset.depth)
             put("phase", preset.phase); put("direction", preset.direction); put("width", preset.width)
             put("room", preset.room); put("rt60", preset.rt60); put("wet", preset.wet); put("raw", preset.raw)
-            put("trajectory", preset.trajectory)
+            put("trajectory", preset.trajectory); put("sourceDistance", preset.sourceDistance)
             put("reverse", reverse); put("speed", transform.speed); put("semi", transform.semi); put("tape", transform.tape)
             put("denoise", transform.denoiseLevel)
             put("clarity", transform.clarityLevel)
@@ -1704,7 +1708,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
                     }
                 }
             })
-            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "depth", "phase") }))
+            parameterPanel.addView(sliderGroup(SLIDERS.filter { it.key in setOf("period", "elev", "sourceDistance", "depth", "phase") }))
             parameterPanel.addView(ThemeUi.divider(this@MainActivity, palette).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@MainActivity, 1f)).apply {
                     topMargin = ThemeUi.dp(this@MainActivity, 12f); bottomMargin = ThemeUi.dp(this@MainActivity, 9f)
@@ -1955,22 +1959,28 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
             }
             transformBody.addView(claritySlider)
             val chips = ThemeUi.row(this@MainActivity)
+            val speedButtons = mutableListOf<Button>()
             listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
-                chips.addView(ThemeUi.button(this@MainActivity, palette, "${formatSpeedShort(value)}×\n${t("speed.realtime")}", role = if (transform.speed == value) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 40f), 1f).apply {
-                        leftMargin = ThemeUi.dp(this@MainActivity, 3f)
-                    }
-                    textSize = 9f
+                chips.addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
-                    setLineSpacing(0f, 0.85f)
-                    setPadding(0, 0, 0, 0)
-                    setOnClickListener {
+                    addView(View(this@MainActivity).apply {
+                        setBackgroundColor(palette.faint)
+                        layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@MainActivity, 2f), ThemeUi.dp(this@MainActivity, 3f))
+                    })
+                    addView(ThemeUi.button(this@MainActivity, palette, "${formatSpeedShort(value)}×", role = ThemeUi.ROLE_TEXT) {
                         transform = transform.copy(speed = value)
                         applyTransform()
-                    }
+                    }.apply {
+                        textSize = 9f
+                        minHeight = 0; minimumHeight = 0
+                        setPadding(0, 0, 0, 0)
+                        speedButtons.add(this)
+                    })
+                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@MainActivity, 28f), 1f)
                 })
             }
-            speedChipButtons = (0 until chips.childCount).map { chips.getChildAt(it) as Button }
+            speedChipButtons = speedButtons
             chips.tag = "localOnly"
             transformBody.addView(chips)
             transformBody.addView(switchRow(t("tape"), t("tape.hint")) { transform = transform.copy(tape = it); applyTransform() }.also {
@@ -2071,12 +2081,16 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
 
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
     private fun installPcmRenderer() {
+        var lastHistoryAt = 0L
         val render: (ByteArray, Int) -> Unit = { data, bytes ->
+            val now = System.nanoTime()
             visualizerView.pcmClock.accept(data, bytes)
             if (::visualization.isInitialized) visualization.acceptPcm(data, bytes)
-            if (::visualizerView.isInitialized && curvePanel == 1) visualizerView.accept(data, bytes)
-            if (drivingDialog?.isShowing == true) visualizerView.accept(data, bytes)
-            popupVisualizer?.accept(data, bytes)
+            val visible = curvePanel == 1 || drivingDialog?.isShowing == true || popupVisualizer != null
+            if (::visualizerView.isInitialized && (visible || now - lastHistoryAt >= 100_000_000L)) {
+                visualizerView.accept(data, bytes)
+                lastHistoryAt = now
+            }
         }
         service?.player?.onPcm = render
         service?.radio?.onPcm = render
@@ -3117,7 +3131,7 @@ private var popupVisualizer: j5i.spatial8d.ui.VisualizerView? = null
         internal fun matchingPresetOrDefault(candidate: SpacePreset, presets: List<SpacePreset>): SpacePreset {
             val name = matchPresetIn(presets, candidate.period, candidate.elev, candidate.depth,
                 candidate.room, candidate.wet, candidate.rt60, candidate.phase,
-                candidate.direction, candidate.width, candidate.raw, candidate.trajectory)
+                candidate.direction, candidate.width, candidate.raw, candidate.trajectory, candidate.sourceDistance)
             return presets.firstOrNull { it.name == name } ?: DEFAULT_SPACE_PRESET
         }
 

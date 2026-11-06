@@ -35,7 +35,7 @@ import kotlin.math.roundToInt
  * 避免音频回调同时承担重 DSP 导致欠载、咔哒声和播放拖慢。
  */
 class SpatialPlayer(context: Context) {
-    var preset = SpacePreset("标准绕头 · 默认", "", 8.0, 35.0, 45.0, 10.0, 18.0, 1.2, 0.0, 1.0)
+    var preset = j5i.spatial8d.core.DEFAULT_SPACE_PRESET
         set(value) {
             if (field == value) return
             field = value
@@ -408,7 +408,7 @@ class SpatialPlayer(context: Context) {
         if ((!reverse && start >= source.frames || reverse && start <= 0) && !source.decodeDone) return null
         val p = preset
         val native = NativeSpatialPlayer.create(sampleRate.toDouble(), p.raw, p.period, p.elev,
-            p.depth, p.phase, p.direction, p.width, p.room, p.rt60, p.wet, transform.denoiseLevel, transform.clarityLevel, p.trajectory)
+            p.depth, p.phase, p.direction, p.width, p.room, p.rt60, p.wet, transform.denoiseLevel, transform.clarityLevel, p.trajectory, p.sourceDistance)
         if (native == 0L) return null
         val result = RenderCache(epoch, start, native)
         Thread({ prerollLoop(own, result) }, "spatial-preroll").start()
@@ -596,7 +596,7 @@ class SpatialPlayer(context: Context) {
                 temp = File.createTempFile("8d-render-", ".wav")
                 NativeSpatialExport.render(pcm, bpf, channels, floating, frames.toLong(), sr.toDouble(), rev,
                     p.raw, p.period, p.elev, p.depth, p.phase, p.direction, p.width, p.room,
-                    p.rt60, p.wet, tr.denoiseLevel, tr.clarityLevel, p.trajectory, temp.absolutePath)
+                    p.rt60, p.wet, tr.denoiseLevel, tr.clarityLevel, p.trajectory, p.sourceDistance, temp.absolutePath)
                 // 仅检查 RIFF 不够：44 字节空 WAV 也曾被当成导出成功。
                 if (!temp.isFile || temp.length() <= 44L || temp.length() < frames * 4L + 44L) {
                     error("空间渲染没有生成完整 PCM")

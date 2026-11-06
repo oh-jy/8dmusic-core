@@ -78,12 +78,42 @@ int main(){
         if(&renderer.rev.p!=&renderer.p){std::cerr<<"reverb retained constructor parameter\n";return 1;}
     }
     {
+        // 混响支路对中心单声道输入不得长期偏向任一声道。
+        constexpr int sr=44100,n=sr*20;
+        Params p{sr,8,35,45,0,1,100,10,1.2,18,false,false,0};
+        Reverb reverb(p);
+        long double left=0,right=0;
+        for(int i=0;i<n;i++){
+            double x=.2*std::sin(2*PI*440*i/sr),l,r;
+            reverb.run(x,l,r);
+            if(i>=sr*2){left+=l*l;right+=r*r;}
+        }
+        const double ratio=std::sqrt(double(left/right));
+        if(ratio<.9||ratio>1.1){std::cerr<<"mono reverb is imbalanced: L/R="<<ratio<<"\n";return 1;}
+        std::cout<<"mono reverb L/R RMS="<<ratio<<"\n";
+    }
+    {
         // 标准绕头只增强默认预设的前后耳廓线索，不扩大到其他空间风格。
         Params standard{44100,8,35,45,0,1,100,10,1.2,18,false,false,58};
         Params other{44100,8,35,45,0,1,100,10,1.2,18,false,false,58};
         other.depth=50;
-        if(ctrl(0,standard,1).rear!=0||ctrl(2,standard,1).rear<=ctrl(2,other,1).rear){
+        if(ctrl(0,standard,1).rear!=0||ctrl(4,standard,1).rear<=ctrl(4,other,1).rear){
             std::cerr<<"standard front/rear cue is not strengthened\n";return 1;
+        }
+    }
+    {
+        // With no reverb, greater baseline distance attenuates direct sound at every orbit position.
+        Params near{44100,8,35,45,0,1,100,10,1.2,0,false,false,0};
+        Params far=near; far.sourceDistance=5;
+        constexpr int n=44100;
+        std::vector<float> input(n, .1f);
+        for(int second: {0,2,4,6}){
+            Renderer a(near),b(far); std::vector<int16_t> x(n*2),y(n*2);
+            a.block(input,0,n,x,0,0,long(second)*44100);
+            b.block(input,0,n,y,0,0,long(second)*44100);
+            long long en=0,ef=0;
+            for(int i=1000;i<n*2;i++){ en+=std::abs(x[i]); ef+=std::abs(y[i]); }
+            if(ef==0||ef>=en){std::cerr<<"source distance did not reduce direct sound\n";return 1;}
         }
     }
     {

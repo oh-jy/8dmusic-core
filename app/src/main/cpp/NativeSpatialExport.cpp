@@ -14,7 +14,7 @@ namespace {
 constexpr double PI = 3.14159265358979323846;
 constexpr double COMBS[8] = {1116,1188,1277,1356,1422,1491,1557,1617};
 constexpr double ALLP[4] = {556,441,341,225};
-struct Params { double sr,period,elev,depth,phase,direction,width,room,rt60,wet; bool raw,reverse; int denoise; int clarity=50; int trajectory=0; };
+struct Params { double sr,period,elev,depth,phase,direction,width,room,rt60,wet; bool raw,reverse; int denoise; int clarity=50; int trajectory=0; double sourceDistance=1.0; };
 
 struct Ring {
     std::vector<double> b; int w=0;
@@ -55,7 +55,7 @@ struct RevChannel {
 };
 struct Reverb {
     const Params&p;RevChannel l,r;Tri a1,a2,a3;double h1=0,h2=0,h3=0,h4=0,gh=1;
-    double ea,ga,de=0,we=0,ag=1;
+    double ea,ga,de=0,we=0,wlEnv=0,wrEnv=0,wlBalance=1,wrBalance=1,ag=1;
     Reverb(const Params&p):p(p),l(p.sr,0),r(p.sr,23),ea(std::exp(-1/(.1*p.sr))),ga(std::exp(-1/(.4*p.sr))){
         double L=std::clamp(p.room,3.0,50.0),rt=std::clamp(p.rt60,0.0,5.0),scale=std::clamp(L/10,.55,5.0);
         for(int c=0;c<2;c++){auto&x=c?r:l;x.plen=std::clamp(int(std::lround(L/343*p.sr)),1,int(x.pre.size()));double spread=c?23:0;
@@ -64,8 +64,10 @@ struct Reverb {
         }
     }
     void run(double in,double&ol,double&orr){double lo=a3.run(a2.run(a1.run(in)));h4=h3;h3=h2;h2=h1;h1=in;double x=lo+(h4-lo)*gh;ol=l.run(x);orr=r.run(x);
+        wlEnv=wlEnv*ea+ol*ol*(1-ea);wrEnv=wrEnv*ea+orr*orr*(1-ea);
+        if(wlEnv>1e-9&&wrEnv>1e-9){double mean=(wlEnv+wrEnv)*.5;double bl=std::clamp(std::sqrt(mean/wlEnv),.5,2.0),br=std::clamp(std::sqrt(mean/wrEnv),.5,2.0);wlBalance=wlBalance*ga+bl*(1-ga);wrBalance=wrBalance*ga+br*(1-ga);}
         de=de*ea+x*x*(1-ea);double wp=(ol*ol+orr*orr)*.5;we=we*ea+wp*(1-ea);if(we>1e-6&&de>1e-6)ag=ag*ga+std::sqrt(de/we)*(1-ga);
-        double target=1.25*p.wet/100*(1+.006*(p.room-10)),g=std::clamp(ag,.35,2.0)*target;ol*=g;orr*=g;
+        double target=1.25*p.wet/100*(1+.006*(p.room-10)),g=std::clamp(ag,.35,2.0)*target;ol*=g*wlBalance;orr*=g*wrBalance;
     }
 };
 double stable(int seed){double x=std::sin(seed*12.9898+78.233)*43758.5453;return x-std::floor(x);}
@@ -108,7 +110,7 @@ struct Renderer {
                 ll=ll*v(&Ctrl::pl)*makeup;rr=rr*v(&Ctrl::pr)*makeup;double pk=std::max(std::abs(ll),std::abs(rr));
                 peak=pk>peak?pk:peak*lr;double want=peak>1e-9?std::min(1.0,.89/peak):1;lim=want<lim?want:lim*lr+want*(1-lr);ll*=lim;rr*=lim;
                 rev.gh=v(&Ctrl::gh);double wl,wr;rev.run(x,wl,wr);double far=.5*(1+std::sin(2*PI/std::clamp(1.5*p.period,8.0,16.0)*(timelineStart+base+k)/p.sr)),d=p.depth/100;
-                double gd=1-.30*d*far,gw=1+1.2*d*far;ll=ll*gd+wl*gw;rr=rr*gd+wr*gw;if(p.denoise>0)noise.run(ll,rr);
+                double distance=(std::clamp(p.sourceDistance,1.0,5.0)-1)/4;double gd=(1-.30*d*far)*(1-.35*distance),gw=(1+1.2*d*far)*(1+.4*distance);ll=ll*gd+wl*gw;rr=rr*gd+wr*gw;if(p.denoise>0)noise.run(ll,rr);
                 long fade=std::max(1L,pos<inputOffset?inputOffset-pos:pos-inputOffset);double gain=fadeFrames>0&&fade<fadeFrames?std::pow(double(fade)/fadeFrames,2)*(3-2*double(fade)/fadeFrames):1;ll*=gain;rr*=gain;pk=std::max(std::abs(ll),std::abs(rr));
                 // 包络峰值不能跟随淡入斜坡下降：它只应衡量原始信号强度。
                 // 否则首块虽从静音起播，限幅器却把随后正常波形也压到近零。
@@ -132,7 +134,7 @@ struct Renderer {
                 r.h4=r.h3;r.h3=r.h2;r.h2=r.h1;r.h1=rr;lo=r.a3.run(r.a2.run(r.a1.run(rr)));rr=lo+(r.h4-lo)*v(&Ctrl::gh);
                 ll=ll*v(&Ctrl::pl)*makeup;rr=rr*v(&Ctrl::pr)*makeup;double pk=std::max(std::abs(ll),std::abs(rr));peak=pk>peak?pk:peak*lr;double want=peak>1e-9?std::min(1.0,.89/peak):1;lim=want<lim?want:lim*lr+want*(1-lr);ll*=lim;rr*=lim;
                 rev.gh=std::clamp(v(&Ctrl::gh),.02,1.0);double wl,wr;rev.run(x,wl,wr);double far=.5*(1+std::sin(2*PI/std::clamp(1.5*p.period,8.0,16.0)*(streamPos+k)/p.sr)),d=p.depth/100;
-                double gd=1-.30*d*far,gw=1+1.2*d*far;ll=ll*gd+wl*gw;rr=rr*gd+wr*gw;if(p.denoise>0)noise.run(ll,rr);
+                double distance=(std::clamp(p.sourceDistance,1.0,5.0)-1)/4;double gd=(1-.30*d*far)*(1-.35*distance),gw=(1+1.2*d*far)*(1+.4*distance);ll=ll*gd+wl*gw;rr=rr*gd+wr*gw;if(p.denoise>0)noise.run(ll,rr);
                 out[(base+k)*2]=std::lround(std::clamp(ll,-1.0,1.0)*32767);out[(base+k)*2+1]=std::lround(std::clamp(rr,-1.0,1.0)*32767);streamPos++;
             }
         }
@@ -153,7 +155,7 @@ void render(const int16_t*bytes,long frames,const Params&p,int bpf,int ch,bool f
 }
 }
 #ifndef SPATIAL_PLAYER_IMPLEMENTATION
-extern "C" JNIEXPORT void JNICALL Java_com_j5i_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity,jint trajectory,jstring path){
-    jbyte*ptr=env->GetByteArrayElements(data,nullptr);const char*p=env->GetStringUTFChars(path,nullptr);try{Params q{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),bool(reverse),denoise,clarity,trajectory};render(reinterpret_cast<int16_t*>(ptr),frames,q,bpf,ch,flt,reverse,p);}catch(const std::string&e){env->ThrowNew(env->FindClass("java/io/IOException"),e.c_str());}env->ReleaseStringUTFChars(path,p);env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);
+extern "C" JNIEXPORT void JNICALL Java_com_j5i_spatial8d_NativeSpatialExport_render(JNIEnv*env,jclass,jbyteArray data,jint bpf,jint ch,jboolean flt,jlong frames,jdouble sr,jboolean reverse,jboolean raw,jdouble period,jdouble elev,jdouble depth,jdouble phase,jdouble direction,jdouble width,jdouble room,jdouble rt60,jdouble wet,jint denoise,jint clarity,jint trajectory,jdouble sourceDistance,jstring path){
+    jbyte*ptr=env->GetByteArrayElements(data,nullptr);const char*p=env->GetStringUTFChars(path,nullptr);try{Params q{sr,period,elev,depth,phase,direction,width,room,rt60,wet,bool(raw),bool(reverse),denoise,clarity,trajectory,sourceDistance};render(reinterpret_cast<int16_t*>(ptr),frames,q,bpf,ch,flt,reverse,p);}catch(const std::string&e){env->ThrowNew(env->FindClass("java/io/IOException"),e.c_str());}env->ReleaseStringUTFChars(path,p);env->ReleaseByteArrayElements(data,ptr,JNI_ABORT);
 }
 #endif

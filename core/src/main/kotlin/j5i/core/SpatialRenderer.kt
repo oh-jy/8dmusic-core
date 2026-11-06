@@ -23,7 +23,7 @@ class SpatialRenderer(sampleRate: Double) {
     fun configure(preset: SpacePreset) {
         engine.setSpace(
             preset.period, preset.elev, preset.depth, preset.phase,
-            preset.direction, preset.width, preset.raw, preset.trajectory
+            preset.direction, preset.width, preset.raw, preset.trajectory, preset.sourceDistance
         )
         engine.setRoom(preset.room, preset.rt60, preset.wet)
     }
