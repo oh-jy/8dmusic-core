@@ -647,10 +647,13 @@ class SpatialPlayer(context: Context) {
                 var channels = source.channels
                 var floating = source.floatingPoint
                 var frames = source.frames
+                Log.i("8DExport", "start speed=${tr.speed} semi=${tr.semi} tape=${tr.tape} " +
+                    "sourceFrames=$frames sourceBytes=${pcm.size} bpf=$bpf channels=$channels sr=$sr")
                 if (tr.active) {
                     // 实时变速交给 AudioTrack；导出则用同源 C++ 离线预处理写入新时长。
                     pcm = NativePreprocess.run(pcm, bpf, channels, floating, frames.toLong(), tr.speed, tr.semi, tr.tape)
                     bpf = 2; channels = 1; floating = false; frames = pcm.size / 2
+                    Log.i("8DExport", "preprocessedFrames=$frames bytes=${pcm.size}")
                 }
                 onProgress(50)
                 temp = File.createTempFile("8d-render-", ".wav", cacheDir)
@@ -661,6 +664,7 @@ class SpatialPlayer(context: Context) {
                 if (!temp.isFile || temp.length() <= 44L || temp.length() < frames * 4L + 44L) {
                     error("空间渲染没有生成完整 PCM")
                 }
+                Log.i("8DExport", "renderedFrames=$frames wavBytes=${temp.length()} mp3=$mp3")
                 if (mp3) {
                     val target = mp3Path ?: error("MP3 缺少临时文件路径")
                     com.j5i.spatial8d.Mp3Export.nativeEncode(temp.absolutePath, target)
@@ -671,6 +675,7 @@ class SpatialPlayer(context: Context) {
                 main.post { onDone(true, if (mp3) "MP3 导出完成" else "WAV 导出完成") }
             } catch (e: Exception) {
                 try { stream.close() } catch (_: Exception) {}
+                Log.e("8DExport", "export failed", e)
                 main.post { onDone(false, "导出失败: ${e.message}") }
             } finally { temp?.delete() }
         }.start()

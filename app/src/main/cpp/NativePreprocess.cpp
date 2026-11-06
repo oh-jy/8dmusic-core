@@ -49,7 +49,8 @@ struct Wsola {
         drop(std::min(prev+hop,std::lround(ana)-search));return true;
     }
     void run(const std::vector<float>&in,std::vector<float>&out){q.insert(q.end(),in.begin(),in.end());while(emit(false,out)){}}
-    void flush(std::vector<float>&out){size_t before=out.size();while(emit(true,out)){}int end=0;for(int i=0;i<win+hop;i++)if(den[i]>=.5)end=i+1;
+    void flush(std::vector<float>&out){while(emit(true,out)){}int end=0;for(int i=0;i<win+hop;i++)if(den[i]>=.5)end=i+1;
+        size_t before=out.size();
         out.resize(before+end);for(int i=0;i<end;i++)out[before+i]=(den[i]>=0.05f)?float(num[i]/den[i]):0.0f;}
 };
 }
