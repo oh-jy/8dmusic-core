@@ -25,7 +25,6 @@ import android.content.res.ColorStateList
 import androidx.core.content.ContextCompat
 import j5i.spatial8d.audio.PlaybackService
 import j5i.spatial8d.audio.Lyrics
-import j5i.spatial8d.core.RadioCatalog
 import j5i.spatial8d.core.SLIDERS
 import j5i.spatial8d.core.SPACE_PRESETS
 import j5i.spatial8d.core.formatValue
@@ -424,7 +423,7 @@ internal fun MainActivity.refreshPlayback() {
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
         durationTime.text = time(player?.duration ?: 0.0)
-        val station = if (isLive) RadioCatalog.filter(false).firstOrNull { it.id == currentStationId } else null
+        val station = if (isLive) importedStations().firstOrNull { it.id == currentStationId } else null
         modeTextView.text = station?.let {
             Regex("(?:FM|AM)\\s?\\d+(?:\\.\\d+)?", RegexOption.IGNORE_CASE).find("${it.name} ${it.note}")?.value
                 ?: if (it.type == "网络台") "网络电台" else "电台直播"
@@ -842,7 +841,9 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             setOnClickListener {
                 val item = currentItem ?: return@setOnClickListener
                 if (isLive || item.uri.isBlank()) return@setOnClickListener
-                if (currentUri == onlinePlayingUri && !musicStore.isFavorite(item.id)) {
+                val onlineProviderTrack = (item.album.startsWith("plugin:https:") || item.album.startsWith("provider:")) &&
+                    item.uri.startsWith("http", ignoreCase = true)
+                if ((currentUri == onlinePlayingUri || onlineProviderTrack) && !musicStore.isFavorite(item.id)) {
                     downloadOnlineFavorite(item)
                     return@setOnClickListener
                 }

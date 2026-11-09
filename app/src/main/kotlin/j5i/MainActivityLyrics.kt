@@ -12,6 +12,7 @@ import j5i.spatial8d.ui.ThemeUi
 
 internal fun MainActivity.scheduleLyricsPrefetch() {
         main.removeCallbacks(prefetchLyrics)
+        if (providerStore.list().none { it.enabled }) return
         // 冷启动先完成恢复与当前歌词请求，再串行补曲库缓存，避免争抢首屏网络。
         main.postDelayed(prefetchLyrics, 8_000)
     }
@@ -40,7 +41,7 @@ internal fun MainActivity.loadLyrics(item: MusicItem, manualTitle: String? = nul
             }.onFailure { lyricsView.showError(manualTitle ?: Lyrics.displayTitle(item.name)) }
         }, { progress ->
             if (!finished && generation == lyricsGeneration && currentItem?.uri == item.uri) lyricsView.showProgress(progress)
-        })
+        }, allowNetwork = providerStore.list().any { it.enabled })
     }
 
     /** 把当前歌词推给音频可视化视图（含弹窗副本），用于穿梭模式叠加字幕。 */
@@ -54,6 +55,7 @@ internal fun MainActivity.pushLyricsToVisualizer() {
     /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
 
 internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
+        if (providerStore.list().none { it.enabled }) { toast("请先启用在线来源"); return }
         if (lyricsDialog?.isShowing == true) return
         val title = Lyrics.searchTitle(item.name, item.artist)
         val artist = item.artist

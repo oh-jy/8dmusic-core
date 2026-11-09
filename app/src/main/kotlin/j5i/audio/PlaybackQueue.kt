@@ -9,10 +9,10 @@ class PlaybackQueue(
     private val mode: PlayMode,
     private val randomIndex: (Int) -> Int = { (0 until it).random() }
 ) {
-    fun next(currentUri: String?, auto: Boolean = false): MusicItem? {
+    fun next(currentUri: String?, auto: Boolean = false, currentId: Long? = null): MusicItem? {
         if (items.isEmpty()) return null
         if (auto && mode == PlayMode.LOOP_ONE) return null
-        val current = items.indexOfFirst { it.uri == currentUri }
+        val current = items.indexOfFirst { it.uri == currentUri || currentId != null && it.id == currentId }
         if (auto && current < 0) return null
         val index = when (mode) {
             PlayMode.SHUFFLE -> {
@@ -24,9 +24,9 @@ class PlaybackQueue(
         return items.getOrNull(index)
     }
 
-    fun previous(currentUri: String?): MusicItem? {
+    fun previous(currentUri: String?, currentId: Long? = null): MusicItem? {
         if (items.isEmpty()) return null
-        val current = items.indexOfFirst { it.uri == currentUri }
+        val current = items.indexOfFirst { it.uri == currentUri || currentId != null && it.id == currentId }
         return items[(current - 1 + items.size) % items.size]
     }
 }

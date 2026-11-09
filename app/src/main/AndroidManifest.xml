@@ -21,6 +21,10 @@
             android:name=".audio.PlaybackService"
             android:foregroundServiceType="mediaPlayback"
             android:exported="false" />
+        <service
+            android:name=".provider.IsolatedProviderService"
+            android:isolatedProcess="true"
+            android:exported="false" />
         <activity
             android:name=".MainActivity"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode|density|fontScale|locale|layoutDirection"

@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 rootProject.name = "8dmusic-kt"
 include(":core")
 include(":app")
+include(":provider-sdk")

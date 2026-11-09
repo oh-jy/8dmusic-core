@@ -29,14 +29,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
 import j5i.spatial8d.audio.PlaybackService
-import j5i.spatial8d.audio.OnlineMusic
-import j5i.spatial8d.audio.OnlineTrack
 import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.audio.LyricsResult
 import j5i.spatial8d.audio.OfflineAsr
 import j5i.spatial8d.ui.LyricsView
 import j5i.spatial8d.ui.VisualizerView
-import com.j5i.spatial8d.MusicSourceApi
 import com.j5i.spatial8d.MicWavRecorder
 import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.SpacePreset
@@ -85,7 +82,6 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var transform = TransformParams()
     internal var reverse = false
     internal val main = Handler(Looper.getMainLooper())
-    internal val onlineMusic by lazy { OnlineMusic(this) }
     internal val preferences by lazy { getSharedPreferences("spatial8d", Context.MODE_PRIVATE) }
 
     override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
@@ -159,6 +155,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var currentStationId = ""
     internal var radioSources = listOf<j5i.spatial8d.core.RadioSource>()
     internal var radioSourceIndex = -1
+    internal var radioAllowHttp = false
     internal var radioGeneration = 0
     internal var radioProbes = listOf<j5i.spatial8d.audio.RadioPlayer>()
     internal var sourceRegion = "全部"
@@ -169,14 +166,17 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var curvePanel = 1
     internal var onlinePage = 1
     internal var onlineQuery = ""
-    internal var onlineTracks = listOf<OnlineTrack>()
+    internal var onlineAutoSource: String? = null
+    internal var providerSelection: String? = null
+    internal var providerResults = listOf<Pair<String, j5i.spatial8d.provider.ProviderSearch.Track>>()
+    internal var pluginResults = listOf<Pair<String, org.json.JSONObject>>()
+    internal var providerRequest = 0
     internal var onlinePlayingUri: String? = null
     internal var onlinePlayingId: String? = null
     internal var onlineSelectedId: String? = null
     internal var onlinePlayingProvider = 0
     internal var onlinePlayingQuery = ""
     internal var onlinePlayingPage = 1
-    internal var onlinePlayingTracks = listOf<OnlineTrack>()
     internal var sourceSheetBody: LinearLayout? = null
     internal var onlineBody: LinearLayout? = null
     internal var onlineStatusView: TextView? = null
@@ -188,6 +188,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var recordingStartedAt = 0L
     internal var fmDialog: Dialog? = null
     internal var onlineDialog: Dialog? = null
+    internal var providerLoginDialog: Dialog? = null
     internal var fmUnlocked = false
     internal var onlineUnlocked = false
     internal var sourceTapCount = 0
@@ -288,12 +289,24 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startMicRecording() else toast("没有麦克风录音权限，请到系统设置开启")
     }
+    internal val providerStore by lazy { j5i.spatial8d.provider.ProviderStore(this) }
+    internal val pluginStore by lazy { j5i.spatial8d.provider.ProviderPluginStore(this) }
+    internal var loginPluginId = ""
+    internal val openLoginFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importPluginLogin(loginPluginId, uri)
+    }
+    internal val openProviderFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importProviderFile(uri)
+    }
+    internal val scanProvider = registerForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { result ->
+        result.contents?.let { importProviderQr(it) }
+    }
     internal val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         displayedLanguage = AppLanguage.resolved(this)
-        com.j5i.spatial8d.MusicSourceApi.bootstrap(this)
+        j5i.spatial8d.provider.ProviderMigration.run(this)
         musicStore = MusicStore(this)
         presetStore = PresetStore(this)
         customPresets = presetStore.load().toMutableList()
@@ -342,6 +355,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     }
 
     override fun onDestroy() {
+        providerLoginDialog?.dismiss()
+        providerLoginDialog = null
         main.removeCallbacks(prefetchLyrics)
         service?.player?.stopRecording()
         service?.radio?.stopRecording()
@@ -370,7 +385,6 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             pendingDeleteResult = null
             return
         }
-        if (MusicSourceApi.onActivityResult(this, requestCode, resultCode, data)) refreshOnlineBody()
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -497,10 +511,6 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         val uri = Uri.parse(item.uri)
         // 原文件已被外部删除时，直接允许清理失效的曲库记录。
         if (isSourceMissing(uri)) {
-            onResult(true)
-            return
-        }
-        if (onlineMusic.deleteBiliAudioUri(item.uri)) {
             onResult(true)
             return
         }

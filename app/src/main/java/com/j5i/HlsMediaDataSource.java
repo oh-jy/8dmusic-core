@@ -8,6 +8,9 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
+import j5i.spatial8d.provider.ProviderNetwork;
+import okhttp3.Response;
+import java.util.Collections;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -26,6 +29,9 @@ public final class HlsMediaDataSource extends MediaDataSource {
     private final LinkedHashSet<String> seen = new LinkedHashSet<>();
 
     private String playlistUrl;
+    private final boolean providerSafe;
+    private final boolean allowHttp;
+    private volatile Response safeResponse;
     private final boolean playlist;
     private boolean directOpened;
     private volatile HttpURLConnection connection;
@@ -38,8 +44,12 @@ public final class HlsMediaDataSource extends MediaDataSource {
     private boolean eof;
     private volatile boolean closed;
 
-    public HlsMediaDataSource(String url) {
+    public HlsMediaDataSource(String url) { this(url, false, false); }
+
+    public HlsMediaDataSource(String url, boolean providerSafe, boolean allowHttp) {
         this.playlistUrl = url;
+        this.providerSafe = providerSafe;
+        this.allowHttp = allowHttp;
         this.playlist = url.split("\\?", 2)[0].toLowerCase(Locale.ROOT).endsWith(".m3u8");
     }
 
@@ -116,9 +126,8 @@ public final class HlsMediaDataSource extends MediaDataSource {
             sleep(targetDurationMs);
             return;
         }
-        HttpURLConnection c = open(url);
         try {
-            segmentInput = c.getInputStream();
+            segmentInput = open(url);
             segmentBytes = 0;
         } catch (IOException e) {
             closeConnection();
@@ -168,13 +177,13 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     private byte[] download(String url) throws IOException {
-        HttpURLConnection c = open(url);
-        try (InputStream in = c.getInputStream()) {
+        try (InputStream in = open(url)) {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             byte[] buffer = new byte[16384];
             while (!closed) {
                 int n = in.read(buffer);
                 if (n < 0) break;
+                if (out.size() + n > 2 * 1024 * 1024) throw new IOException("HLS playlist too large");
                 out.write(buffer, 0, n);
             }
             return out.toByteArray();
@@ -183,8 +192,17 @@ public final class HlsMediaDataSource extends MediaDataSource {
         }
     }
 
-    private HttpURLConnection open(String url) throws IOException {
+    private InputStream open(String url) throws IOException {
         if (closed) throw new IOException("data source closed");
+        if (providerSafe) {
+            Response response = ProviderNetwork.INSTANCE.open(url, allowHttp, Collections.emptyMap());
+            if (response.code() != 200 || response.body() == null || closed) {
+                response.close();
+                throw new IOException("HLS request failed");
+            }
+            safeResponse = response;
+            return response.body().byteStream();
+        }
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         connection = c;
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -196,7 +214,7 @@ public final class HlsMediaDataSource extends MediaDataSource {
             int code = c.getResponseCode();
             if (code != HttpURLConnection.HTTP_OK) throw new IOException("HTTP " + code);
             if (closed) throw new IOException("data source closed");
-            return c;
+            return c.getInputStream();
         } catch (IOException e) {
             closeConnection();
             throw e;
@@ -212,6 +230,9 @@ public final class HlsMediaDataSource extends MediaDataSource {
     }
 
     private void closeConnection() {
+        Response response = safeResponse;
+        safeResponse = null;
+        if (response != null) response.close();
         HttpURLConnection c = connection;
         connection = null;
         segmentInput = null;

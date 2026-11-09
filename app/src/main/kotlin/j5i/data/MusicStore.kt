@@ -68,6 +68,16 @@ class MusicStore(private val context: Context) {
         saveAdded(items)
     }
 
+    fun rememberAll(newItems: List<MusicItem>) {
+        if (newItems.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val existing = loadAdded().associateBy { it.id }
+        val merged = newItems.map { item ->
+            item.copy(addedAt = existing[item.id]?.addedAt ?: now, modifiedAt = now)
+        }
+        saveAdded((loadAdded().filterNot { old -> newItems.any { it.id == old.id } } + merged).distinctBy { it.id })
+    }
+
     fun library(): List<MusicItem> = (loadAdded() + scan()).filterNot(::isBiliAudio).distinctBy { it.uri }
 
     fun mergeScan(fresh: List<MusicItem>): List<MusicItem> = (loadAdded() + fresh).filterNot(::isBiliAudio).distinctBy { it.uri }
@@ -305,6 +315,17 @@ class MusicStore(private val context: Context) {
         playlistIndex = playlists.lastIndex
         savePlaylists()
         return true
+    }
+
+    fun addToPlaylist(index: Int, songs: List<MusicItem>): Int {
+        if (index !in playlists.indices || songs.isEmpty()) return 0
+        val playlist = playlists[index]
+        val existing = playlist.ids.toSet()
+        val added = songs.filter { it.id !in existing }.map { it.id }.distinct()
+        if (added.isEmpty()) return 0
+        playlists[index] = playlist.copy(ids = playlist.ids + added, rule = "")
+        savePlaylists()
+        return added.size
     }
 
     fun deletePlaylist(index: Int) {

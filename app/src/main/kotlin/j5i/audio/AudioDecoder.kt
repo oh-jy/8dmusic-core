@@ -6,6 +6,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaDataSource
 import android.net.Uri
+import com.j5i.spatial8d.HttpMediaDataSource
 
 import j5i.spatial8d.core.PcmBuffer
 import java.io.File
@@ -27,7 +28,16 @@ class AudioDecoder(private val context: Context) {
     fun decode(source: MediaDataSource, onProgress: (Int) -> Unit, isActive: () -> Boolean = { true },
         onHead: (PcmBuffer, Long) -> Unit = { _, _ -> },
         onFormat: (PcmBuffer) -> Unit = {}): PcmBuffer = decode(
-        { extractor -> extractor.setDataSource(source) }, onProgress, isActive, onHead, onFormat)
+        { extractor ->
+            if (source is HttpMediaDataSource) {
+                try {
+                    source.readAt(0, ByteArray(1), 0, 1)
+                } catch (e: java.io.IOException) {
+                    throw IllegalStateException("音频请求失败: ${e.message ?: "连接错误"}", e)
+                }
+            }
+            extractor.setDataSource(source)
+        }, onProgress, isActive, onHead, onFormat)
 
     private fun decode(setSource: (MediaExtractor) -> Unit, onProgress: (Int) -> Unit,
         isActive: () -> Boolean, onHead: (PcmBuffer, Long) -> Unit,
@@ -129,6 +139,7 @@ class AudioDecoder(private val context: Context) {
             return (output ?: error("音频没有 PCM 输出")).also { it.decodeDone = true }
         } catch (e: Exception) {
             output?.close()
+            if (e is IllegalStateException && e.message?.startsWith("音频请求失败:") == true) throw e
             throw IllegalStateException("解码失败: ${e.message ?: e.javaClass.simpleName}", e)
         } finally {
             try { codec?.stop() } catch (_: Exception) {}

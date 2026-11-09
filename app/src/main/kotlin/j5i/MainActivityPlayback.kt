@@ -15,6 +15,7 @@ import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
 import j5i.spatial8d.core.matchPresetIn
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.data.isOnlineAudio
 import j5i.spatial8d.data.PlayMode
 import j5i.spatial8d.ui.PlaylistDialog
 import org.json.JSONObject
@@ -68,6 +69,32 @@ internal fun MainActivity.load(item: MusicItem) {
     }
 
 internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
+    if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
+        playbackStatus = "正在解析在线歌曲…"
+        refreshPlayback()
+        Thread {
+            val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
+            main.post {
+                resolved.onSuccess { load(it, autoplay) }
+                    .onFailure { playbackStatus = "在线歌曲解析失败：${it.message}"; toast(playbackStatus); refreshPlayback() }
+            }
+        }.start()
+        return
+    }
+        if (item.album.startsWith("provider:")) {
+            val id = item.album.substringAfter(':').substringAfter(':', "")
+            if (providerStore.list().none { it.enabled && it.definition.id == id }) {
+                toast("来源不存在或已停用")
+                return
+            }
+        }
+        if (item.album.startsWith("plugin:https:")) {
+            val id = item.album.substringAfter("plugin:https:")
+            if (runCatching { pluginStore.list().none { it.enabled && it.descriptor.id == id } }.getOrDefault(true)) {
+                toast("插件来源不存在或已停用")
+                return
+            }
+        }
         // 所有选歌、切歌和冷启动恢复共用同一条加载链路，旧代号回调全部丢弃。
         if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
         if (isViewReady(this@load::visualizerView)) visualizerView.pcmClock.reset()
@@ -75,6 +102,12 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         ++radioGeneration
         radioProbes.forEach { it.stop() }
         radioProbes = emptyList()
+        val online = item.isOnlineAudio()
+        val previous = currentItem
+        val previousOnline = previous != null && previous.isOnlineAudio()
+        if (autoplay && (isLive || previous == null || online != previousOnline)) {
+            preset = if (online) SPACE_PRESETS[0] else DEFAULT_SPACE_PRESET
+        }
         isLive = false
         offlineAsrEnabled = false
         asrTranscript = ""
@@ -90,12 +123,14 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         currentItem = item
         loadLyrics(item)
         queue = musicStore.view(songs)
-        currentIndex = queue.indexOfFirst { it.id == item.id && it.uri == item.uri }
-        currentQueue = queue
+        val isProviderTrack = item.album.startsWith("plugin:") || item.album.startsWith("provider:") ||
+            item.album.startsWith("在线缓存:")
+        val keepProviderQueue = isProviderTrack && currentQueue.any { it.id == item.id }
+        if (!keepProviderQueue) currentQueue = queue
+        currentIndex = currentQueue.indexOfFirst { it.id == item.id }
         currentUri = item.uri
         playbackStatus = t("status.preparing")
         service?.let {
-            it.clearBiliQueue()
             it.controlsPreset = preset
             it.controlsTransform = transform
             it.controlsReverse = reverse
@@ -111,8 +146,17 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
                 val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
                 val isOnline = remote && currentQueue.none { it.uri == item.uri }
                 val stream = if (remote) {
+                    val pluginId = item.album.substringAfter("plugin:https:", "")
+                    val plugin = if (pluginId.isNotEmpty()) j5i.spatial8d.provider.ProviderPluginStore(this).list()
+                        .first { it.enabled && it.descriptor.id == pluginId } else null
+                    val safe = item.album.startsWith("provider:http:") || item.album.startsWith("provider:https:") || plugin != null
+                    val allowHttp = item.album.startsWith("provider:http:") || plugin != null
                     if (item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
-                        TsAdtsMediaDataSource(item.uri) else HttpMediaDataSource(item.uri)
+                        TsAdtsMediaDataSource(item.uri, safe, allowHttp) else if (plugin != null) {
+                        val referer = if ("referer" in plugin.descriptor.capabilities) "https://www.bilibili.com/" else ""
+                        val cookie = j5i.spatial8d.provider.ProviderCredentials(this).get(pluginId)
+                        HttpMediaDataSource(item.uri, true, allowHttp, referer, cookie)
+                    } else HttpMediaDataSource(item.uri, safe, allowHttp)
                 } else null
                 try {
                     if (stream != null) AudioDecoder(this).decode(stream, { percent ->
@@ -136,7 +180,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.w("8DQueue", "local load failed: ${item.name} uri=${item.uri}", e)
+                android.util.Log.w("8DQueue", "播放加载失败：${item.name}", e)
                 main.post {
                     if (generation != loadGeneration) return@post
                     if (e.message?.contains("已取消旧音频解码") == true) return@post
@@ -153,12 +197,16 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
     }
 
 internal fun MainActivity.adoptServiceTrack(item: MusicItem) {
+    if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item) && item.uri != currentUri) {
+        load(item)
+        return
+    }
         if (currentUri == item.uri) return
         if (isViewReady(this@adoptServiceTrack::visualizerView)) visualizerView.pcmClock.reset()
         currentQueue = service?.queueSnapshot?.ifEmpty { currentQueue } ?: currentQueue
+        service?.controlsPreset?.let { preset = it }
         currentItem = item
         currentUri = item.uri
-        if (service?.hasBiliQueue == true) onlinePlayingUri = item.uri
         currentIndex = currentQueue.indexOfFirst { it.uri == item.uri }
         loadLyrics(item)
         playbackStatus = t("status.auto.next")
@@ -262,10 +310,9 @@ internal fun MainActivity.savePlaybackState() {
 
 internal fun MainActivity.next(auto: Boolean = false) {
         if (isLive) { skipStation(1); return }
-        if (service?.hasBiliQueue == true) { service?.next(); return }
         if (!auto) autoplayRequests = 0
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
-        if (currentItem != null && items.indexOfFirst { it.uri == currentUri } < 0) {
+        if (currentItem != null && items.indexOfFirst { it.id == currentItem?.id } < 0) {
             if (auto) service?.player?.replay(forcePlay = true) else load(currentItem!!)
             return
         }
@@ -279,7 +326,7 @@ internal fun MainActivity.next(auto: Boolean = false) {
             service?.player?.replay(forcePlay = true)
             return
         }
-        val current = items.indexOfFirst { it.uri == currentUri }
+        val current = items.indexOfFirst { it.id == currentItem?.id }
         val nextIndex = when (currentMode()) {
             PlayMode.SHUFFLE -> if (items.size > 1) (items.indices.filter { it != current }).random() else 0
             else -> (current + 1 + items.size) % items.size
@@ -291,7 +338,6 @@ internal fun MainActivity.next(auto: Boolean = false) {
 
 internal fun MainActivity.previous() {
         if (isLive) { skipStation(-1); return }
-        if (service?.hasBiliQueue == true) { service?.previous(); return }
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (items.isEmpty()) {
             playbackStatus = "播放列表为空，请先添加或扫描音频"
@@ -299,7 +345,7 @@ internal fun MainActivity.previous() {
             showPlaylist()
             return
         }
-        val current = items.indexOfFirst { it.uri == currentUri }
+        val current = items.indexOfFirst { it.id == currentItem?.id }
         val target = if (current < 0) items.lastIndex else (current - 1 + items.size) % items.size
         currentQueue = items
         load(items[target])
@@ -307,7 +353,7 @@ internal fun MainActivity.previous() {
 
 internal fun MainActivity.showPlaylist() {
         // 弹层回调的视图队列会成为切歌快照，过滤/排序改变时同步更新。
-        playlistDialog = PlaylistDialog(this, musicStore, dark, songs.firstOrNull { it.uri == currentUri }?.id ?: -1L,
+        playlistDialog = PlaylistDialog(this, musicStore, dark, currentItem?.id ?: -1L,
             { item -> onlinePlayingUri = null; currentQueue = queue; load(item) }, {
                 queue = it
                 if (!isLive && (onlinePlayingUri == null || currentUri != onlinePlayingUri)) {
@@ -316,24 +362,17 @@ internal fun MainActivity.showPlaylist() {
                 }
             }, songs, initialTab = when {
                 isLive -> 1
-                onlinePlayingUri != null && currentUri == onlinePlayingUri -> 2
+                onlinePlayingUri != null -> 2
                 else -> 0
             }) { tab, body, dialog ->
                 fmDialog = if (tab == 1) dialog else null
                 onlineDialog = if (tab == 2) dialog else null
                 sourceSheetBody = if (tab == 0) null else body
                 if (tab == 1) {
-                    syncStationFilterToCurrent()
                     populateSourceSheet(body, false)
                     sourceStatusView = j5i.spatial8d.ui.ThemeUi.text(this, "", 11f, palette,
                         role = j5i.spatial8d.ui.ThemeUi.ROLE_SUB).also { body.addView(it) }
                 } else if (tab == 2) {
-                    if (currentUri == onlinePlayingUri && onlinePlayingUri != null) {
-                        onlineProvider = onlinePlayingProvider
-                        onlineQuery = onlinePlayingQuery
-                        onlinePage = onlinePlayingPage
-                        onlineTracks = onlinePlayingTracks
-                    }
                     populateSourceSheet(body, true)
                 }
             }

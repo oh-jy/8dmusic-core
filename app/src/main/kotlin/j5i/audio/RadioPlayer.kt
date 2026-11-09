@@ -83,25 +83,25 @@ class RadioPlayer(private val probe: Boolean = false) {
     private var envelope = 0.0
     private var noiseGain = 1.0
 
-    fun load(url: String) {
+    fun load(url: String, providerSafe: Boolean = false, allowHttp: Boolean = false) {
         stop()
         val own = ++generation
         running = true
         paused = false
         playedFrames = 0
         if (probe) {
-            Thread({ probeSession(url, own) }, "spatial-radio-probe").start()
+            Thread({ probeSession(url, own, providerSafe, allowHttp) }, "spatial-radio-probe").start()
         } else {
-            Thread({ run(url, own) }, "spatial-radio").start()
+            Thread({ run(url, own, providerSafe, allowHttp) }, "spatial-radio").start()
         }
     }
 
     /** Probe 只验证 HTTP 连通性和首个 TS 分片可读，不跑 MediaExtractor/MediaCodec。 */
-    private fun probeSession(url: String, own: Int) {
+    private fun probeSession(url: String, own: Int, providerSafe: Boolean, allowHttp: Boolean) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_LESS_FAVORABLE)
         val tag = "8DRadio"
         val stream = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
-            com.j5i.spatial8d.HlsMediaDataSource(url) else HttpMediaDataSource(url)
+            com.j5i.spatial8d.HlsMediaDataSource(url, providerSafe, allowHttp) else HttpMediaDataSource(url, providerSafe, allowHttp)
         source = stream
         try {
             val start = android.os.SystemClock.elapsedRealtime()
@@ -168,13 +168,13 @@ class RadioPlayer(private val probe: Boolean = false) {
         writer?.stop()
     }
 
-    private fun run(url: String, own: Int) {
+    private fun run(url: String, own: Int, providerSafe: Boolean, allowHttp: Boolean) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
         var failures = 0
         while (own == generation && running) {
             var producedAudio = false
             try {
-                producedAudio = session(url, own)
+                producedAudio = session(url, own, providerSafe, allowHttp)
                 if (own == generation && running) {
                     running = false
                     releaseTrack()
@@ -202,12 +202,12 @@ class RadioPlayer(private val probe: Boolean = false) {
         }
     }
 
-    private fun session(url: String, own: Int): Boolean {
+    private fun session(url: String, own: Int, providerSafe: Boolean, allowHttp: Boolean): Boolean {
         val sessionStarted = android.os.SystemClock.elapsedRealtime()
         android.util.Log.i("8DRadio", "session start")
         val stream = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
-            TsAdtsMediaDataSource(url) else if (url.substringBefore('?').endsWith(".mp3", ignoreCase = true))
-            Mp3MediaDataSource(url) else HttpMediaDataSource(url)
+            TsAdtsMediaDataSource(url, providerSafe, allowHttp) else if (url.substringBefore('?').endsWith(".mp3", ignoreCase = true))
+            Mp3MediaDataSource(url, providerSafe, allowHttp) else HttpMediaDataSource(url, providerSafe, allowHttp)
         if (stream is TsAdtsMediaDataSource) return aacSession(stream, own, sessionStarted)
         if (stream is Mp3MediaDataSource) return mp3Session(stream, own, sessionStarted)
         source = stream

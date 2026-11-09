@@ -368,12 +368,18 @@ class PlaylistDialog(
             if (store.playlistIndex >= 0) addView(sheetButton(t("remove"), ThemeUi.ROLE_CONTROL) {
                 sheet.dismiss(); confirmRemove(song)
             })
-            addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
-                sheet.dismiss(); confirmDelete(song)
-            })
-            addView(sheetButton(t("metadata.edit"), ThemeUi.ROLE_CONTROL) {
-                sheet.dismiss(); (context as? PlaylistMetadataHost)?.editMetadata(song)
-            })
+            if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
+                addView(sheetButton("从音乐库移除", ThemeUi.ROLE_CONTROL) {
+                    sheet.dismiss(); store.removePermanently(song); syncLibrary()
+                })
+            } else {
+                addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
+                    sheet.dismiss(); confirmDelete(song)
+                })
+                addView(sheetButton(t("metadata.edit"), ThemeUi.ROLE_CONTROL) {
+                    sheet.dismiss(); (context as? PlaylistMetadataHost)?.editMetadata(song)
+                })
+            }
         }
         sheet.show()
     }

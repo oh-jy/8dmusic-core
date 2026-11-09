@@ -17,7 +17,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = '8dmusic-kt'
-include ':core', ':app'
+include ':core', ':app', ':provider-sdk'
 
 gradle.projectsLoaded {
     gradle.rootProject.allprojects { project ->

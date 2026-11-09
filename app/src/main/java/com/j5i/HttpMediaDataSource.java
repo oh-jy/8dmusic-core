@@ -6,6 +6,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import j5i.spatial8d.provider.ProviderNetwork;
+import okhttp3.Response;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Progressive HTTP source for MediaExtractor.
@@ -20,6 +24,11 @@ public class HttpMediaDataSource extends MediaDataSource {
     private static final int READ_TIMEOUT_MS = 5000;
 
     private final String url;
+    private final boolean providerSafe;
+    private final boolean allowHttp;
+    private final String referer;
+    private final String cookie;
+    private Response safeResponse;
     private final byte[] cache = new byte[CACHE_BYTES];
 
     private HttpURLConnection connection;
@@ -32,8 +41,18 @@ public class HttpMediaDataSource extends MediaDataSource {
     private boolean closed;
     private long contentLength = -1;
 
-    public HttpMediaDataSource(String url) {
+    public HttpMediaDataSource(String url) { this(url, false, false); }
+
+    public HttpMediaDataSource(String url, boolean providerSafe, boolean allowHttp) {
+        this(url, providerSafe, allowHttp, "", "");
+    }
+
+    public HttpMediaDataSource(String url, boolean providerSafe, boolean allowHttp, String referer, String cookie) {
         this.url = url;
+        this.providerSafe = providerSafe;
+        this.allowHttp = allowHttp;
+        this.referer = referer;
+        this.cookie = cookie;
     }
 
     @Override
@@ -84,6 +103,35 @@ public class HttpMediaDataSource extends MediaDataSource {
         cacheStart = position;
         cacheLength = 0;
         eof = false;
+
+        if (providerSafe) {
+            Map<String, String> headers = new HashMap<>();
+            headers.put("Accept", "*/*");
+            headers.put("Icy-MetaData", "1");
+            if (position > 0) headers.put("Range", "bytes=" + position + "-");
+            if (!referer.isEmpty()) headers.put("Referer", referer);
+            if (!cookie.isEmpty()) headers.put("Cookie", cookie);
+            Response response = ProviderNetwork.INSTANCE.open(url, allowHttp, headers);
+            int code = response.code();
+            if ((code != 200 && code != 206) || response.body() == null) {
+                response.close();
+                throw new IOException("HTTP " + code);
+            }
+            safeResponse = response;
+            input = response.body().byteStream();
+            if (position == 0) contentLength = response.body().contentLength();
+            else if (code == 200) { skipNetwork(position); contentLength = -1; }
+            else {
+                String range = response.header("Content-Range");
+                if (range != null && range.contains("/")) {
+                    try { contentLength = Long.parseLong(range.substring(range.lastIndexOf('/') + 1)); }
+                    catch (NumberFormatException ignored) {}
+                }
+            }
+            icyMetaInt = parsePositiveInt(response.header("icy-metaint"));
+            audioRemaining = icyMetaInt;
+            return;
+        }
 
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(CONNECT_TIMEOUT_MS);
@@ -203,6 +251,10 @@ public class HttpMediaDataSource extends MediaDataSource {
             } catch (IOException ignored) {
             }
             input = null;
+        }
+        if (safeResponse != null) {
+            safeResponse.close();
+            safeResponse = null;
         }
         if (connection != null) {
             connection.disconnect();

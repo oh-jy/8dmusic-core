@@ -14,6 +14,8 @@ public final class Mp3MediaDataSource extends HttpMediaDataSource {
 
     public Mp3MediaDataSource(String url) { super(url); }
 
+    public Mp3MediaDataSource(String url, boolean providerSafe, boolean allowHttp) { super(url, providerSafe, allowHttp); }
+
     public synchronized byte[] nextFrame() throws IOException {
         while (true) {
             byte[] data = pending.toByteArray();

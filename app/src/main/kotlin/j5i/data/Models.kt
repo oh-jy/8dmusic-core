@@ -1,5 +1,8 @@
 package j5i.spatial8d.data
 
+internal fun MusicItem.isOnlineAudio() = album.startsWith("plugin:") || album.startsWith("provider:") ||
+    album.startsWith("在线缓存") || uri.startsWith("online://") || uri.startsWith("http://") || uri.startsWith("https://")
+
 data class MusicItem(
     val id: Long,
     val name: String,

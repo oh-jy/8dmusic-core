@@ -24,6 +24,8 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.data.isOnlineAudio
+import j5i.spatial8d.provider.ProviderCredentials
 import j5i.spatial8d.data.MusicStore
 import j5i.spatial8d.data.PlayMode
 import com.j5i.spatial8d.HttpMediaDataSource
@@ -62,52 +64,6 @@ class PlaybackService : Service() {
     private val store by lazy { MusicStore(this) }
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val decodeExecutor = Executors.newSingleThreadExecutor()
-    private val onlineExecutor = Executors.newSingleThreadExecutor()
-    private val bili by lazy { BiliMusic(applicationContext) }
-    private var biliQueue = listOf<OnlineTrack>()
-    private var biliIndex = -1
-    private var biliGeneration = 0
-    val hasBiliQueue: Boolean get() = biliIndex in biliQueue.indices
-
-    fun setBiliQueue(items: List<OnlineTrack>, id: String) {
-        biliGeneration++
-        biliQueue = items.toList()
-        biliIndex = items.indexOfFirst { it.id == id }
-        savePlaybackSnapshot(force = true)
-    }
-
-    fun clearBiliQueue() {
-        biliGeneration++
-        biliQueue = emptyList()
-        biliIndex = -1
-    }
-
-    private fun skipBili(previous: Boolean) {
-        if (!hasBiliQueue) return
-        val index = if (previous) (biliIndex - 1 + biliQueue.size) % biliQueue.size
-        else if (playbackMode() == PlayMode.SHUFFLE && biliQueue.size > 1)
-            biliQueue.indices.filter { it != biliIndex }.random()
-        else (biliIndex + 1) % biliQueue.size
-        val track = biliQueue[index]
-        val generation = ++biliGeneration
-        currentItem?.let(::ensureContinuousForeground)
-        onlineExecutor.execute {
-            val result = runCatching { bili.download(track) }
-            main.post {
-                if (generation != biliGeneration) return@post
-                result.onSuccess { uri ->
-                    biliIndex = index
-                    val item = MusicItem((track.provider + track.id).hashCode().toLong(),
-                        "${track.title} · ${track.artist}", uri, duration = (track.duration * 1000).toLong(),
-                        artist = track.artist, album = "B站音频")
-                    load(item, listOf(item))
-                }.onFailure {
-                    transitioning = false
-                    onPlaybackError?.invoke(it.message ?: "合集曲目加载失败")
-                }
-            }
-        }
-    }
     @Volatile private var queue = listOf<MusicItem>()
     @Volatile private var currentItem: MusicItem? = null
     @Volatile private var loadGeneration = 0
@@ -175,6 +131,7 @@ class PlaybackService : Service() {
     }
 
     override fun onCreate() {
+        j5i.spatial8d.provider.ProviderMigration.run(this)
         super.onCreate()
         // 上次进程异常退出可能留下整轨 PCM；本进程尚未创建新缓冲。
         File(cacheDir, "decoded-pcm").listFiles()?.forEach { it.delete() }
@@ -215,12 +172,36 @@ class PlaybackService : Service() {
     /** 解码、队列和播放都在服务；页面销毁不影响自然续播。 */
     fun load(item: MusicItem, queue: List<MusicItem> = this.queue, autoplay: Boolean = true,
         resumePosition: Double = 0.0) {
+        if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
+            decodeExecutor.execute {
+                val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
+                main.post {
+                    resolved.onSuccess { load(it, queue, autoplay, resumePosition) }
+                        .onFailure { onPlaybackError?.invoke("在线歌曲解析失败：${it.message}") }
+                }
+            }
+            return
+        }
+        if (item.album.startsWith("plugin:https:")) {
+            val id = item.album.substringAfter("plugin:https:")
+            val active = runCatching { j5i.spatial8d.provider.ProviderPluginStore(this).list().any { it.enabled && it.descriptor.id == id } }.getOrDefault(false)
+            if (!active) { onPlaybackError?.invoke("插件来源不存在或已停用"); return }
+        }
+        if (item.album.startsWith("provider:")) {
+            val id = item.album.substringAfter(':').substringAfter(':', "")
+            val active = runCatching { j5i.spatial8d.provider.ProviderStore(this).list().any { it.enabled && it.definition.id == id } }.getOrDefault(false)
+            if (!active) { onPlaybackError?.invoke("来源不存在或已停用"); return }
+        }
         val own = ++loadGeneration
         desiredPlaying = autoplay
         pausedByFocus = false
         if (!autoplay || currentItem?.uri != item.uri) autoplayFailures = 0
         val keepForeground = transitioning
         transitioning = false
+        val previous = currentItem
+        if (autoplay && previous != null && previous.isOnlineAudio() != item.isOnlineAudio()) {
+            controlsPreset = if (item.isOnlineAudio()) j5i.spatial8d.core.SPACE_PRESETS[0] else j5i.spatial8d.core.DEFAULT_SPACE_PRESET
+        }
         this.queue = queue.ifEmpty { listOf(item) }
         currentItem = item
         player.stop()
@@ -228,12 +209,23 @@ class PlaybackService : Service() {
             !item.uri.startsWith("https://", ignoreCase = true)
         updateMedia(item.name, item.artist, keepForeground, duration = item.duration / 1000.0)
         decodeExecutor.execute {
-            val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
-            val stream = if (remote) {
-                if (item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
-                    TsAdtsMediaDataSource(item.uri) else HttpMediaDataSource(item.uri)
-            } else null
+            var stream: android.media.MediaDataSource? = null
             try {
+            val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
+            stream = if (remote) {
+                val safe = item.album.startsWith("provider:http:") || item.album.startsWith("provider:https:") || item.album.startsWith("plugin:https:")
+                val plugin = if (item.album.startsWith("plugin:https:"))
+                    j5i.spatial8d.provider.ProviderPluginStore(this).list().first { it.enabled && it.descriptor.id == item.album.substringAfter("plugin:https:") } else null
+                val allowHttp = item.album.startsWith("provider:http:") || plugin != null
+                if (item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true))
+                    TsAdtsMediaDataSource(item.uri, safe, allowHttp) else if (item.album.startsWith("plugin:https:")) {
+                    val id = item.album.substringAfter("plugin:https:")
+                    val entry = requireNotNull(plugin)
+                    val referer = if ("referer" in entry.descriptor.capabilities) "https://www.bilibili.com/" else ""
+                    val cookie = ProviderCredentials(this).get(id)
+                    HttpMediaDataSource(item.uri, true, allowHttp, referer, cookie)
+                } else HttpMediaDataSource(item.uri, safe, allowHttp)
+            } else null
                 val decoder = AudioDecoder(this)
                 val source = if (stream != null) null else store.readableUri(item)
                 val onHead: (j5i.spatial8d.core.PcmBuffer, Long) -> Unit = { head, _ ->
@@ -289,14 +281,12 @@ class PlaybackService : Service() {
     fun next() = continueQueue(auto = false)
 
     fun previous() {
-        if (hasBiliQueue) { skipBili(true); return }
         val item = currentItem ?: return
-        PlaybackQueue(queue, playbackMode()).previous(item.uri)?.let { load(it) }
+        PlaybackQueue(queue, playbackMode()).previous(item.uri, item.id)?.let { load(it) }
     }
 
     /** 切到电台也使尚未完成的本地解码失效，避免后台迟到回调重新起播。 */
     fun stopLocal() {
-        clearBiliQueue()
         loadGeneration++
         transitioning = false
         player.stop()
@@ -330,8 +320,7 @@ class PlaybackService : Service() {
             player.replay(forcePlay = true)
             return
         }
-        if (hasBiliQueue) { skipBili(false); return }
-        val next = PlaybackQueue(queue, mode).next(item.uri, auto)
+        val next = PlaybackQueue(queue, mode).next(item.uri, auto, item.id)
         if (next == null) {
             if (auto && queue.isNotEmpty()) {
                 ensureContinuousForeground(item)
@@ -502,7 +491,6 @@ class PlaybackService : Service() {
         session.isActive = false
         session.release()
         decodeExecutor.shutdownNow()
-        onlineExecutor.shutdownNow()
         player.close()
         radio.stop()
         radio.stopRecording()

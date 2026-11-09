@@ -33,6 +33,10 @@ public final class TsAdtsMediaDataSource extends MediaDataSource {
         hls = new HlsMediaDataSource(url);
     }
 
+    public TsAdtsMediaDataSource(String url, boolean providerSafe, boolean allowHttp) {
+        hls = new HlsMediaDataSource(url, providerSafe, allowHttp);
+    }
+
     @Override
     public synchronized int readAt(long position, byte[] buffer, int offset, int size)
             throws IOException {

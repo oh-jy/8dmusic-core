@@ -96,7 +96,8 @@ class Lyrics(context: Context) {
         artist: String = "",
         durationSeconds: Double = 0.0,
         callback: (Result<LyricsResult>) -> Unit,
-        onProgress: (String) -> Unit = {}
+        onProgress: (String) -> Unit = {},
+        allowNetwork: Boolean = true
     ) {
         fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
@@ -108,7 +109,8 @@ class Lyrics(context: Context) {
         progress("读取本地歌词缓存…")
         val cleanTitle = title.trim()
         val cleanArtist = knownArtist(artist.trim())
-        val requestKey = key(cleanTitle, cleanArtist, durationSeconds)
+        val failureKey = key(cleanTitle, cleanArtist, durationSeconds)
+        val requestKey = failureKey + if (allowNetwork) ":network" else ":offline"
         // 合并相同请求；旧请求超时后允许新请求重试。
         val callbacks = synchronized(requestLock) {
             val pending = requests[requestKey]
@@ -122,7 +124,9 @@ class Lyrics(context: Context) {
         thread(name = "lyrics-search") {
             val result = try {
                 // 本地持久歌词优先，兼容旧缓存以及元数据变化造成的精确键失配。
-                Result.success(cachedLyrics(cleanTitle, cleanArtist, durationSeconds) ?: try {
+                Result.success(cachedLyrics(cleanTitle, cleanArtist, durationSeconds) ?: if (!allowNetwork) {
+                    throw NoSuchElementException("没有本地歌词缓存")
+                } else try {
                     progress("LRCLIB 在线检索…")
                     fetch(title.trim(), artist.trim(), durationSeconds)
                 } catch (e: Exception) {
@@ -149,8 +153,10 @@ class Lyrics(context: Context) {
                     if (requests[requestKey]?.second === callbacks) requests.remove(requestKey)
                 }
                 synchronized(requestLock) {
-                    if (result.isSuccess) failures.edit().remove(requestKey).apply()
-                    else failures.edit().putInt(requestKey, (failures.getInt(requestKey, 0) + 1).coerceAtMost(5)).apply()
+                    if (allowNetwork) {
+                        if (result.isSuccess) failures.edit().remove(failureKey).apply()
+                        else failures.edit().putInt(failureKey, (failures.getInt(failureKey, 0) + 1).coerceAtMost(5)).apply()
+                    }
                 }
                 result.onSuccess { Log.i("8DLyrics", "歌词成功：${it.trackName} · ${it.artistName} · ${it.lines.size} 行") }
                 callbacks.forEach { it(result) }
@@ -487,6 +493,8 @@ class Lyrics(context: Context) {
             (0 until artists.length()).joinToString(" / ") { decode(artists.getJSONObject(it).optString("name")) },
             lines, toSimplified(synced)).also { writeCache(cacheFile(title, knownArtist(artist), duration), best, it) }
     }
+
+    fun cancelPrefetch() { prefetchGeneration.incrementAndGet() }
 
     /** 后台串行预取整个曲库；仅自动任务受失败次数限制，手动搜索始终可用。 */
     fun prefetch(songs: List<MusicItem>) {
