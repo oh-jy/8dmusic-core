@@ -7,10 +7,14 @@ import android.os.Process;
 
 /** Microphone recorder that writes 16-bit PCM WAV through PcmWavRecorder. */
 public final class MicWavRecorder {
+    public interface Listener { void onPcm(byte[] data, int length); }
     private AudioRecord record;
     private PcmWavRecorder writer;
     private Thread thread;
     private volatile boolean recording;
+    private volatile Listener listener;
+
+    public void setListener(Listener listener) { this.listener = listener; }
 
     public synchronized boolean start(String path, int sampleRate, int channels) {
         if (recording) {
@@ -94,6 +98,8 @@ public final class MicWavRecorder {
             int n = record.read(buffer, 0, buffer.length);
             if (n > 0) {
                 writer.write(buffer, 0, n);
+                Listener current = listener;
+                if (current != null) current.onPcm(buffer, n);
             } else {
                 try {
                     Thread.sleep(5);

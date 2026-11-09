@@ -48,6 +48,7 @@ class RadioPlayer(private val probe: Boolean = false) {
     var onReconnecting: ((String) -> Unit)? = null
     var onPcm: ((ByteArray, Int) -> Unit)? = null
     val isPlaying get() = running && !paused
+    val outputSampleRate get() = sampleRate
     val position get() = playedFrames.toDouble() / sampleRate
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var generation = 0

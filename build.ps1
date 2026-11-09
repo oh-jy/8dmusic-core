@@ -5,6 +5,7 @@ param(
     [switch]$Clean,
     [switch]$Test,
     [switch]$Install,
+    [switch]$WithAsr,
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$GradleArgs
 )
@@ -48,6 +49,7 @@ if ($Clean) {
 $tasks = @()
 if ($Test) { $tasks += ':app:testDebugUnitTest' }
 $tasks += ":app:assemble$Configuration"
+if ($WithAsr) { $GradleArgs += '-PwithAsr=true' }
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 & $gradle --project-dir $PSScriptRoot --project-cache-dir "$PSScriptRoot\build\gradle" `
     "-Dkotlin.project.persistent.dir=$PSScriptRoot\build\kotlin" `
@@ -58,6 +60,10 @@ $stopwatch.Stop()
 
 $apk = Join-Path $PSScriptRoot "build\outputs\apk\$variant\app-$variant.apk"
 if (-not (Test-Path -LiteralPath $apk)) { throw "APK not found: $apk" }
+$deliveryDir = Join-Path $PSScriptRoot 'build\deliveries'
+New-Item -ItemType Directory -Path $deliveryDir -Force | Out-Null
+$namedApk = Join-Path $deliveryDir "app-$variant-$(if ($WithAsr) { 'asr' } else { 'no-asr' }).apk"
+Copy-Item -LiteralPath $apk -Destination $namedApk -Force
 if ($Install) {
     $adb = 'D:\temp\tools\android-sdk\platform-tools\adb.exe'
     $devices = @(& $adb devices | Select-Object -Skip 1 | Where-Object { $_ -match "`tdevice$" })
@@ -67,4 +73,5 @@ if ($Install) {
     & $adb shell dumpsys package $package | Select-String 'versionCode=|versionName='
 }
 Get-Item -LiteralPath $apk | Select-Object FullName, Length, LastWriteTime
+Get-Item -LiteralPath $namedApk | Select-Object FullName, Length
 "Build elapsed: $($stopwatch.Elapsed.ToString('mm\:ss'))"

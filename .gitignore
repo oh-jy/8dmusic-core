@@ -9,4 +9,5 @@ local.properties
 .DS_Store
 fix_structure.py
 .codex-tmp/
+.worktrees/
 docs/signing/

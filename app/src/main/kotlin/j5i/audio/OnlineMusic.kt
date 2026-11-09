@@ -131,6 +131,14 @@ class OnlineMusic(private val activity: Activity) {
     }
 
     fun biliCached(track: OnlineTrack): Boolean = bili.cached(track)
+    fun canSaveBili(track: OnlineTrack): Boolean = bili.canSave(track)
+
+    fun saveBiliCached(track: OnlineTrack, callback: (Result<String>) -> Unit) {
+        thread(name = "bili-save") {
+            try { deliver(callback, Result.success(bili.saveCached(track))) }
+            catch (e: Exception) { deliver(callback, Result.failure(e)) }
+        }
+    }
 
     fun deleteBiliAudio(track: OnlineTrack): Boolean = bili.delete(track)
 

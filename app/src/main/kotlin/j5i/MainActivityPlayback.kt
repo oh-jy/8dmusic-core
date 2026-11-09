@@ -76,6 +76,9 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         radioProbes.forEach { it.stop() }
         radioProbes = emptyList()
         isLive = false
+        offlineAsrEnabled = false
+        asrTranscript = ""
+        if (offlineAsrLazy.isInitialized()) offlineAsr.stop()
         stationIndex = -1
         currentStationId = ""
         radioSources = emptyList()
@@ -92,6 +95,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         currentUri = item.uri
         playbackStatus = t("status.preparing")
         service?.let {
+            it.clearBiliQueue()
             it.controlsPreset = preset
             it.controlsTransform = transform
             it.controlsReverse = reverse
@@ -154,6 +158,7 @@ internal fun MainActivity.adoptServiceTrack(item: MusicItem) {
         currentQueue = service?.queueSnapshot?.ifEmpty { currentQueue } ?: currentQueue
         currentItem = item
         currentUri = item.uri
+        if (service?.hasBiliQueue == true) onlinePlayingUri = item.uri
         currentIndex = currentQueue.indexOfFirst { it.uri == item.uri }
         loadLyrics(item)
         playbackStatus = t("status.auto.next")
@@ -257,6 +262,7 @@ internal fun MainActivity.savePlaybackState() {
 
 internal fun MainActivity.next(auto: Boolean = false) {
         if (isLive) { skipStation(1); return }
+        if (service?.hasBiliQueue == true) { service?.next(); return }
         if (!auto) autoplayRequests = 0
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (currentItem != null && items.indexOfFirst { it.uri == currentUri } < 0) {
@@ -285,6 +291,7 @@ internal fun MainActivity.next(auto: Boolean = false) {
 
 internal fun MainActivity.previous() {
         if (isLive) { skipStation(-1); return }
+        if (service?.hasBiliQueue == true) { service?.previous(); return }
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (items.isEmpty()) {
             playbackStatus = "播放列表为空，请先添加或扫描音频"
@@ -301,11 +308,35 @@ internal fun MainActivity.previous() {
 internal fun MainActivity.showPlaylist() {
         // 弹层回调的视图队列会成为切歌快照，过滤/排序改变时同步更新。
         playlistDialog = PlaylistDialog(this, musicStore, dark, songs.firstOrNull { it.uri == currentUri }?.id ?: -1L,
-            { item -> currentQueue = queue; load(item) }, {
+            { item -> onlinePlayingUri = null; currentQueue = queue; load(item) }, {
                 queue = it
-                currentQueue = it
-                service?.syncQueue(it, currentUri)
-            }, songs)
+                if (!isLive && (onlinePlayingUri == null || currentUri != onlinePlayingUri)) {
+                    currentQueue = it
+                    service?.syncQueue(it, currentUri)
+                }
+            }, songs, initialTab = when {
+                isLive -> 1
+                onlinePlayingUri != null && currentUri == onlinePlayingUri -> 2
+                else -> 0
+            }) { tab, body, dialog ->
+                fmDialog = if (tab == 1) dialog else null
+                onlineDialog = if (tab == 2) dialog else null
+                sourceSheetBody = if (tab == 0) null else body
+                if (tab == 1) {
+                    syncStationFilterToCurrent()
+                    populateSourceSheet(body, false)
+                    sourceStatusView = j5i.spatial8d.ui.ThemeUi.text(this, "", 11f, palette,
+                        role = j5i.spatial8d.ui.ThemeUi.ROLE_SUB).also { body.addView(it) }
+                } else if (tab == 2) {
+                    if (currentUri == onlinePlayingUri && onlinePlayingUri != null) {
+                        onlineProvider = onlinePlayingProvider
+                        onlineQuery = onlinePlayingQuery
+                        onlinePage = onlinePlayingPage
+                        onlineTracks = onlinePlayingTracks
+                    }
+                    populateSourceSheet(body, true)
+                }
+            }
         playlistDialog?.show()
     }
 

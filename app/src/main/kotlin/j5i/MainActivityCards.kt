@@ -437,6 +437,7 @@ internal fun MainActivity.curveCard(): LinearLayout {
                 }
             })
             curveLegend = ThemeUi.row(this@curveCard).apply {
+                visibility = if (curvePanel == 0) View.VISIBLE else View.GONE
                 listOf(
                     t("left.ear") to 0xff4ea1ff.toInt(),
                     t("right.ear") to 0xffff7a59.toInt(),
@@ -465,20 +466,20 @@ internal fun MainActivity.curveCard(): LinearLayout {
             // 用 FrameLayout 叠放四个面板，同一时间只有一个 VISIBLE，MATCH_PARENT 才能占满整个高度。
             // 之前 LinearLayout 中多个 height=-1 的子 view 会被平分/压缩，造成音频图谱/可视化上下留白。
             curveContent = FrameLayout(this@curveCard).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@curveCard, 140f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@curveCard, if (curvePanel == 0) 140f else 162f))
             }
-            curve = CurveView(this@curveCard)
+            curve = CurveView(this@curveCard).apply { visibility = if (curvePanel == 0) View.VISIBLE else View.GONE }
             curveContent.addView(curve, FrameLayout.LayoutParams(-1, -1))
             lyricsView = LyricsView(this@curveCard).apply {
                 dark = this@curveCard.dark
                 onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
                 onManual = { currentItem?.let { showLyricsCandidates(it) } }
-                visibility = View.GONE
+                visibility = if (curvePanel == 2) View.VISIBLE else View.GONE
             }
             curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
             visualizerView = VisualizerView(this@curveCard).apply {
                 dark = this@curveCard.dark
-                visibility = View.GONE
+                visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
                 onExpand = { showVisualizerSheet() }
             }
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
@@ -503,7 +504,10 @@ internal fun MainActivity.installPcmRenderer() {
         PerfTrace.sample("visual.fanoutNs", System.nanoTime() - startedAt)
         }
         service?.player?.onPcm = render
-        service?.radio?.onPcm = render
+        service?.radio?.onPcm = { data, bytes ->
+            render(data, bytes)
+            if (isLive && offlineAsrEnabled) offlineAsr.acceptPcm(data, bytes, service?.radio?.outputSampleRate ?: 44_100, 2)
+        }
     }
 
     /** 文件名和时长共同参与匹配，切歌代号阻止旧请求覆盖新歌歌词。 */

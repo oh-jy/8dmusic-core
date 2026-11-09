@@ -65,13 +65,13 @@ public final class MusicSourceApi {
 
     private MusicSourceApi() {}
 
-    public static void request(Activity activity, String url, String method, String body,
+    public static void request(Context activity, String url, String method, String body,
                                boolean qq, Callback callback) {
         request(activity, url, method, body, qq ? "qq" : "", callback);
     }
 
     /** Provider-scoped sessions: no provider can accidentally consume another site's cookies. */
-    public static void request(Activity activity, String url, String method, String body,
+    public static void request(Context activity, String url, String method, String body,
                                String provider, Callback callback) {
         new Thread(() -> {
             String result;
@@ -121,9 +121,9 @@ public final class MusicSourceApi {
         }).start();
     }
 
-    private static String providerCookie(Activity activity, String provider) {
+    private static String providerCookie(Context activity, String provider) {
         if (provider == null || provider.isEmpty()) return "";
-        if ("qq".equals(provider)) { restore(activity); synchronized (LOCK) { return cookie; } }
+        if ("qq".equals(provider)) { if (activity instanceof Activity) restore((Activity) activity); synchronized (LOCK) { return cookie; } }
         synchronized (LOCK) {
             String value = providerCookies.get(provider);
             if (value == null) {
@@ -134,7 +134,7 @@ public final class MusicSourceApi {
         }
     }
 
-    private static void saveResponseCookies(Activity activity, String provider, Map<String, java.util.List<String>> headers) {
+    private static void saveResponseCookies(Context activity, String provider, Map<String, java.util.List<String>> headers) {
         if (!"netease".equals(provider) && !"bilibili".equals(provider)) return;
         java.util.List<String> values = headers.get("Set-Cookie");
         if (values == null) values = headers.get("set-cookie");
@@ -155,16 +155,16 @@ public final class MusicSourceApi {
         String merged = result.toString();
         saveProviderCookie(activity, provider, merged);
         // 短信登录等非 WebView 流程拿到完整会话后，同样落盘到公共登录目录。
-        if (LoginCookies.valid(provider, merged)) writeLoginFile(activity, provider, merged);
+        if (LoginCookies.valid(provider, merged) && activity instanceof Activity) writeLoginFile((Activity) activity, provider, merged);
     }
 
-    private static void saveProviderCookie(Activity activity, String provider, String value) {
+    private static void saveProviderCookie(Context activity, String provider, String value) {
         synchronized (LOCK) { providerCookies.put(provider, value); }
         activity.getSharedPreferences(SESSION_PREFS, Context.MODE_PRIVATE).edit().putString(provider, value).apply();
     }
 
     /** Only session state is returned; cookies and verification codes never reach UI or logs. */
-    public static String sessionInfo(Activity activity, String provider) {
+    public static String sessionInfo(Context activity, String provider) {
         if ("qq".equals(provider)) return sessionInfo();
         String value = providerCookie(activity, provider);
         boolean loggedIn = LoginCookies.valid(provider, value);
@@ -182,12 +182,12 @@ public final class MusicSourceApi {
     }
 
     /** Raw provider cookie for binary downloads (e.g. DASH audio CDN checks). */
-    public static String sessionCookie(Activity activity, String provider) {
+    public static String sessionCookie(Context activity, String provider) {
         return providerCookie(activity, provider);
     }
 
     /** Persists cookies captured after an official WebView login for a provider. */
-    public static void saveSession(Activity activity, String provider, String cookie) {
+    public static void saveSession(Context activity, String provider, String cookie) {
         saveProviderCookie(activity, provider, cookie == null ? "" : cookie);
     }
 

@@ -38,6 +38,7 @@ class LyricsView(context: Context) : ScrollView(context) {
     private var touching = false
     private var topPadding = 0
     private var bottomPadding = 0
+    private var liveCaption = ""
 
     init {
         isFillViewport = true
@@ -50,6 +51,7 @@ class LyricsView(context: Context) : ScrollView(context) {
 
     /** null 表示暂无歌词；instrumental 和无时间轴文本不会伪造逐行高亮。 */
     fun setLyrics(value: LyricsResult?) {
+        liveCaption = ""
         lyrics = value
         if (positionMs < 0) positionMs = 0
         activeIndex = -2
@@ -89,6 +91,17 @@ class LyricsView(context: Context) : ScrollView(context) {
             updatePadding()
             scrollToLine(activeIndex, false)
         }
+    }
+
+    /** Shows the current FM transcript using the same centered, highlighted lyric row. */
+    fun setLiveCaption(text: String) {
+        if (liveCaption == text) return
+        if (text.isBlank()) {
+            setLyrics(null)
+        } else {
+            setLyrics(LyricsResult("FM", "", listOf(j5i.spatial8d.audio.LyricLine(0, text))))
+        }
+        liveCaption = text
     }
 
     /** 外部播放器仍是唯一进度来源；force 仅用于切歌或用户返回当前行。 */

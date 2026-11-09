@@ -102,11 +102,15 @@ internal fun MainActivity.startMicRecording() {
         val path = java.io.File(cacheDir, "mic_${System.currentTimeMillis()}.wav").absolutePath
         Thread {
             val recorder = MicWavRecorder()
+            recorder.setListener { data, length ->
+                if (offlineAsrEnabled) offlineAsr.acceptPcm(data, length, 44100, 1)
+            }
             if (!recorder.start(path, 44100, 1)) {
                 main.post { toast("麦克风初始化失败，可能被其它应用占用") }
                 return@Thread
             }
             micRecorder = recorder
+            if (offlineAsrEnabled) offlineAsr.start()
             main.post { sourceStatusView?.let { beginRecording("mic", path, it) } }
         }.start()
     }
@@ -123,6 +127,7 @@ internal fun MainActivity.finishMicRecording(statusView: TextView) {
         micRecorder = null
         Thread {
             recorder.stop()
+            recorder.setListener(null)
             main.post { finishRecording("麦克风录音", statusView) }
         }.start()
     }

@@ -33,6 +33,7 @@ import j5i.spatial8d.audio.OnlineMusic
 import j5i.spatial8d.audio.OnlineTrack
 import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.audio.LyricsResult
+import j5i.spatial8d.audio.OfflineAsr
 import j5i.spatial8d.ui.LyricsView
 import j5i.spatial8d.ui.VisualizerView
 import com.j5i.spatial8d.MusicSourceApi
@@ -73,6 +74,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var restoreUri: String? = null
     internal var restorePosition = 0.0
     internal var currentItem: MusicItem? = null
+    internal val favoriteDownloads = mutableSetOf<Long>()
     internal var pageActive = true
     internal var exporting = false
     internal var dark = true
@@ -164,10 +166,18 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var sourceType = "全部"
     internal var stationListBody: LinearLayout? = null
     internal var onlineProvider = 0
-    internal var curvePanel = 0
+    internal var curvePanel = 1
     internal var onlinePage = 1
     internal var onlineQuery = ""
     internal var onlineTracks = listOf<OnlineTrack>()
+    internal var onlinePlayingUri: String? = null
+    internal var onlinePlayingId: String? = null
+    internal var onlineSelectedId: String? = null
+    internal var onlinePlayingProvider = 0
+    internal var onlinePlayingQuery = ""
+    internal var onlinePlayingPage = 1
+    internal var onlinePlayingTracks = listOf<OnlineTrack>()
+    internal var sourceSheetBody: LinearLayout? = null
     internal var onlineBody: LinearLayout? = null
     internal var onlineStatusView: TextView? = null
     internal var onlineSearchSeq = 0
@@ -190,6 +200,24 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var playlistDialog: PlaylistDialog? = null
     internal var seekGuardUntil = 0L
     internal var micRecorder: MicWavRecorder? = null
+    internal val offlineAsrLazy = lazy {
+        OfflineAsr(this,
+            onText = { text -> main.post { asrTranscript = text; refreshPlayback() } },
+            onError = { error -> main.post { offlineAsrEnabled = false; playbackStatus = "离线识别失败：$error"; refreshPlayback() } },
+        )
+    }
+    internal val offlineAsr get() = offlineAsrLazy.value
+    internal var asrTranscript = ""
+    internal var offlineAsrEnabled = false
+
+    internal fun toggleOfflineAsr() {
+        if (!BuildConfig.WITH_ASR) { toast("当前安装包不含离线识别功能"); return }
+        offlineAsrEnabled = !offlineAsrEnabled
+        asrTranscript = ""
+        if (offlineAsrEnabled) offlineAsr.start() else offlineAsr.stop()
+        refreshPlayback()
+        sourceStatusView?.text = if (offlineAsrEnabled) "离线识别已开启" else "离线识别已关闭"
+    }
     internal lateinit var liveTimeline: LinearLayout
     internal lateinit var recordingLabel: TextView
     internal lateinit var transformCardRoot: LinearLayout
@@ -318,6 +346,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         service?.player?.stopRecording()
         service?.radio?.stopRecording()
         micRecorder?.stop()
+        micRecorder?.setListener(null)
+        if (offlineAsrLazy.isInitialized()) offlineAsrLazy.value.release()
         main.removeCallbacks(ticker)
         service?.controls = null
         service?.onTrackChanged = null

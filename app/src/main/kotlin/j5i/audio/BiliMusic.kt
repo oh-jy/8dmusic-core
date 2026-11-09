@@ -1,6 +1,7 @@
 package j5i.spatial8d.audio
 
 import android.app.Activity
+import android.content.Context
 import android.content.ContentUris
 import android.content.ContentValues
 import android.net.Uri
@@ -25,7 +26,7 @@ import android.util.Log
  * 哔哩哔哩音源：搜索视频元数据，播放时只取 DASH 音频轨并保存为本地 m4a。
  * 视频流从不下载；未登录可搜索公开内容，登录（扫码或手机号在官方页完成）后会话更稳。
  */
-class BiliMusic(private val activity: Activity) {
+class BiliMusic(private val activity: Context) {
     companion object {
         private const val PROVIDER = "bilibili"
         // The web DASH CDN rejects Android browser UAs even for otherwise accessible tracks.
@@ -47,7 +48,7 @@ class BiliMusic(private val activity: Activity) {
             .getOrDefault(false)
 
     fun login(callback: (Result<Unit>) -> Unit) {
-        MusicSourceApi.loginWeb(activity, PROVIDER, LOGIN_URL, REFERER, "SESSDATA=") { raw ->
+        MusicSourceApi.loginWeb(activity as Activity, PROVIDER, LOGIN_URL, REFERER, "SESSDATA=") { raw ->
             val r = JSONObject(raw)
             if (r.optBoolean("ok")) callback(Result.success(Unit))
             else callback(Result.failure(Exception(r.optString("message", "登录失败"))))
@@ -129,9 +130,41 @@ class BiliMusic(private val activity: Activity) {
         if (!bvid.startsWith("BV")) return false
         val cid = segments.getOrNull(1)?.toLongOrNull()
         val key = if (cid != null) "${bvid}_$cid" else bvid
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        return cachedTemp(track) != null || if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             publicAudio("$key.m4a") != null || privateAudio(key) != null
         } else privateAudio(key) != null
+    }
+
+    private fun cachedTemp(track: OnlineTrack): File? {
+        val segments = track.id.substringAfter("bili:").split(':')
+        val bvid = segments.firstOrNull().orEmpty()
+        if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) return null
+        val cid = segments.getOrNull(1)?.toLongOrNull()
+        if (cid != null) return tempAudio("${bvid}_$cid")
+        if (track.compilation) return null
+        return File(activity.cacheDir, "bili").listFiles()?.filter {
+            (it.name == "$bvid.m4a" || it.name.matches(Regex("${bvid}_[0-9]+\\.m4a"))) && it.length() > 100_000
+        }?.singleOrNull()
+    }
+
+    fun canSave(track: OnlineTrack): Boolean = cachedTemp(track) != null
+
+    fun saveCached(track: OnlineTrack): String {
+        val source = cachedTemp(track) ?: error("缓存已失效，请重新播放后保存")
+        checkContainer(source)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            publicAudio(source.name)?.let { return it.toString() }
+            return publishAudio(source, source.name).toString()
+        }
+        val target = File(File(activity.filesDir, "bili").apply { mkdirs() }, source.name)
+        if (!target.exists()) {
+            val part = File(target.parentFile, "${target.name}.part")
+            try {
+                source.copyTo(part, overwrite = true)
+                check(part.renameTo(target)) { "音频保存失败" }
+            } finally { part.delete() }
+        }
+        return Uri.fromFile(target).toString()
     }
 
     /** 删除 B 站音频缓存；公共文件与私有旧缓存都删除，不提供恢复。 */
@@ -142,6 +175,7 @@ class BiliMusic(private val activity: Activity) {
         val cid = segments.getOrNull(1)?.toLongOrNull()
         val key = if (cid != null) "${bvid}_$cid" else bvid
         var removed = false
+        tempAudio(key)?.let { removed = it.delete() || removed }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             publicAudio("$key.m4a")?.let { uri ->
                 removed = activity.contentResolver.delete(uri, null, null) > 0 || removed
@@ -204,7 +238,7 @@ class BiliMusic(private val activity: Activity) {
         }.ifEmpty { error("合集曲目列表为空") }
     }
 
-    /** 只保存音频；Android 10 以上通过 MediaStore 写入公共下载目录。 */
+    /** 复用已有下载；新音频下载到系统可清理的私有缓存。 */
     fun download(track: OnlineTrack): String {
         val segments = track.id.substringAfter("bili:").split(':')
         val bvid = segments.first()
@@ -213,19 +247,16 @@ class BiliMusic(private val activity: Activity) {
         val cid = explicitCid ?: firstCid(bvid)
         Log.i("8DBili", "download bvid=$bvid cid=$cid")
         val key = if (explicitCid != null) "${bvid}_$cid" else bvid
-        val dir = File(activity.filesDir, "bili").apply { mkdirs() }
+        val dir = File(activity.cacheDir, "bili").apply { mkdirs() }
+        tempAudio(key)?.let { return Uri.fromFile(it).toString() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             publicAudio("$key.m4a")?.let { return it.toString() }
         } else {
             cached(bvid, explicitCid)?.let { return Uri.fromFile(it).toString() }
         }
         val part = File(dir, "$key.m4a.part")
+        privateAudio(key)?.let { return Uri.fromFile(it).toString() }
         val target = File(dir, "$key.m4a")
-        // Preserve old private cache and existing library entries; copy on demand.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && target.length() > 100_000) {
-            checkContainer(target)
-            return publishAudio(target, "$key.m4a").toString()
-        }
         val candidates = audioCandidates(bvid, cid)
         var failure: Exception? = null
         for (audioUrl in candidates) {
@@ -234,11 +265,6 @@ class BiliMusic(private val activity: Activity) {
                 fetch(audioUrl, part)
                 checkContainer(part)
                 Log.i("8DBili", "audio saved bytes=${part.length()}")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    val uri = publishAudio(part, "$key.m4a")
-                    part.delete()
-                    return uri.toString()
-                }
                 if (target.exists()) target.delete()
                 check(part.renameTo(target)) { "音频保存失败" }
                 return "file://${target.absolutePath}"
@@ -297,6 +323,9 @@ class BiliMusic(private val activity: Activity) {
     private fun privateAudio(key: String): File? = File(activity.filesDir, "bili").listFiles()?.firstOrNull {
         it.name == "$key.m4a" && it.length() > 100_000
     }
+
+    private fun tempAudio(key: String): File? = File(activity.cacheDir, "bili/$key.m4a")
+        .takeIf { it.isFile && it.length() > 100_000 }
 
     private fun pageList(bvid: String): JSONArray {
         val r = JSONObject(api("https://api.bilibili.com/x/player/pagelist?bvid=$bvid"))

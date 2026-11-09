@@ -62,6 +62,52 @@ class PlaybackService : Service() {
     private val store by lazy { MusicStore(this) }
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val decodeExecutor = Executors.newSingleThreadExecutor()
+    private val onlineExecutor = Executors.newSingleThreadExecutor()
+    private val bili by lazy { BiliMusic(applicationContext) }
+    private var biliQueue = listOf<OnlineTrack>()
+    private var biliIndex = -1
+    private var biliGeneration = 0
+    val hasBiliQueue: Boolean get() = biliIndex in biliQueue.indices
+
+    fun setBiliQueue(items: List<OnlineTrack>, id: String) {
+        biliGeneration++
+        biliQueue = items.toList()
+        biliIndex = items.indexOfFirst { it.id == id }
+        savePlaybackSnapshot(force = true)
+    }
+
+    fun clearBiliQueue() {
+        biliGeneration++
+        biliQueue = emptyList()
+        biliIndex = -1
+    }
+
+    private fun skipBili(previous: Boolean) {
+        if (!hasBiliQueue) return
+        val index = if (previous) (biliIndex - 1 + biliQueue.size) % biliQueue.size
+        else if (playbackMode() == PlayMode.SHUFFLE && biliQueue.size > 1)
+            biliQueue.indices.filter { it != biliIndex }.random()
+        else (biliIndex + 1) % biliQueue.size
+        val track = biliQueue[index]
+        val generation = ++biliGeneration
+        currentItem?.let(::ensureContinuousForeground)
+        onlineExecutor.execute {
+            val result = runCatching { bili.download(track) }
+            main.post {
+                if (generation != biliGeneration) return@post
+                result.onSuccess { uri ->
+                    biliIndex = index
+                    val item = MusicItem((track.provider + track.id).hashCode().toLong(),
+                        "${track.title} · ${track.artist}", uri, duration = (track.duration * 1000).toLong(),
+                        artist = track.artist, album = "B站音频")
+                    load(item, listOf(item))
+                }.onFailure {
+                    transitioning = false
+                    onPlaybackError?.invoke(it.message ?: "合集曲目加载失败")
+                }
+            }
+        }
+    }
     @Volatile private var queue = listOf<MusicItem>()
     @Volatile private var currentItem: MusicItem? = null
     @Volatile private var loadGeneration = 0
@@ -243,12 +289,14 @@ class PlaybackService : Service() {
     fun next() = continueQueue(auto = false)
 
     fun previous() {
+        if (hasBiliQueue) { skipBili(true); return }
         val item = currentItem ?: return
         PlaybackQueue(queue, playbackMode()).previous(item.uri)?.let { load(it) }
     }
 
     /** 切到电台也使尚未完成的本地解码失效，避免后台迟到回调重新起播。 */
     fun stopLocal() {
+        clearBiliQueue()
         loadGeneration++
         transitioning = false
         player.stop()
@@ -282,6 +330,7 @@ class PlaybackService : Service() {
             player.replay(forcePlay = true)
             return
         }
+        if (hasBiliQueue) { skipBili(false); return }
         val next = PlaybackQueue(queue, mode).next(item.uri, auto)
         if (next == null) {
             if (auto && queue.isNotEmpty()) {
@@ -453,6 +502,7 @@ class PlaybackService : Service() {
         session.isActive = false
         session.release()
         decodeExecutor.shutdownNow()
+        onlineExecutor.shutdownNow()
         player.close()
         radio.stop()
         radio.stopRecording()

@@ -27,6 +27,7 @@ if (releaseBuild) {
 val versionSequence = if (releaseBuild) buildNumber else
     if (sameHour) versionCounter.getProperty("count", "1").toInt().coerceIn(1, 9) else 1
 val hourlyVersionCode = (buildHour + versionSequence).toInt()
+val withAsr = providers.gradleProperty("withAsr").map { it.toBoolean() }.getOrElse(false)
 
 android {
     namespace = "j5i.spatial8d"
@@ -39,9 +40,12 @@ android {
         targetSdk = 34
         // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.10.8"
+        versionName = "2.11.6"
+        buildConfigField("boolean", "WITH_ASR", withAsr.toString())
         ndk { abiFilters += listOf("arm64-v8a") }
     }
+
+    if (!withAsr) sourceSets.getByName("main").assets.setSrcDirs(emptyList<String>())
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -57,6 +61,8 @@ val releaseStorePassword = providers.environmentVariable("SPATIAL8D_KEYSTORE_PAS
 
 dependencies {
     implementation(project(":core"))
+    if (withAsr) implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.8")
+    else compileOnly("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v1.13.8")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.0")

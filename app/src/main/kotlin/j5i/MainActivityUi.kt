@@ -413,6 +413,9 @@ internal fun MainActivity.refreshPlayback() {
         visualization.playing = playing
         curve.playing = playing
         val lyricPositionMs = ((if (isLive) 0.0 else player?.position ?: 0.0) * 1000).toLong()
+        if (isLive && isViewReady(this@refreshPlayback::lyricsView)) {
+            lyricsView.setLiveCaption(asrTranscript)
+        }
         if (isViewReady(this@refreshPlayback::lyricsView)) lyricsView.setPosition(lyricPositionMs)
         if (isViewReady(this@refreshPlayback::visualizerView)) visualizerView.setPosition(lyricPositionMs)
         popupVisualizer?.setPosition(lyricPositionMs)
@@ -442,12 +445,17 @@ internal fun MainActivity.refreshPlayback() {
                 if (idx >= 0) ls[idx].text else null
             }?.takeIf { it.isNotBlank() }
         } else null
-        val statusLine = if (isLive) "● LIVE · 流媒体实时处理 · $effectiveStatus"
+        val statusLine = if (isLive) "● LIVE · ${asrTranscript.takeIf { it.isNotBlank() } ?: "流媒体实时处理 · $effectiveStatus"}"
             else currentLine ?: effectiveStatus
         val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
-        (playerBar.findViewWithTag<TextView>("playerStatus"))?.text =
-            if (!isLive && playing && currentLine == null)
+        (playerBar.findViewWithTag<TextView>("playerStatus"))?.let { subtitle ->
+            subtitle.text = if (!isLive && playing && currentLine == null)
                 playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
+            val showingCaption = isLive && asrTranscript.isNotBlank()
+            subtitle.textSize = if (showingCaption) 12f else 11f
+            subtitle.maxLines = if (showingCaption) 2 else 1
+            subtitle.ellipsize = if (showingCaption) null else android.text.TextUtils.TruncateAt.END
+        }
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
         recordingLabel.setTextColor(0xffff5d5d.toInt())
@@ -467,9 +475,9 @@ internal fun MainActivity.refreshPlayback() {
             favoriteButton.tag = "favoriteButton"
             favoriteButton.imageTintList = null
             val item = currentItem
-            val local = !isLive && item != null && item.uri.isNotBlank() && !item.uri.startsWith("http")
-            favoriteButton.visibility = if (local) View.VISIBLE else View.GONE
-            if (local) {
+            val canFavorite = !isLive && item != null && item.uri.isNotBlank()
+            favoriteButton.visibility = if (canFavorite) View.VISIBLE else View.GONE
+            if (canFavorite && item != null) {
                 val favorite = musicStore.isFavorite(item.id)
                 val color = if (favorite) 0xffff5c7a.toInt() else palette.controlText
                 favoriteButton.setImageDrawable(j5i.spatial8d.ui.HeartDrawable(favorite, color))
@@ -701,7 +709,6 @@ internal fun MainActivity.navbar(): LinearLayout {
             orientation = LinearLayout.VERTICAL
             addView(ThemeUi.row(this@navbar).apply {
                 addView(ThemeUi.text(this@navbar, t("app.name"), 16f, palette, bold = true).apply {
-                    setOnClickListener { unlockSource() }
                 })
                 addView(ThemeUi.text(this@navbar, "ⓘ", 18f, palette, role = ThemeUi.ROLE_SUB).apply {
                     gravity = Gravity.CENTER
@@ -725,12 +732,10 @@ internal fun MainActivity.navbar(): LinearLayout {
             visibility = if (onlineUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
-        bar.addView(onlineButton)
         fmButton = navButton("FM") { showSourceSheet(false) }.apply {
             visibility = if (fmUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
-        bar.addView(fmButton)
         bar.addView(ImageButton(this).apply {
             setImageResource(j5i.spatial8d.R.drawable.ic_driving)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -836,7 +841,11 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             contentDescription = "收藏"
             setOnClickListener {
                 val item = currentItem ?: return@setOnClickListener
-                if (isLive || item.uri.isBlank() || item.uri.startsWith("http")) return@setOnClickListener
+                if (isLive || item.uri.isBlank()) return@setOnClickListener
+                if (currentUri == onlinePlayingUri && !musicStore.isFavorite(item.id)) {
+                    downloadOnlineFavorite(item)
+                    return@setOnClickListener
+                }
                 musicStore.toggleFavorite(item.id)
                 playbackStatus = if (musicStore.isFavorite(item.id)) "已加入收藏" else "已取消收藏"
                 queue = musicStore.view(songs)

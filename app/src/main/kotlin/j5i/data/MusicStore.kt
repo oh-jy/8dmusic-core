@@ -42,6 +42,7 @@ class MusicStore(private val context: Context) {
             while (cursor.moveToNext() && result.size < 300) {
                 val duration = cursor.getLong(3)
                 val id = cursor.getLong(0)
+                if ((cursor.getString(1) ?: "").startsWith("BV")) continue
                 result.add(MusicItem(
                     id, cursor.getString(1) ?: "track_$id",
                     ContentUris.withAppendedId(collection, id).toString(),
@@ -67,9 +68,11 @@ class MusicStore(private val context: Context) {
         saveAdded(items)
     }
 
-    fun library(): List<MusicItem> = (loadAdded() + scan()).distinctBy { it.uri }
+    fun library(): List<MusicItem> = (loadAdded() + scan()).filterNot(::isBiliAudio).distinctBy { it.uri }
 
-    fun mergeScan(fresh: List<MusicItem>): List<MusicItem> = (loadAdded() + fresh).distinctBy { it.uri }
+    fun mergeScan(fresh: List<MusicItem>): List<MusicItem> = (loadAdded() + fresh).filterNot(::isBiliAudio).distinctBy { it.uri }
+
+    private fun isBiliAudio(item: MusicItem) = item.album == "B站音频" || item.name.startsWith("BV")
 
     /**
      * MediaStore/SAF 的 content Uri 不一定允许随机读取和重复打开。
@@ -194,7 +197,7 @@ class MusicStore(private val context: Context) {
         }
     }
 
-    fun cached(): List<MusicItem> = jsonSongs(preferences.getString("songs", "[]"))
+    fun cached(): List<MusicItem> = jsonSongs(preferences.getString("songs", "[]")).filterNot(::isBiliAudio)
 
     fun saveLibrary(songs: List<MusicItem>) {
         save("songs", JSONArray().apply { songs.forEach { put(songJson(it)) } }.toString())

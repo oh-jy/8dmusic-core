@@ -38,11 +38,16 @@ class PlaylistDialog(
     private val currentId: Long,
     private val onPlay: (MusicItem) -> Unit,
     private val onChanged: (List<MusicItem>) -> Unit,
-    private var source: List<MusicItem>
+    private var source: List<MusicItem>,
+    private val initialTab: Int = 0,
+    private val onSourceTab: (Int, LinearLayout, Dialog) -> Unit = { _, _, _ -> }
 ) {
     private var dialog: Dialog? = null
     private val p get() = ThemeUi.palette(dark)
     private lateinit var root: LinearLayout
+    private lateinit var localBody: LinearLayout
+    private lateinit var sourceBody: LinearLayout
+    private lateinit var sourceTabs: LinearLayout
     private lateinit var list: LinearLayout
     private lateinit var listScroll: ScrollView
     private lateinit var tabs: LinearLayout
@@ -97,6 +102,7 @@ class PlaylistDialog(
             it.show()
             ThemeUi.layoutSheet(it)
         }
+        if (initialTab in 1..2) selectSourceTab(initialTab)
     }
 
     private fun close() {
@@ -119,19 +125,16 @@ class PlaylistDialog(
             })
             setOnClickListener { close() }
         })
+        sourceTabs = ThemeUi.row(c)
+        root.addView(sourceTabs)
+        localBody = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL }
+        sourceBody = LinearLayout(c).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        root.addView(localBody, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(sourceBody, LinearLayout.LayoutParams(-1, 0, 1f))
+        renderSourceTabs(0)
         count = ThemeUi.text(c, "", 11f, p, role = ThemeUi.ROLE_SUB)
-        root.addView(ThemeUi.row(c).apply {
-            addView(ThemeUi.text(c, t("playlist"), 15f, p, bold = true))
-            addView(count.apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { leftMargin = dp(8) } })
-            addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
-            addView(ThemeUi.text(c, t("close"), 11f, p, role = ThemeUi.ROLE_SUB).apply {
-                gravity = Gravity.CENTER
-                minWidth = dp(48); minHeight = dp(48)
-                setOnClickListener { close() }
-            })
-        })
         tabs = LinearLayout(c).apply { orientation = LinearLayout.HORIZONTAL }
-        root.addView(ThemeUi.row(c).apply {
+        localBody.addView(ThemeUi.row(c).apply {
             addView(HorizontalScrollView(c).apply {
                 isHorizontalScrollBarEnabled = false
                 addView(tabs)
@@ -139,6 +142,8 @@ class PlaylistDialog(
             })
             saveButton = button(t("playlist.save")) { toggleSave() }
             addView(saveButton)
+            addView(count)
+            addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
         })
         search = ThemeUi.input(c, p, t("playlist.filter")).apply {
             setText(store.query)
@@ -148,9 +153,9 @@ class PlaylistDialog(
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
             })
         }
-        root.addView(search)
+        localBody.addView(search)
         sortRow = ThemeUi.row(c)
-        root.addView(sortRow)
+        localBody.addView(sortRow)
         list = DropIndicatorList(c, this).apply { orientation = LinearLayout.VERTICAL }
         // 在子 View 上层画插入线；拖动时其他行让位，拖动的行随手移动。
         list.setWillNotDraw(false)
@@ -162,7 +167,7 @@ class PlaylistDialog(
                 gravity = Gravity.CENTER
                 setPadding(dp(18), dp(36), dp(18), dp(24))
                 addView(ThemeUi.text(c, "需要音频权限才能读取本机歌曲", 13f, p, bold = true))
-                addView(ThemeUi.text(c, "首次使用请允许；若已拒绝，请到系统设置开启「音乐和音频」。也可以直接添加单个音频文件。", 11f, p, role = ThemeUi.ROLE_SUB))
+                addView(ThemeUi.text(c, "首次使用请允许；若已拒绝，请到系统设置开启「音乐和音频」。", 11f, p, role = ThemeUi.ROLE_SUB))
                 addView(ThemeUi.row(c).apply {
                     gravity = Gravity.CENTER
                     addView(button("重新请求授权") { (context as? PlaylistHost)?.scanMusic(); dismiss() })
@@ -171,16 +176,15 @@ class PlaylistDialog(
                             android.net.Uri.parse("package:${context.packageName}")))
                     })
                 })
-                addView(ThemeUi.text(c, "或点「＋ 添加」选择单个音频", 11f, p, role = ThemeUi.ROLE_ACCENT))
             })
         }
         listScroll = ScrollView(c).apply {
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
             addView(list)
         }
-        root.addView(listScroll)
+        localBody.addView(listScroll)
         status = ThemeUi.text(c, "点按播放 · 长按歌曲拖动排序 · 操作菜单可移除、删除或编辑", 11f, p, role = ThemeUi.ROLE_SUB)
-        root.addView(status)
+        localBody.addView(status)
         refresh(scrollToPlaying = true)
         return Dialog(c).apply {
             setContentView(root, ViewGroup.LayoutParams(-1, -1))
@@ -189,6 +193,22 @@ class PlaylistDialog(
             window?.setDimAmount(0.45f)
             window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
+    }
+
+    private fun renderSourceTabs(selected: Int) {
+        sourceTabs.removeAllViews()
+        listOf("本地歌曲", "FM", "在线歌曲").forEachIndexed { index, label ->
+            sourceTabs.addView(chip(label, index == selected) {
+                selectSourceTab(index)
+            }.apply { layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f) })
+        }
+    }
+
+    private fun selectSourceTab(index: Int) {
+        localBody.visibility = if (index == 0) View.VISIBLE else View.GONE
+        sourceBody.visibility = if (index == 0) View.GONE else View.VISIBLE
+        renderSourceTabs(index)
+        dialog?.let { onSourceTab(index, sourceBody, it) }
     }
 
     private fun drawInsertionLine(canvas: Canvas) {
@@ -227,7 +247,6 @@ class PlaylistDialog(
                 }
             })
         }
-        tabs.addView(chip(t("playlist.add"), false) { (context as? PlaylistHost)?.addAudio() })
         sortRow.removeAllViews()
         val actions = ThemeUi.row(context)
         actions.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))

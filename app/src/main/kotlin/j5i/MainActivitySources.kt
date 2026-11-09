@@ -49,7 +49,7 @@ internal fun MainActivity.syncStationFilterToCurrent() {
 
 internal fun MainActivity.showSourceSheetRecreate() {
         val dialog = onlineDialog ?: return
-        dialog.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody")
+        (sourceSheetBody ?: dialog.window?.decorView?.findViewWithTag<LinearLayout>("sheetBody"))
             ?.let { populateSourceSheet(it, true) }
     }
 
@@ -62,7 +62,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             filters.addView(filterScroll(t("region"), RadioCatalog.regions, sourceRegion) {
                 sourceRegion = it
                 sourceCity = "全部"
-                populateSourceSheet(fmDialog?.window?.decorView?.findViewWithTag("sheetBody") ?: return@filterScroll, false)
+                populateSourceSheet(sourceSheetBody ?: fmDialog?.window?.decorView?.findViewWithTag("sheetBody") ?: return@filterScroll, false)
             })
             if (sourceRegion != "全部" && sourceRegion != "全国") {
                     val cities = listOf(t("all")) + RadioCatalog.filter(false, sourceRegion)
@@ -89,7 +89,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             onlineBody = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             body.addView(onlineBody, LinearLayout.LayoutParams(-1, 0, 1f))
             refreshOnlineBody()
-            loadOnlineTracks(false)
+            if (currentUri != onlinePlayingUri || onlinePlayingUri == null || onlineTracks.isEmpty()) loadOnlineTracks(false)
         }
     }
 
@@ -212,6 +212,8 @@ internal fun MainActivity.addStationBrowser(parent: LinearLayout, filters: Linea
         details.addView(ThemeUi.text(this, t("fm.recording.note"),
             11f, palette, role = ThemeUi.ROLE_SUB))
         footer.addView(toggle)
+        footer.addView(ThemeUi.button(this, palette,
+            if (offlineAsrEnabled) "停止实时离线识别" else "实时离线识别") { toggleOfflineAsr() })
         footer.addView(details)
         details.visibility = if (customActive) View.VISIBLE else View.GONE
         filters.addView(footer)
@@ -219,7 +221,7 @@ internal fun MainActivity.addStationBrowser(parent: LinearLayout, filters: Linea
 
 internal fun MainActivity.refreshStationFilter() {
         val body = stationListBody ?: return
-        val query = fmDialog?.window?.decorView?.findViewWithTag<android.widget.EditText>("stationSearch")?.text?.toString().orEmpty()
+        val query = (sourceSheetBody ?: fmDialog?.window?.decorView)?.findViewWithTag<android.widget.EditText>("stationSearch")?.text?.toString().orEmpty()
         ++sourceSearchSeq
         body.post { renderStations(body, RadioCatalog.filter(false, sourceRegion, sourceCity, sourceType, query)) }
     }
@@ -289,9 +291,12 @@ internal fun MainActivity.refreshOnlineBody() {
         onlineStatusView?.maxLines = 3
         onlineStatusView?.ellipsize = android.text.TextUtils.TruncateAt.END
         val tracks = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        var activeRow: View? = null
         onlineTracks.forEach { track ->
+            val active = currentUri == onlinePlayingUri && onlinePlayingUri != null && track.id == onlinePlayingId
             tracks.addView(ThemeUi.row(this).apply {
                 setPadding(0, ThemeUi.dp(this@refreshOnlineBody, 8f), 0, ThemeUi.dp(this@refreshOnlineBody, 8f))
+                if (active) background = ThemeUi.bgDrawable(this@refreshOnlineBody, palette.surfaceAlt, 8f)
                 addView(LinearLayout(this@refreshOnlineBody).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(ThemeUi.row(this@refreshOnlineBody).apply {
@@ -312,7 +317,8 @@ internal fun MainActivity.refreshOnlineBody() {
                             val lp = layoutParams as? LinearLayout.LayoutParams
                             lp?.rightMargin = ThemeUi.dp(this@refreshOnlineBody, 6f)
                         })
-                        addView(ThemeUi.text(this@refreshOnlineBody, track.title, 13f, palette, bold = true),
+                        addView(ThemeUi.text(this@refreshOnlineBody, (if (active) "▶ " else "") + track.title, 13f, palette, bold = true,
+                            role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT),
                             LinearLayout.LayoutParams(0, -2, 1f))
                     })
                     addView(ThemeUi.text(this@refreshOnlineBody,
@@ -322,19 +328,30 @@ internal fun MainActivity.refreshOnlineBody() {
                             else -> "${track.artist} · ${track.provider} · ${formatTrackDuration(track.duration)}"
                         }, 11f, palette, role = ThemeUi.ROLE_SUB))
                 }, LinearLayout.LayoutParams(0, -2, 1f))
+                if (track.provider == "哔哩哔哩" && onlineMusic.canSaveBili(track)) {
+                    addView(ThemeUi.text(this@refreshOnlineBody, "保存", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        setPadding(ThemeUi.dp(this@refreshOnlineBody, 8f), ThemeUi.dp(this@refreshOnlineBody, 8f),
+                            ThemeUi.dp(this@refreshOnlineBody, 8f), ThemeUi.dp(this@refreshOnlineBody, 8f))
+                        setOnClickListener { saveBiliCache(track) }
+                    })
+                }
                 addView(ThemeUi.text(this@refreshOnlineBody,
                     if (track.provider == "哔哩哔哩" && track.compilation) "展开曲目 › " else t("online.preview"),
                     12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener {
+                    onlineSelectedId = track.id
                     if (track.provider == "哔哩哔哩") expandBiliTrack(track) else resolveOnline(track)
                 }
+                if (active) activeRow = this
             })
         }
         if (onlineTracks.isNotEmpty()) tracks.addView(ThemeUi.button(this, palette, "加载更多") {
             onlinePage++
             loadOnlineTracks(true)
         })
-        body.addView(ScrollView(this).apply { addView(tracks) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val scroll = ScrollView(this).apply { addView(tracks) }
+        body.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        activeRow?.let { row -> scroll.post { scroll.scrollTo(0, (row.top - scroll.height / 2 + row.height / 2).coerceAtLeast(0)) } }
         body.addView(ThemeUi.text(this, t("online.footer"),
             10f, palette, role = ThemeUi.ROLE_FAINT))
     }
@@ -642,12 +659,23 @@ internal fun MainActivity.showBiliParts(parent: OnlineTrack, parts: List<OnlineT
                         addView(ThemeUi.text(this@showBiliParts, formatTrackDuration(part.duration),
                             11f, palette, role = ThemeUi.ROLE_SUB))
                     }, LinearLayout.LayoutParams(0, -2, 1f))
+                    if (onlineMusic.canSaveBili(part)) {
+                        addView(ThemeUi.text(this@showBiliParts, "保存", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                            setPadding(ThemeUi.dp(this@showBiliParts, 8f), ThemeUi.dp(this@showBiliParts, 8f),
+                                ThemeUi.dp(this@showBiliParts, 8f), ThemeUi.dp(this@showBiliParts, 8f))
+                            setOnClickListener { saveBiliCache(part) }
+                        })
+                    }
                     addView(ThemeUi.text(this@showBiliParts, t("online.preview"), 12f, palette, role = ThemeUi.ROLE_ACCENT))
                     setOnClickListener {
                         status.text = "正在缓存《${part.title}》，首次需下载整首音频，请稍候…"
                         isEnabled = false
                         onlineMusic.resolve(part) { result ->
-                            result.onSuccess { sheet.dismiss(); playOnline(part, it) }
+                            result.onSuccess {
+                                sheet.dismiss()
+                                playOnline(part, it)
+                                service?.setBiliQueue(parts, part.id)
+                            }
                                 .onFailure { e ->
                                     android.util.Log.w("8DBili", "part resolve failed: ${e.message}", e)
                                     isEnabled = true
@@ -664,6 +692,73 @@ internal fun MainActivity.showBiliParts(parent: OnlineTrack, parts: List<OnlineT
         sheet.show()
     }
 
+internal fun MainActivity.saveBiliCache(track: OnlineTrack) {
+        toast("正在保存《${track.title}》…")
+        onlineMusic.saveBiliCached(track) { result ->
+            result.onSuccess {
+                toast(if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q)
+                    "已保存到 Download/bili" else "已保存到应用私有目录")
+            }.onFailure { toast(it.message ?: "保存失败") }
+        }
+    }
+
+internal fun MainActivity.downloadOnlineFavorite(item: MusicItem) {
+        if (!favoriteDownloads.add(item.id)) { toast("正在下载，请稍候"); return }
+        toast("正在下载原始音频，完成后加入收藏")
+        val app = applicationContext
+        Thread {
+            val result = runCatching {
+                require(!item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) { "暂不支持收藏分段直播流" }
+                val dir = java.io.File(app.filesDir, "online-favorites").apply { mkdirs() }
+                val target = java.io.File(dir, "${item.id}.audio")
+                val part = java.io.File(dir, "${item.id}.part")
+                try {
+                    if (!target.isFile || target.length() == 0L) {
+                        if (item.uri.startsWith("http://") || item.uri.startsWith("https://")) {
+                            if (Log.isLoggable("8DFavorite", Log.INFO))
+                                Log.i("8DFavorite", "下载在线收藏原始音频 method=downloadOnlineFavorite id=${item.id}")
+                            val connection = java.net.URL(item.uri).openConnection() as java.net.HttpURLConnection
+                            try {
+                                connection.connectTimeout = 15_000
+                                connection.readTimeout = 30_000
+                                connection.instanceFollowRedirects = true
+                                check(connection.responseCode == 200) { "音频下载失败（HTTP ${connection.responseCode}）" }
+                                val expected = connection.contentLengthLong
+                                connection.inputStream.use { input -> part.outputStream().use { input.copyTo(it) } }
+                                check(expected <= 0 || part.length() == expected) { "音频下载不完整" }
+                            } finally { connection.disconnect() }
+                        } else {
+                            requireNotNull(app.contentResolver.openInputStream(android.net.Uri.parse(item.uri))) { "无法读取缓存音频" }
+                                .use { input -> part.outputStream().use { input.copyTo(it) } }
+                        }
+                        check(part.length() > 0) { "音频文件为空" }
+                        val extractor = android.media.MediaExtractor()
+                        try {
+                            extractor.setDataSource(part.absolutePath)
+                            check((0 until extractor.trackCount).any {
+                                extractor.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+                            }) { "下载内容不是可识别的音频" }
+                        } finally { extractor.release() }
+                        check(part.renameTo(target)) { "保存音频失败" }
+                    }
+                    item.copy(uri = android.net.Uri.fromFile(target).toString(), size = target.length(), album = "在线收藏")
+                } finally { if (part.exists()) part.delete() }
+            }
+            main.post {
+                favoriteDownloads.remove(item.id)
+                result.onSuccess { saved ->
+                    musicStore.remember(saved)
+                    songs = (musicStore.cached().filterNot { it.id == saved.id } + saved).toMutableList()
+                    musicStore.saveLibrary(songs)
+                    if (!musicStore.isFavorite(saved.id)) musicStore.toggleFavorite(saved.id)
+                    queue = musicStore.view(songs)
+                    toast("已下载并加入收藏")
+                    if (!isDestroyed) refreshPlayback()
+                }.onFailure { toast(it.message ?: "下载失败，未加入收藏") }
+            }
+        }.start()
+    }
+
 internal fun MainActivity.formatTrackDuration(seconds: Double): String {
         val total = seconds.toLong()
         val h = total / 3600; val m = (total % 3600) / 60; val s = total % 60
@@ -671,19 +766,17 @@ internal fun MainActivity.formatTrackDuration(seconds: Double): String {
     }
 
 internal fun MainActivity.playOnline(track: OnlineTrack, url: String) {
-        // 哔哩哔哩只保存音频文件：下载完成后登记进本地曲库，离线也可播放，不保留视频数据。
         val localFile = if (url.startsWith("file://")) java.io.File(url.removePrefix("file://")) else null
         val item = MusicItem((track.provider + track.id).hashCode().toLong(), "${track.title} · ${track.artist}",
             url, size = localFile?.length() ?: 0L,
             duration = (track.duration * 1000).toLong(), artist = track.artist,
             album = if (track.provider == "哔哩哔哩") "B站音频" else "未知专辑")
-        if ((localFile != null || (track.provider == "哔哩哔哩" && url.startsWith("content://media/"))) &&
-            musicStore.cached().none { it.uri == item.uri }) {
-            musicStore.remember(item)
-            val merged = (musicStore.cached() + listOf(item)).distinctBy { it.uri }
-            musicStore.saveLibrary(merged)
-            songs = merged.toMutableList()
-        }
+        onlinePlayingUri = item.uri
+        onlinePlayingId = onlineSelectedId ?: track.id
+        onlinePlayingProvider = onlineProvider
+        onlinePlayingQuery = onlineQuery
+        onlinePlayingPage = onlinePage
+        onlinePlayingTracks = onlineTracks.toList()
         dismissSource()
         load(item)
     }
@@ -716,6 +809,9 @@ internal fun MainActivity.playRadio(station: RadioStation) {
         currentItem = MusicItem(-1, station.name, "")
         currentUri = null
         isLive = true
+        offlineAsrEnabled = false
+        asrTranscript = ""
+        if (offlineAsrLazy.isInitialized()) offlineAsr.stop()
         val generation = ++radioGeneration
         currentStationId = station.id
         // 蜻蜓 MP3 的 MediaExtractor 会持续探测十几秒；同源 AAC 已可直接逐帧解码。
