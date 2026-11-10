@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "apple.itunes.preview",
+  "name": "Apple iTunes 歌曲试听（非完整歌曲）",
+  "type": "music",
+  "search": {
+    "url": "https://itunes.apple.com/search?term={query}&media=music&entity=song&limit=50",
+    "results": "results",
+    "id": "trackId",
+    "title": "trackName",
+    "artist": "artistName",
+    "audio": "previewUrl"
+  }
+}

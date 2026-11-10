@@ -1,0 +1,13 @@
+.gradle/
+.kotlin/
+build/
+app/build/
+core/build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+fix_structure.py
+.codex-tmp/
+.worktrees/
+docs/signing/

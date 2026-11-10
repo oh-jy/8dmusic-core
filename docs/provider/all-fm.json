@@ -1,0 +1,2428 @@
+{
+  "version": 1,
+  "id": "legacy.full.fm",
+  "name": "原版全量 FM 电台",
+  "type": "fm",
+  "stations": [
+    {
+      "id": "cnr-1",
+      "name": "中国之声",
+      "url": "https://satellitepull.cnr.cn/live/wxzgzs/playlist.m3u8",
+      "alternateUrls": [
+        "https://ngcdn001.cnr.cn/live/zgzs/index.m3u8"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "新闻综合",
+      "level": "央媒",
+      "note": "CNR-1 · 全国新闻综合"
+    },
+    {
+      "id": "cnr-music",
+      "name": "音乐之声",
+      "url": "https://ngcdn001.cnr.cn/live/yyzs/index.m3u8",
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "央媒",
+      "note": "CNR-3 · 官方 AAC 直播"
+    },
+    {
+      "id": "cnr-classic",
+      "name": "经典音乐广播",
+      "url": "https://ngcdn001.cnr.cn/live/dszs/index.m3u8",
+      "alternateUrls": [
+        "https://ngcdn002.cnr.cn/live/dszs/index.m3u8"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "央媒",
+      "note": "CNR-4 · 官方 AAC 双 CDN"
+    },
+    {
+      "id": "cnr-economy",
+      "name": "经济之声",
+      "url": "https://ngcdn002.cnr.cn/live/jjzs/index.m3u8",
+      "region": "全国",
+      "city": "全国",
+      "category": "财经",
+      "level": "央媒",
+      "note": "CNR-2 · 官方 AAC 直播"
+    },
+    {
+      "id": "cnr-intl",
+      "name": "国际新闻",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500172/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500172.m3u8",
+        "https://lhttp.qtfm.cn/live/20500172/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500172/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "新闻综合",
+      "level": "央媒",
+      "note": "国际新闻资讯"
+    },
+    {
+      "id": "hitfm",
+      "name": "CRI 劲曲调频 HIT FM",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318703/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318703.m3u8",
+        "https://lhttp.qtfm.cn/live/15318703/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318703/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "央媒",
+      "note": "国际流行音乐"
+    },
+    {
+      "id": "asiafm",
+      "name": "AsiaFM 亚洲音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022405/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022405.m3u8",
+        "https://lhttp.qtfm.cn/live/5022405/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022405/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "亚洲流行音乐"
+    },
+    {
+      "id": "cityfm",
+      "name": "CityFM 城市音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500153/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500153.m3u8",
+        "https://lhttp.qtfm.cn/live/20500153/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500153/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "城市流行音乐"
+    },
+    {
+      "id": "star-radio",
+      "name": "星空电台 STAR RADIO",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022379/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022379.m3u8",
+        "https://lhttp.qtfm.cn/live/5022379/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022379/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "华语流行与怀旧"
+    },
+    {
+      "id": "yunmeng",
+      "name": "云梦音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500187/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500187.m3u8",
+        "https://lhttp.qtfm.cn/live/20500187/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500187/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "网络音乐台"
+    },
+    {
+      "id": "classic-500",
+      "name": "500 首华语经典",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022308/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022308.m3u8",
+        "https://lhttp.qtfm.cn/live/5022308/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022308/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "华语经典歌曲"
+    },
+    {
+      "id": "morning-music",
+      "name": "清晨音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/4915/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4915.m3u8",
+        "https://lhttp.qtfm.cn/live/4915/64k.mp3",
+        "https://lhttp.qingting.fm/live/4915/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "清晨轻音乐"
+    },
+    {
+      "id": "asiafm-pop",
+      "name": "AsiaFM 亚洲音乐台（网络版）",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022405/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022405.m3u8",
+        "https://lhttp.qtfm.cn/live/5022405/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022405/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "亚洲线上流行音乐"
+    },
+    {
+      "id": "asiafm-classic",
+      "name": "AsiaFM 亚洲经典台",
+      "url": "https://lhttp-hw.qtfm.cn/live/5021912/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5021912.m3u8",
+        "https://lhttp.qtfm.cn/live/5021912/64k.mp3",
+        "https://lhttp.qingting.fm/live/5021912/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "亚洲经典流行"
+    },
+    {
+      "id": "asiafm-sky",
+      "name": "AsiaFM 亚洲天空台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20071/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20071.m3u8",
+        "https://lhttp.qtfm.cn/live/20071/64k.mp3",
+        "https://lhttp.qingting.fm/live/20071/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "欧美流行音乐"
+    },
+    {
+      "id": "asiafm-hd",
+      "name": "AsiaFM HD 音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318341/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318341.m3u8",
+        "https://lhttp.qtfm.cn/live/15318341/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318341/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "高品质流行音乐"
+    },
+    {
+      "id": "asiafm-cantopop",
+      "name": "AsiaFM 亚洲粤语台",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318569/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318569.m3u8",
+        "https://lhttp.qtfm.cn/live/15318569/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318569/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "经典粤语与港乐"
+    },
+    {
+      "id": "asiafm-hot",
+      "name": "AsiaFM 亚洲热歌台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500208/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500208.m3u8",
+        "https://lhttp.qtfm.cn/live/20500208/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500208/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "热门流行歌曲"
+    },
+    {
+      "id": "bay-area-music",
+      "name": "湾区音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500163/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500163.m3u8",
+        "https://lhttp.qtfm.cn/live/20500163/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500163/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "广东歌与多元音乐"
+    },
+    {
+      "id": "online-891",
+      "name": "891 线上音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500215/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500215.m3u8",
+        "https://lhttp.qtfm.cn/live/20500215/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500215/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "热门网络歌曲"
+    },
+    {
+      "id": "melody-music",
+      "name": "动听音乐台",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022107/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022107.m3u8",
+        "https://lhttp.qtfm.cn/live/5022107/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022107/24k.mp3"
+      ],
+      "region": "全国",
+      "city": "全国",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "动听经典与怀旧"
+    },
+    {
+      "id": "bj-news",
+      "name": "北京新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/339/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/339.m3u8",
+        "https://lhttp.qtfm.cn/live/339/64k.mp3",
+        "https://lhttp.qingting.fm/live/339/24k.mp3"
+      ],
+      "region": "北京",
+      "city": "北京",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "北京新闻广播"
+    },
+    {
+      "id": "bj-traffic",
+      "name": "北京交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/336/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/336.m3u8",
+        "https://lhttp.qtfm.cn/live/336/64k.mp3",
+        "https://lhttp.qingting.fm/live/336/24k.mp3"
+      ],
+      "region": "北京",
+      "city": "北京",
+      "category": "交通",
+      "level": "省台",
+      "note": "北京交通路况"
+    },
+    {
+      "id": "bj-art",
+      "name": "北京文艺广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/333/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/333.m3u8",
+        "https://lhttp.qtfm.cn/live/333/64k.mp3",
+        "https://lhttp.qingting.fm/live/333/24k.mp3"
+      ],
+      "region": "北京",
+      "city": "北京",
+      "category": "文艺|曲艺",
+      "level": "省台",
+      "note": "文艺与曲艺"
+    },
+    {
+      "id": "bj-music",
+      "name": "北京音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/332/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/332.m3u8",
+        "https://lhttp.qtfm.cn/live/332/64k.mp3",
+        "https://lhttp.qingting.fm/live/332/24k.mp3"
+      ],
+      "region": "北京",
+      "city": "北京",
+      "category": "音乐",
+      "level": "省台",
+      "note": "北京音乐广播"
+    },
+    {
+      "id": "sh-news",
+      "name": "上海新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/270/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/270.m3u8",
+        "https://lhttp.qtfm.cn/live/270/64k.mp3",
+        "https://lhttp.qingting.fm/live/270/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "上海新闻广播"
+    },
+    {
+      "id": "sh-east-news",
+      "name": "上海东广新闻资讯",
+      "url": "https://lhttp-hw.qtfm.cn/live/275/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/275.m3u8",
+        "https://lhttp.qtfm.cn/live/275/64k.mp3",
+        "https://lhttp.qingting.fm/live/275/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "东广新闻资讯"
+    },
+    {
+      "id": "sh-traffic",
+      "name": "上海交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/266/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/266.m3u8",
+        "https://lhttp.qtfm.cn/live/266/64k.mp3",
+        "https://lhttp.qingting.fm/live/266/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "交通",
+      "level": "省台",
+      "note": "上海交通路况"
+    },
+    {
+      "id": "sh-music",
+      "name": "上海音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/273/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/273.m3u8",
+        "https://lhttp.qtfm.cn/live/273/64k.mp3",
+        "https://lhttp.qingting.fm/live/273/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "音乐",
+      "level": "省台",
+      "note": "上海音乐广播"
+    },
+    {
+      "id": "sh-classic",
+      "name": "上海经典音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/267/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/267.m3u8",
+        "https://lhttp.qtfm.cn/live/267/64k.mp3",
+        "https://lhttp.qingting.fm/live/267/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "音乐",
+      "level": "省台",
+      "note": "经典音乐"
+    },
+    {
+      "id": "sh-dynamic",
+      "name": "上海动感 101",
+      "url": "https://lhttp-hw.qtfm.cn/live/274/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/274.m3u8",
+        "https://lhttp.qtfm.cn/live/274/64k.mp3",
+        "https://lhttp.qingting.fm/live/274/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "音乐",
+      "level": "省台",
+      "note": "动感流行音乐"
+    },
+    {
+      "id": "sh-finance",
+      "name": "第一财经",
+      "url": "https://lhttp-hw.qtfm.cn/live/276/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/276.m3u8",
+        "https://lhttp.qtfm.cn/live/276/64k.mp3",
+        "https://lhttp.qingting.fm/live/276/24k.mp3"
+      ],
+      "region": "上海",
+      "city": "上海",
+      "category": "财经",
+      "level": "省台",
+      "note": "财经资讯"
+    },
+    {
+      "id": "tj-binhai",
+      "name": "天津滨海音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20003/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20003.m3u8",
+        "https://lhttp.qtfm.cn/live/20003/64k.mp3",
+        "https://lhttp.qingting.fm/live/20003/24k.mp3"
+      ],
+      "region": "天津",
+      "city": "滨海",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "FM100.5 · 好音乐伴随你"
+    },
+    {
+      "id": "tj-classic",
+      "name": "经典 FM100.8",
+      "url": "https://lhttp-hw.qtfm.cn/live/20212227/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20212227.m3u8",
+        "https://lhttp.qtfm.cn/live/20212227/64k.mp3",
+        "https://lhttp.qingting.fm/live/20212227/24k.mp3"
+      ],
+      "region": "天津",
+      "city": "天津",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "经典音乐与京津冀资讯"
+    },
+    {
+      "id": "cq-news",
+      "name": "重庆之声 · 新闻广播",
+      "url": "https://satellitepull.cnr.cn/live/wxcqxwgb/playlist.m3u8",
+      "region": "重庆",
+      "city": "重庆",
+      "category": "新闻综合",
+      "level": "市台",
+      "note": "FM96.8 · 重庆新闻资讯"
+    },
+    {
+      "id": "cq-traffic",
+      "name": "重庆交通广播",
+      "url": "https://live.xmcdn.com/live/130/64.m3u8",
+      "region": "重庆",
+      "city": "重庆",
+      "category": "交通",
+      "level": "市台",
+      "note": "FM95.5 · 重庆交通路况"
+    },
+    {
+      "id": "cq-music",
+      "name": "重庆音乐广播",
+      "url": "https://satellitepull.cnr.cn/live/wxcqyygb/playlist.m3u8",
+      "alternateUrls": [
+        "https://live.xmcdn.com/live/131/64.m3u8"
+      ],
+      "region": "重庆",
+      "city": "重庆",
+      "category": "音乐",
+      "level": "市台",
+      "note": "FM88.1 · 流行音乐"
+    },
+    {
+      "id": "cq-art",
+      "name": "重庆文艺广播",
+      "url": "https://satellitepull.cnr.cn/live/wxcqwygb/playlist.m3u8",
+      "region": "重庆",
+      "city": "重庆",
+      "category": "文艺|曲艺",
+      "level": "市台",
+      "note": "FM103.5 · 央广卫星 AAC"
+    },
+    {
+      "id": "cq-city",
+      "name": "重庆都市广播",
+      "url": "https://satellitepull.cnr.cn/live/wxcqdsgb/playlist.m3u8",
+      "alternateUrls": [
+        "https://live.xmcdn.com/live/132/64.m3u8",
+        "https://lhttp-hw.qtfm.cn/live/1502/64k.mp3"
+      ],
+      "region": "重庆",
+      "city": "重庆",
+      "category": "都市",
+      "level": "市台",
+      "note": "FM93.8 · 都市生活"
+    },
+    {
+      "id": "cq-economy",
+      "name": "重庆经济广播",
+      "url": "https://live.xmcdn.com/live/129/64.m3u8",
+      "alternateUrls": [
+        "https://satellitepull.cnr.cn/live/wxcqjjgb/playlist.m3u8"
+      ],
+      "region": "重庆",
+      "city": "重庆",
+      "category": "财经",
+      "level": "市台",
+      "note": "FM101.5 · 央广卫星 HLS"
+    },
+    {
+      "id": "cq-bayu",
+      "name": "巴渝之声",
+      "url": "https://ls.qingting.fm/live/3545693.m3u8",
+      "region": "重庆",
+      "city": "巴南",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "FM104.5 · 巴渝之声 AAC"
+    },
+    {
+      "id": "cq-wansheng",
+      "name": "万盛旅游交通广播",
+      "url": "https://ls.qingting.fm/live/5359760.m3u8",
+      "region": "重庆",
+      "city": "万盛",
+      "category": "交通",
+      "level": "区县台",
+      "note": "FM92.2 · 旅游交通 AAC"
+    },
+    {
+      "id": "cq-dazu",
+      "name": "大足之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/20211676/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20211676.m3u8",
+        "https://lhttp.qtfm.cn/live/20211676/64k.mp3",
+        "https://lhttp.qingting.fm/live/20211676/24k.mp3"
+      ],
+      "region": "重庆",
+      "city": "大足",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "大足人民广播电台"
+    },
+    {
+      "id": "cq-beibei",
+      "name": "北碚综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20211692/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20211692.m3u8",
+        "https://lhttp.qtfm.cn/live/20211692/64k.mp3",
+        "https://lhttp.qingting.fm/live/20211692/24k.mp3"
+      ],
+      "region": "重庆",
+      "city": "北碚",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "北碚人民广播电台"
+    },
+    {
+      "id": "cq-banan",
+      "name": "巴南综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022385/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022385.m3u8",
+        "https://lhttp.qtfm.cn/live/5022385/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022385/24k.mp3"
+      ],
+      "region": "重庆",
+      "city": "巴南",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "巴南人民广播电台"
+    },
+    {
+      "id": "cq-kaizhou",
+      "name": "开州之声",
+      "url": "http://183.64.174.171:10124/tlgb.m3u8",
+      "region": "重庆",
+      "city": "开州",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "FM89.0 · 开州 HLS"
+    },
+    {
+      "id": "cq-hechuan",
+      "name": "合川综合广播",
+      "url": "http://125.62.24.73:8030/ch0.m3u8",
+      "region": "重庆",
+      "city": "合川",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "合川人民广播电台 · HLS"
+    },
+    {
+      "id": "cq-fengjie",
+      "name": "奉节综合广播",
+      "url": "http://125.82.171.154:8040/ch0.m3u8",
+      "region": "重庆",
+      "city": "奉节",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "奉节人民广播电台 · HLS"
+    },
+    {
+      "id": "cq-jiangjin",
+      "name": "江津综合广播",
+      "url": "https://live.xmcdn.com/live/2519/64.m3u8",
+      "region": "重庆",
+      "city": "江津",
+      "category": "新闻综合",
+      "level": "区县台",
+      "note": "江津人民广播电台 · HLS"
+    },
+    {
+      "id": "gd-news",
+      "name": "广东新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1254/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1254.m3u8",
+        "https://lhttp.qtfm.cn/live/1254/64k.mp3",
+        "https://lhttp.qingting.fm/live/1254/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "广东新闻广播"
+    },
+    {
+      "id": "gd-music",
+      "name": "广东音乐之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1260/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1260.m3u8",
+        "https://lhttp.qtfm.cn/live/1260/64k.mp3",
+        "https://lhttp.qingting.fm/live/1260/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "音乐",
+      "level": "省台",
+      "note": "广东音乐之声"
+    },
+    {
+      "id": "gd-traffic",
+      "name": "广东交通之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1262/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1262.m3u8",
+        "https://lhttp.qtfm.cn/live/1262/64k.mp3",
+        "https://lhttp.qingting.fm/live/1262/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "交通",
+      "level": "省台",
+      "note": "广东交通路况"
+    },
+    {
+      "id": "gd-economy",
+      "name": "广东珠江经济台",
+      "url": "https://lhttp-hw.qtfm.cn/live/1259/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1259.m3u8",
+        "https://lhttp.qtfm.cn/live/1259/64k.mp3",
+        "https://lhttp.qingting.fm/live/1259/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "财经",
+      "level": "省台",
+      "note": "珠江经济广播"
+    },
+    {
+      "id": "gd-stock",
+      "name": "广东股市广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4847/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4847.m3u8",
+        "https://lhttp.qtfm.cn/live/4847/64k.mp3",
+        "https://lhttp.qingting.fm/live/4847/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "财经",
+      "level": "省台",
+      "note": "股市财经"
+    },
+    {
+      "id": "gd-city",
+      "name": "广东城市之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/469/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/469.m3u8",
+        "https://lhttp.qtfm.cn/live/469/64k.mp3",
+        "https://lhttp.qingting.fm/live/469/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "都市",
+      "level": "省台",
+      "note": "城市生活与娱乐"
+    },
+    {
+      "id": "gd-life",
+      "name": "南方生活广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/468/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/468.m3u8",
+        "https://lhttp.qtfm.cn/live/468/64k.mp3",
+        "https://lhttp.qingting.fm/live/468/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "生活",
+      "level": "省台",
+      "note": "生活服务"
+    },
+    {
+      "id": "gz-news",
+      "name": "广州新闻资讯广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4848/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4848.m3u8",
+        "https://lhttp.qtfm.cn/live/4848/64k.mp3",
+        "https://lhttp.qingting.fm/live/4848/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "广州新闻资讯"
+    },
+    {
+      "id": "gz-music",
+      "name": "广州金曲音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20192/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20192.m3u8",
+        "https://lhttp.qtfm.cn/live/20192/64k.mp3",
+        "https://lhttp.qingting.fm/live/20192/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "广州",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "广州金曲"
+    },
+    {
+      "id": "sz-news",
+      "name": "深圳新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1270/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1270.m3u8",
+        "https://lhttp.qtfm.cn/live/1270/64k.mp3",
+        "https://lhttp.qingting.fm/live/1270/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "深圳",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "深圳新闻广播"
+    },
+    {
+      "id": "sz-music",
+      "name": "深圳音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1271/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1271.m3u8",
+        "https://lhttp.qtfm.cn/live/1271/64k.mp3",
+        "https://lhttp.qingting.fm/live/1271/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "深圳",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "深圳音乐广播"
+    },
+    {
+      "id": "sz-life",
+      "name": "深圳生活广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1273/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1273.m3u8",
+        "https://lhttp.qtfm.cn/live/1273/64k.mp3",
+        "https://lhttp.qingting.fm/live/1273/24k.mp3"
+      ],
+      "region": "广东",
+      "city": "深圳",
+      "category": "生活",
+      "level": "城市台",
+      "note": "深圳生活服务"
+    },
+    {
+      "id": "jx-news",
+      "name": "嘉兴新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1154/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1154.m3u8",
+        "https://lhttp.qtfm.cn/live/1154/64k.mp3",
+        "https://lhttp.qingting.fm/live/1154/24k.mp3"
+      ],
+      "region": "浙江",
+      "city": "嘉兴",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "嘉兴新闻广播"
+    },
+    {
+      "id": "wz-music",
+      "name": "温州音乐之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1149/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1149.m3u8",
+        "https://lhttp.qtfm.cn/live/1149/64k.mp3",
+        "https://lhttp.qingting.fm/live/1149/24k.mp3"
+      ],
+      "region": "浙江",
+      "city": "温州",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "温州音乐之声"
+    },
+    {
+      "id": "tz-music",
+      "name": "台州音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1144/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1144.m3u8",
+        "https://lhttp.qtfm.cn/live/1144/64k.mp3",
+        "https://lhttp.qingting.fm/live/1144/24k.mp3"
+      ],
+      "region": "浙江",
+      "city": "台州",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "台州音乐广播"
+    },
+    {
+      "id": "sz-j-news",
+      "name": "苏州新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/2808/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/2808.m3u8",
+        "https://lhttp.qtfm.cn/live/2808/64k.mp3",
+        "https://lhttp.qingting.fm/live/2808/24k.mp3"
+      ],
+      "region": "江苏",
+      "city": "苏州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "苏州新闻广播"
+    },
+    {
+      "id": "sz-j-city",
+      "name": "苏州都市音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/2803/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/2803.m3u8",
+        "https://lhttp.qtfm.cn/live/2803/64k.mp3",
+        "https://lhttp.qingting.fm/live/2803/24k.mp3"
+      ],
+      "region": "江苏",
+      "city": "苏州",
+      "category": "都市",
+      "level": "城市台",
+      "note": "苏州都市音乐"
+    },
+    {
+      "id": "wx-news",
+      "name": "无锡新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/2777/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/2777.m3u8",
+        "https://lhttp.qtfm.cn/live/2777/64k.mp3",
+        "https://lhttp.qingting.fm/live/2777/24k.mp3"
+      ],
+      "region": "江苏",
+      "city": "无锡",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "无锡新闻综合"
+    },
+    {
+      "id": "xz-music",
+      "name": "徐州音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4923/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4923.m3u8",
+        "https://lhttp.qtfm.cn/live/4923/64k.mp3",
+        "https://lhttp.qingting.fm/live/4923/24k.mp3"
+      ],
+      "region": "江苏",
+      "city": "徐州",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "徐州音乐广播"
+    },
+    {
+      "id": "yz-news",
+      "name": "扬州新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5000/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5000.m3u8",
+        "https://lhttp.qtfm.cn/live/5000/64k.mp3",
+        "https://lhttp.qingting.fm/live/5000/24k.mp3"
+      ],
+      "region": "江苏",
+      "city": "扬州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "扬州新闻广播"
+    },
+    {
+      "id": "ah-news",
+      "name": "安徽综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4919/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4919.m3u8",
+        "https://lhttp.qtfm.cn/live/4919/64k.mp3",
+        "https://lhttp.qingting.fm/live/4919/24k.mp3"
+      ],
+      "region": "安徽",
+      "city": "合肥",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "安徽综合广播"
+    },
+    {
+      "id": "ah-music",
+      "name": "安徽音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1947/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1947.m3u8",
+        "https://lhttp.qtfm.cn/live/1947/64k.mp3",
+        "https://lhttp.qingting.fm/live/1947/24k.mp3"
+      ],
+      "region": "安徽",
+      "city": "合肥",
+      "category": "音乐",
+      "level": "省台",
+      "note": "安徽音乐广播"
+    },
+    {
+      "id": "ah-story",
+      "name": "安徽小说评书广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1951/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1951.m3u8",
+        "https://lhttp.qtfm.cn/live/1951/64k.mp3",
+        "https://lhttp.qingting.fm/live/1951/24k.mp3"
+      ],
+      "region": "安徽",
+      "city": "合肥",
+      "category": "文艺|曲艺",
+      "level": "省台",
+      "note": "小说与评书"
+    },
+    {
+      "id": "ah-opera",
+      "name": "安徽戏曲广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1952/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1952.m3u8",
+        "https://lhttp.qtfm.cn/live/1952/64k.mp3",
+        "https://lhttp.qingting.fm/live/1952/24k.mp3"
+      ],
+      "region": "安徽",
+      "city": "合肥",
+      "category": "文艺|曲艺",
+      "level": "省台",
+      "note": "戏曲节目"
+    },
+    {
+      "id": "xm-news",
+      "name": "厦门综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1737/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1737.m3u8",
+        "https://lhttp.qtfm.cn/live/1737/64k.mp3",
+        "https://lhttp.qingting.fm/live/1737/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "厦门",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "厦门综合广播"
+    },
+    {
+      "id": "xm-music",
+      "name": "厦门音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1739/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1739.m3u8",
+        "https://lhttp.qtfm.cn/live/1739/64k.mp3",
+        "https://lhttp.qingting.fm/live/1739/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "厦门",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "厦门音乐广播"
+    },
+    {
+      "id": "xm-traffic",
+      "name": "厦门经济交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1738/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1738.m3u8",
+        "https://lhttp.qtfm.cn/live/1738/64k.mp3",
+        "https://lhttp.qingting.fm/live/1738/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "厦门",
+      "category": "交通",
+      "level": "城市台",
+      "note": "经济与交通路况"
+    },
+    {
+      "id": "fz-news",
+      "name": "福州新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5025/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5025.m3u8",
+        "https://lhttp.qtfm.cn/live/5025/64k.mp3",
+        "https://lhttp.qingting.fm/live/5025/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "福州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "福州新闻广播"
+    },
+    {
+      "id": "qz-news",
+      "name": "泉州新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318346/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318346.m3u8",
+        "https://lhttp.qtfm.cn/live/15318346/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318346/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "泉州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "泉州新闻综合"
+    },
+    {
+      "id": "qz-traffic",
+      "name": "泉州交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318189/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318189.m3u8",
+        "https://lhttp.qtfm.cn/live/15318189/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318189/24k.mp3"
+      ],
+      "region": "福建",
+      "city": "泉州",
+      "category": "交通",
+      "level": "城市台",
+      "note": "泉州交通路况"
+    },
+    {
+      "id": "sd-news",
+      "name": "山东综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20234/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20234.m3u8",
+        "https://lhttp.qtfm.cn/live/20234/64k.mp3",
+        "https://lhttp.qingting.fm/live/20234/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "济南",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "山东综合广播"
+    },
+    {
+      "id": "jn-news",
+      "name": "济南新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1667/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1667.m3u8",
+        "https://lhttp.qtfm.cn/live/1667/64k.mp3",
+        "https://lhttp.qingting.fm/live/1667/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "济南",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "济南新闻综合"
+    },
+    {
+      "id": "jn-music",
+      "name": "济南音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1671/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1671.m3u8",
+        "https://lhttp.qtfm.cn/live/1671/64k.mp3",
+        "https://lhttp.qingting.fm/live/1671/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "济南",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "济南音乐广播"
+    },
+    {
+      "id": "jn-story",
+      "name": "济南故事广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1672/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1672.m3u8",
+        "https://lhttp.qtfm.cn/live/1672/64k.mp3",
+        "https://lhttp.qingting.fm/live/1672/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "济南",
+      "category": "文艺|曲艺",
+      "level": "城市台",
+      "note": "故事与评书"
+    },
+    {
+      "id": "jn-art",
+      "name": "济南文艺广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1670/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1670.m3u8",
+        "https://lhttp.qtfm.cn/live/1670/64k.mp3",
+        "https://lhttp.qingting.fm/live/1670/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "济南",
+      "category": "文艺|曲艺",
+      "level": "城市台",
+      "note": "文艺节目"
+    },
+    {
+      "id": "qd-sport",
+      "name": "青岛音乐体育广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1677/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1677.m3u8",
+        "https://lhttp.qtfm.cn/live/1677/64k.mp3",
+        "https://lhttp.qingting.fm/live/1677/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "青岛",
+      "category": "文体旅游",
+      "level": "城市台",
+      "note": "音乐与体育"
+    },
+    {
+      "id": "yt-music",
+      "name": "烟台汽车音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022382/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022382.m3u8",
+        "https://lhttp.qtfm.cn/live/5022382/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022382/24k.mp3"
+      ],
+      "region": "山东",
+      "city": "烟台",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "汽车音乐"
+    },
+    {
+      "id": "zz-news",
+      "name": "郑州新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1220/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1220.m3u8",
+        "https://lhttp.qtfm.cn/live/1220/64k.mp3",
+        "https://lhttp.qingting.fm/live/1220/24k.mp3"
+      ],
+      "region": "河南",
+      "city": "郑州",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "郑州新闻综合"
+    },
+    {
+      "id": "zz-music",
+      "name": "郑州音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4921/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4921.m3u8",
+        "https://lhttp.qtfm.cn/live/4921/64k.mp3",
+        "https://lhttp.qingting.fm/live/4921/24k.mp3"
+      ],
+      "region": "河南",
+      "city": "郑州",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "郑州音乐广播"
+    },
+    {
+      "id": "hn-music",
+      "name": "河南星河音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20210755/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20210755.m3u8",
+        "https://lhttp.qtfm.cn/live/20210755/64k.mp3",
+        "https://lhttp.qingting.fm/live/20210755/24k.mp3"
+      ],
+      "region": "河南",
+      "city": "郑州",
+      "category": "音乐",
+      "level": "省台",
+      "note": "河南星河音乐"
+    },
+    {
+      "id": "kf-music",
+      "name": "开封音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4569/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4569.m3u8",
+        "https://lhttp.qtfm.cn/live/4569/64k.mp3",
+        "https://lhttp.qingting.fm/live/4569/24k.mp3"
+      ],
+      "region": "河南",
+      "city": "开封",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "开封音乐广播"
+    },
+    {
+      "id": "ny-news",
+      "name": "南阳综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1213/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1213.m3u8",
+        "https://lhttp.qtfm.cn/live/1213/64k.mp3",
+        "https://lhttp.qingting.fm/live/1213/24k.mp3"
+      ],
+      "region": "河南",
+      "city": "南阳",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "南阳综合广播"
+    },
+    {
+      "id": "hb-news",
+      "name": "湖北之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1303/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1303.m3u8",
+        "https://lhttp.qtfm.cn/live/1303/64k.mp3",
+        "https://lhttp.qingting.fm/live/1303/24k.mp3"
+      ],
+      "region": "湖北",
+      "city": "武汉",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "湖北之声"
+    },
+    {
+      "id": "hb-music",
+      "name": "湖北经典音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1296/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1296.m3u8",
+        "https://lhttp.qtfm.cn/live/1296/64k.mp3",
+        "https://lhttp.qingting.fm/live/1296/24k.mp3"
+      ],
+      "region": "湖北",
+      "city": "武汉",
+      "category": "音乐",
+      "level": "省台",
+      "note": "经典音乐广播"
+    },
+    {
+      "id": "hb-finance",
+      "name": "湖北经济广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1295/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1295.m3u8",
+        "https://lhttp.qtfm.cn/live/1295/64k.mp3",
+        "https://lhttp.qingting.fm/live/1295/24k.mp3"
+      ],
+      "region": "湖北",
+      "city": "武汉",
+      "category": "财经",
+      "level": "省台",
+      "note": "经济资讯"
+    },
+    {
+      "id": "wh-news",
+      "name": "武汉新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20198/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20198.m3u8",
+        "https://lhttp.qtfm.cn/live/20198/64k.mp3",
+        "https://lhttp.qingting.fm/live/20198/24k.mp3"
+      ],
+      "region": "湖北",
+      "city": "武汉",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "武汉新闻广播"
+    },
+    {
+      "id": "sy-news",
+      "name": "十堰综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20338/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20338.m3u8",
+        "https://lhttp.qtfm.cn/live/20338/64k.mp3",
+        "https://lhttp.qingting.fm/live/20338/24k.mp3"
+      ],
+      "region": "湖北",
+      "city": "十堰",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "十堰综合广播"
+    },
+    {
+      "id": "cs-big",
+      "name": "长沙 BIG RADIO",
+      "url": "https://lhttp-hw.qtfm.cn/live/20847/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20847.m3u8",
+        "https://lhttp.qtfm.cn/live/20847/64k.mp3",
+        "https://lhttp.qingting.fm/live/20847/24k.mp3"
+      ],
+      "region": "湖南",
+      "city": "长沙",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "长沙流行音乐"
+    },
+    {
+      "id": "cs-city",
+      "name": "长沙城市之音",
+      "url": "https://lhttp-hw.qtfm.cn/live/4237/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4237.m3u8",
+        "https://lhttp.qtfm.cn/live/4237/64k.mp3",
+        "https://lhttp.qingting.fm/live/4237/24k.mp3"
+      ],
+      "region": "湖南",
+      "city": "长沙",
+      "category": "都市",
+      "level": "城市台",
+      "note": "长沙城市生活"
+    },
+    {
+      "id": "cs-taste",
+      "name": "长沙品味音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4930/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4930.m3u8",
+        "https://lhttp.qtfm.cn/live/4930/64k.mp3",
+        "https://lhttp.qingting.fm/live/4930/24k.mp3"
+      ],
+      "region": "湖南",
+      "city": "长沙",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "长沙品味音乐"
+    },
+    {
+      "id": "sc-news",
+      "name": "四川新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4906/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4906.m3u8",
+        "https://lhttp.qtfm.cn/live/4906/64k.mp3",
+        "https://lhttp.qingting.fm/live/4906/24k.mp3"
+      ],
+      "region": "四川",
+      "city": "成都",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "四川新闻广播"
+    },
+    {
+      "id": "sc-music",
+      "name": "四川音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1110/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1110.m3u8",
+        "https://lhttp.qtfm.cn/live/1110/64k.mp3",
+        "https://lhttp.qingting.fm/live/1110/24k.mp3"
+      ],
+      "region": "四川",
+      "city": "成都",
+      "category": "音乐",
+      "level": "省台",
+      "note": "四川音乐广播"
+    },
+    {
+      "id": "sc-city",
+      "name": "四川城市之音",
+      "url": "https://lhttp-hw.qtfm.cn/live/1111/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1111.m3u8",
+        "https://lhttp.qtfm.cn/live/1111/64k.mp3",
+        "https://lhttp.qingting.fm/live/1111/24k.mp3"
+      ],
+      "region": "四川",
+      "city": "成都",
+      "category": "都市",
+      "level": "省台",
+      "note": "四川城市之音"
+    },
+    {
+      "id": "sy-news-ln",
+      "name": "沈阳新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20024/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20024.m3u8",
+        "https://lhttp.qtfm.cn/live/20024/64k.mp3",
+        "https://lhttp.qingting.fm/live/20024/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "沈阳",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "沈阳新闻广播"
+    },
+    {
+      "id": "ln-music",
+      "name": "辽宁经典流行音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20021/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20021.m3u8",
+        "https://lhttp.qtfm.cn/live/20021/64k.mp3",
+        "https://lhttp.qingting.fm/live/20021/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "沈阳",
+      "category": "音乐",
+      "level": "省台",
+      "note": "经典流行音乐"
+    },
+    {
+      "id": "ln-rural",
+      "name": "辽宁乡村广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20018/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20018.m3u8",
+        "https://lhttp.qtfm.cn/live/20018/64k.mp3",
+        "https://lhttp.qingting.fm/live/20018/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "沈阳",
+      "category": "乡村",
+      "level": "省台",
+      "note": "对农服务与乡村节目"
+    },
+    {
+      "id": "dl-music",
+      "name": "大连音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1084/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1084.m3u8",
+        "https://lhttp.qtfm.cn/live/1084/64k.mp3",
+        "https://lhttp.qingting.fm/live/1084/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "大连",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "大连音乐广播"
+    },
+    {
+      "id": "dl-sport",
+      "name": "大连体育广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1085/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1085.m3u8",
+        "https://lhttp.qtfm.cn/live/1085/64k.mp3",
+        "https://lhttp.qingting.fm/live/1085/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "大连",
+      "category": "文体旅游",
+      "level": "城市台",
+      "note": "体育节目"
+    },
+    {
+      "id": "dl-city",
+      "name": "大连都市之声广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1086/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1086.m3u8",
+        "https://lhttp.qtfm.cn/live/1086/64k.mp3",
+        "https://lhttp.qingting.fm/live/1086/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "大连",
+      "category": "都市",
+      "level": "城市台",
+      "note": "城市生活节目"
+    },
+    {
+      "id": "dl-news",
+      "name": "大连新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1089/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1089.m3u8",
+        "https://lhttp.qtfm.cn/live/1089/64k.mp3",
+        "https://lhttp.qingting.fm/live/1089/24k.mp3"
+      ],
+      "region": "辽宁",
+      "city": "大连",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "大连新闻综合"
+    },
+    {
+      "id": "cc-news",
+      "name": "长春新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5013/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5013.m3u8",
+        "https://lhttp.qtfm.cn/live/5013/64k.mp3",
+        "https://lhttp.qingting.fm/live/5013/24k.mp3"
+      ],
+      "region": "吉林",
+      "city": "长春",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "长春新闻综合"
+    },
+    {
+      "id": "cc-youth",
+      "name": "长春少儿与老年生活广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4984/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4984.m3u8",
+        "https://lhttp.qtfm.cn/live/4984/64k.mp3",
+        "https://lhttp.qingting.fm/live/4984/24k.mp3"
+      ],
+      "region": "吉林",
+      "city": "长春",
+      "category": "青少科教",
+      "level": "城市台",
+      "note": "少儿与老年生活"
+    },
+    {
+      "id": "cc-finance",
+      "name": "长春经济广播 U FM88.0",
+      "url": "https://lhttp-hw.qtfm.cn/live/4850/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4850.m3u8",
+        "https://lhttp.qtfm.cn/live/4850/64k.mp3",
+        "https://lhttp.qingting.fm/live/4850/24k.mp3"
+      ],
+      "region": "吉林",
+      "city": "长春",
+      "category": "财经",
+      "level": "城市台",
+      "note": "经济与生活"
+    },
+    {
+      "id": "jl-rural",
+      "name": "吉林乡村广播",
+      "url": "https://live-jlr.jlntv.cn/live/fm976.m3u8",
+      "region": "吉林",
+      "city": "长春",
+      "category": "乡村",
+      "level": "省台",
+      "note": "对农服务与乡村节目"
+    },
+    {
+      "id": "hlj-news",
+      "name": "黑龙江新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4974/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4974.m3u8",
+        "https://lhttp.qtfm.cn/live/4974/64k.mp3",
+        "https://lhttp.qingting.fm/live/4974/24k.mp3"
+      ],
+      "region": "黑龙江",
+      "city": "哈尔滨",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "黑龙江新闻广播"
+    },
+    {
+      "id": "hrb-classic",
+      "name": "哈尔滨古典音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022338/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022338.m3u8",
+        "https://lhttp.qtfm.cn/live/5022338/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022338/24k.mp3"
+      ],
+      "region": "黑龙江",
+      "city": "哈尔滨",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "古典音乐"
+    },
+    {
+      "id": "sjz-news",
+      "name": "石家庄综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1652/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1652.m3u8",
+        "https://lhttp.qtfm.cn/live/1652/64k.mp3",
+        "https://lhttp.qingting.fm/live/1652/24k.mp3"
+      ],
+      "region": "河北",
+      "city": "石家庄",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "石家庄综合广播"
+    },
+    {
+      "id": "sjz-music",
+      "name": "石家庄音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1654/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1654.m3u8",
+        "https://lhttp.qtfm.cn/live/1654/64k.mp3",
+        "https://lhttp.qingting.fm/live/1654/24k.mp3"
+      ],
+      "region": "河北",
+      "city": "石家庄",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "石家庄音乐广播"
+    },
+    {
+      "id": "lf-news",
+      "name": "廊坊综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/3948/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/3948.m3u8",
+        "https://lhttp.qtfm.cn/live/3948/64k.mp3",
+        "https://lhttp.qingting.fm/live/3948/24k.mp3"
+      ],
+      "region": "河北",
+      "city": "廊坊",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "廊坊综合广播"
+    },
+    {
+      "id": "hd-news",
+      "name": "邯郸新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5072/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5072.m3u8",
+        "https://lhttp.qtfm.cn/live/5072/64k.mp3",
+        "https://lhttp.qingting.fm/live/5072/24k.mp3"
+      ],
+      "region": "河北",
+      "city": "邯郸",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "邯郸新闻综合"
+    },
+    {
+      "id": "sx-news",
+      "name": "山西综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20491/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20491.m3u8",
+        "https://lhttp.qtfm.cn/live/20491/64k.mp3",
+        "https://lhttp.qingting.fm/live/20491/24k.mp3"
+      ],
+      "region": "山西",
+      "city": "太原",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "山西综合广播"
+    },
+    {
+      "id": "ty-music",
+      "name": "太原音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1185/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1185.m3u8",
+        "https://lhttp.qtfm.cn/live/1185/64k.mp3",
+        "https://lhttp.qingting.fm/live/1185/24k.mp3"
+      ],
+      "region": "山西",
+      "city": "太原",
+      "category": "音乐",
+      "level": "城市台",
+      "note": "太原音乐广播"
+    },
+    {
+      "id": "shaanxi-news",
+      "name": "陕西新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1600/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1600.m3u8",
+        "https://lhttp.qtfm.cn/live/1600/64k.mp3",
+        "https://lhttp.qingting.fm/live/1600/24k.mp3"
+      ],
+      "region": "陕西",
+      "city": "西安",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "陕西新闻广播"
+    },
+    {
+      "id": "shaanxi-music",
+      "name": "陕西音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/4873/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/4873.m3u8",
+        "https://lhttp.qtfm.cn/live/4873/64k.mp3",
+        "https://lhttp.qingting.fm/live/4873/24k.mp3"
+      ],
+      "region": "陕西",
+      "city": "西安",
+      "category": "音乐",
+      "level": "省台",
+      "note": "陕西音乐广播"
+    },
+    {
+      "id": "xy-news",
+      "name": "咸阳综合广播",
+      "url": "https://hplayer1.juyun.tv/tv/29379189.m3u8",
+      "region": "陕西",
+      "city": "咸阳",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "咸阳综合广播"
+    },
+    {
+      "id": "gs-rural",
+      "name": "甘肃农村广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/3941/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/3941.m3u8",
+        "https://lhttp.qtfm.cn/live/3941/64k.mp3",
+        "https://lhttp.qingting.fm/live/3941/24k.mp3"
+      ],
+      "region": "甘肃",
+      "city": "兰州",
+      "category": "乡村",
+      "level": "省台",
+      "note": "乡村之音 · 对农服务"
+    },
+    {
+      "id": "nmg-news",
+      "name": "内蒙古新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1883/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1883.m3u8",
+        "https://lhttp.qtfm.cn/live/1883/64k.mp3",
+        "https://lhttp.qingting.fm/live/1883/24k.mp3"
+      ],
+      "region": "内蒙古",
+      "city": "呼和浩特",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "内蒙古新闻综合"
+    },
+    {
+      "id": "nmg-music",
+      "name": "内蒙古音乐之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1886/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1886.m3u8",
+        "https://lhttp.qtfm.cn/live/1886/64k.mp3",
+        "https://lhttp.qingting.fm/live/1886/24k.mp3"
+      ],
+      "region": "内蒙古",
+      "city": "呼和浩特",
+      "category": "音乐",
+      "level": "省台",
+      "note": "草原音乐"
+    },
+    {
+      "id": "yn-news",
+      "name": "云南新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1926/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1926.m3u8",
+        "https://lhttp.qtfm.cn/live/1926/64k.mp3",
+        "https://lhttp.qingting.fm/live/1926/24k.mp3"
+      ],
+      "region": "云南",
+      "city": "昆明",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "云南新闻广播"
+    },
+    {
+      "id": "gx-news",
+      "name": "南宁综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20358/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20358.m3u8",
+        "https://lhttp.qtfm.cn/live/20358/64k.mp3",
+        "https://lhttp.qingting.fm/live/20358/24k.mp3"
+      ],
+      "region": "广西",
+      "city": "南宁",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "南宁综合广播"
+    },
+    {
+      "id": "gl-city",
+      "name": "桂林城市之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/1759/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1759.m3u8",
+        "https://lhttp.qtfm.cn/live/1759/64k.mp3",
+        "https://lhttp.qingting.fm/live/1759/24k.mp3"
+      ],
+      "region": "广西",
+      "city": "桂林",
+      "category": "都市",
+      "level": "城市台",
+      "note": "桂林城市生活"
+    },
+    {
+      "id": "hi-news",
+      "name": "海南新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1861/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1861.m3u8",
+        "https://lhttp.qtfm.cn/live/1861/64k.mp3",
+        "https://lhttp.qingting.fm/live/1861/24k.mp3"
+      ],
+      "region": "海南",
+      "city": "海口",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "海南新闻广播"
+    },
+    {
+      "id": "hi-life",
+      "name": "海南民生广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/21243/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/21243.m3u8",
+        "https://lhttp.qtfm.cn/live/21243/64k.mp3",
+        "https://lhttp.qingting.fm/live/21243/24k.mp3"
+      ],
+      "region": "海南",
+      "city": "海口",
+      "category": "生活",
+      "level": "省台",
+      "note": "海南民生服务"
+    },
+    {
+      "id": "sanya",
+      "name": "三亚天涯之声",
+      "url": "https://lhttp-hw.qtfm.cn/live/20450/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20450.m3u8",
+        "https://lhttp.qtfm.cn/live/20450/64k.mp3",
+        "https://lhttp.qingting.fm/live/20450/24k.mp3"
+      ],
+      "region": "海南",
+      "city": "三亚",
+      "category": "文体旅游",
+      "level": "城市台",
+      "note": "三亚旅游与生活"
+    },
+    {
+      "id": "nx-traffic",
+      "name": "宁夏交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1840/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1840.m3u8",
+        "https://lhttp.qtfm.cn/live/1840/64k.mp3",
+        "https://lhttp.qingting.fm/live/1840/24k.mp3"
+      ],
+      "region": "宁夏",
+      "city": "银川",
+      "category": "交通",
+      "level": "省台",
+      "note": "宁夏交通路况"
+    },
+    {
+      "id": "nx-music",
+      "name": "宁夏音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318294/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318294.m3u8",
+        "https://lhttp.qtfm.cn/live/15318294/64k.mp3",
+        "https://lhttp.qingting.fm/live/15318294/24k.mp3"
+      ],
+      "region": "宁夏",
+      "city": "银川",
+      "category": "音乐",
+      "level": "省台",
+      "note": "宁夏音乐广播"
+    },
+    {
+      "id": "xj-news",
+      "name": "乌鲁木齐新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1918/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1918.m3u8",
+        "https://lhttp.qtfm.cn/live/1918/64k.mp3",
+        "https://lhttp.qingting.fm/live/1918/24k.mp3"
+      ],
+      "region": "新疆",
+      "city": "乌鲁木齐",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "乌鲁木齐新闻广播"
+    },
+    {
+      "id": "xj-uyghur",
+      "name": "乌鲁木齐维语广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1923/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1923.m3u8",
+        "https://lhttp.qtfm.cn/live/1923/64k.mp3",
+        "https://lhttp.qingting.fm/live/1923/24k.mp3"
+      ],
+      "region": "新疆",
+      "city": "乌鲁木齐",
+      "category": "文艺|曲艺",
+      "level": "城市台",
+      "note": "维吾尔语节目"
+    },
+    {
+      "id": "gz-province-news",
+      "name": "贵州综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20063/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20063.m3u8",
+        "https://lhttp.qtfm.cn/live/20063/64k.mp3",
+        "https://lhttp.qingting.fm/live/20063/24k.mp3"
+      ],
+      "region": "贵州",
+      "city": "贵阳",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "FM94.6 · 贵州新闻广播"
+    },
+    {
+      "id": "gz-province-music",
+      "name": "贵州音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20067/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20067.m3u8",
+        "https://lhttp.qtfm.cn/live/20067/64k.mp3",
+        "https://lhttp.qingting.fm/live/20067/24k.mp3"
+      ],
+      "region": "贵州",
+      "city": "贵阳",
+      "category": "音乐",
+      "level": "省台",
+      "note": "FM91.6 · 流行音乐"
+    },
+    {
+      "id": "gz-province-traffic",
+      "name": "贵州交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20057/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20057.m3u8",
+        "https://lhttp.qtfm.cn/live/20057/64k.mp3",
+        "https://lhttp.qingting.fm/live/20057/24k.mp3"
+      ],
+      "region": "贵州",
+      "city": "贵阳",
+      "category": "交通",
+      "level": "省台",
+      "note": "FM95.2 · 阳光 952"
+    },
+    {
+      "id": "gz-province-economy",
+      "name": "贵州经济广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20065/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20065.m3u8",
+        "https://lhttp.qtfm.cn/live/20065/64k.mp3",
+        "https://lhttp.qingting.fm/live/20065/24k.mp3"
+      ],
+      "region": "贵州",
+      "city": "贵阳",
+      "category": "财经",
+      "level": "省台",
+      "note": "FM98.9 · 财富 989"
+    },
+    {
+      "id": "jx-province-news",
+      "name": "江西新闻广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1809/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1809.m3u8",
+        "https://lhttp.qtfm.cn/live/1809/64k.mp3",
+        "https://lhttp.qingting.fm/live/1809/24k.mp3"
+      ],
+      "region": "江西",
+      "city": "南昌",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "江西综合新闻频率"
+    },
+    {
+      "id": "jx-province-music",
+      "name": "江西音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1802/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1802.m3u8",
+        "https://lhttp.qtfm.cn/live/1802/64k.mp3",
+        "https://lhttp.qingting.fm/live/1802/24k.mp3"
+      ],
+      "region": "江西",
+      "city": "南昌",
+      "category": "音乐",
+      "level": "省台",
+      "note": "FM103.4 · 省级音乐频率"
+    },
+    {
+      "id": "jx-province-traffic",
+      "name": "江西交通广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/1811/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/1811.m3u8",
+        "https://lhttp.qtfm.cn/live/1811/64k.mp3",
+        "https://lhttp.qingting.fm/live/1811/24k.mp3"
+      ],
+      "region": "江西",
+      "city": "南昌",
+      "category": "交通",
+      "level": "省台",
+      "note": "FM105.4 · 全省交通服务"
+    },
+    {
+      "id": "jx-trend",
+      "name": "江西潮台 96.9",
+      "url": "https://lhttp-hw.qtfm.cn/live/20500092/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20500092.m3u8",
+        "https://lhttp.qtfm.cn/live/20500092/64k.mp3",
+        "https://lhttp.qingting.fm/live/20500092/24k.mp3"
+      ],
+      "region": "江西",
+      "city": "南昌",
+      "category": "音乐",
+      "level": "省台",
+      "note": "潮流音乐"
+    },
+    {
+      "id": "jx-travel",
+      "name": "江西旅游广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/20133/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/20133.m3u8",
+        "https://lhttp.qtfm.cn/live/20133/64k.mp3",
+        "https://lhttp.qingting.fm/live/20133/24k.mp3"
+      ],
+      "region": "江西",
+      "city": "南昌",
+      "category": "文体旅游",
+      "level": "省台",
+      "note": "FM97.4 · 旅游与经典"
+    },
+    {
+      "id": "qh-traffic-music",
+      "name": "青海交通音乐广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5009/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5009.m3u8",
+        "https://lhttp.qtfm.cn/live/5009/64k.mp3",
+        "https://lhttp.qingting.fm/live/5009/24k.mp3"
+      ],
+      "region": "青海",
+      "city": "西宁",
+      "category": "音乐",
+      "level": "省台",
+      "note": "FM97.2 · 交通与音乐"
+    },
+    {
+      "id": "qh-economy",
+      "name": "青海经济生活广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5008/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5008.m3u8",
+        "https://lhttp.qtfm.cn/live/5008/64k.mp3",
+        "https://lhttp.qingting.fm/live/5008/24k.mp3"
+      ],
+      "region": "青海",
+      "city": "西宁",
+      "category": "生活",
+      "level": "省台",
+      "note": "经济资讯与生活服务"
+    },
+    {
+      "id": "xn-news",
+      "name": "西宁新闻综合广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022282/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022282.m3u8",
+        "https://lhttp.qtfm.cn/live/5022282/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022282/24k.mp3"
+      ],
+      "region": "青海",
+      "city": "西宁",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "西宁本地新闻"
+    },
+    {
+      "id": "xn-traffic",
+      "name": "西宁交通文艺广播",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022283/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022283.m3u8",
+        "https://lhttp.qtfm.cn/live/5022283/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022283/24k.mp3"
+      ],
+      "region": "青海",
+      "city": "西宁",
+      "category": "交通",
+      "level": "城市台",
+      "note": "FM104.3 · 交通与文艺"
+    },
+    {
+      "id": "lhasa-radio",
+      "name": "拉萨人民广播电台",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022138/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022138.m3u8",
+        "https://lhttp.qtfm.cn/live/5022138/64k.mp3",
+        "https://lhttp.qingting.fm/live/5022138/24k.mp3"
+      ],
+      "region": "西藏",
+      "city": "拉萨",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "FM91.4 · 拉萨综合广播"
+    },
+    {
+      "id": "rthk-1",
+      "name": "香港电台第一台",
+      "url": "https://rthkradio1-live.akamaized.net/hls/live/2035313/radio1/master.m3u8",
+      "region": "香港",
+      "city": "香港",
+      "category": "新闻综合",
+      "level": "港台",
+      "note": "粤语新闻与公共资讯"
+    },
+    {
+      "id": "rthk-2",
+      "name": "香港电台第二台",
+      "url": "https://rthkradio2-live.akamaized.net/hls/live/2040078/radio2/index_64_a.m3u8",
+      "region": "香港",
+      "city": "香港",
+      "category": "音乐",
+      "level": "港台",
+      "note": "粤语流行与娱乐"
+    },
+    {
+      "id": "asiafm-hk-cantopop",
+      "name": "AsiaFM 亚洲粤语台（香港流）",
+      "url": "https://live.ximalaya.com/radio-first-page-app/live/999/64.m3u8?transcode=ts",
+      "region": "香港",
+      "city": "香港",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "港乐与经典粤语"
+    },
+    {
+      "id": "macau-green-village",
+      "name": "澳门绿村电台",
+      "url": "https://macaofm995.com/hls1/fm995.m3u8",
+      "region": "澳门",
+      "city": "澳门",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "FM99.5 · 澳门本地直播"
+    },
+    {
+      "id": "macau-cgt",
+      "name": "CGTN Radio 澳门",
+      "url": "https://sk.cri.cn/am846.m3u8",
+      "region": "澳门",
+      "city": "澳门",
+      "category": "新闻综合",
+      "level": "央媒",
+      "note": "AM1341 · 国际资讯"
+    },
+    {
+      "id": "tw-taipei",
+      "name": "台北广播电台",
+      "url": "https://stream.ginnet.cloud/live0130lo-yfyo/_definst_/fm/playlist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "台北公共资讯与音乐"
+    },
+    {
+      "id": "tw-classical",
+      "name": "佳音经典音乐网",
+      "url": "https://stream.ginnet.cloud/live0119lo-p4rb/_definst_/classic/playlist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "经典音乐"
+    },
+    {
+      "id": "tw-good-news",
+      "name": "佳音电台",
+      "url": "https://stream.ginnet.cloud/live0119lo-p4rb/_definst_/fm909/playlist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "生活",
+      "level": "城市台",
+      "note": "FM90.9 · 生活与音乐"
+    },
+    {
+      "id": "tw-bcc-news",
+      "name": "中广新闻网",
+      "url": "https://n03.rcs.revma.com/78fm9wyy2tzuv",
+      "region": "台湾",
+      "city": "台北",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "BCC 新闻直播"
+    },
+    {
+      "id": "tw-rti",
+      "name": "中央广播电台",
+      "url": "https://streamak0138.akamaized.net/live0138lh-mbm9/_definst_/rti3/chunklist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "新闻综合",
+      "level": "省台",
+      "note": "RTI 台湾之音"
+    },
+    {
+      "id": "intl-cri-chinese",
+      "name": "CRI 华语环球",
+      "url": "https://sk.cri.cn/hyhq.m3u8",
+      "region": "国际",
+      "city": "华语",
+      "category": "新闻综合",
+      "level": "国际台",
+      "note": "华语新闻与文化"
+    },
+    {
+      "id": "intl-cri-world",
+      "name": "CRI 世界华声",
+      "url": "https://sk.cri.cn/hxfh.m3u8",
+      "region": "国际",
+      "city": "华语",
+      "category": "新闻综合",
+      "level": "国际台",
+      "note": "面向全球华语听众"
+    },
+    {
+      "id": "intl-cri-nanhai",
+      "name": "CRI 南海之声",
+      "url": "https://sk.cri.cn/nhzs.m3u8",
+      "region": "国际",
+      "city": "华语",
+      "category": "新闻综合",
+      "level": "国际台",
+      "note": "华语资讯与音乐"
+    },
+    {
+      "id": "intl-cri-news",
+      "name": "CRI 环球资讯",
+      "url": "https://sk.cri.cn/905.m3u8",
+      "region": "国际",
+      "city": "华语",
+      "category": "新闻综合",
+      "level": "国际台",
+      "note": "国际新闻华语广播"
+    },
+    {
+      "id": "intl-star-radio",
+      "name": "星空电台 STAR RADIO",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022379/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022379.m3u8"
+      ],
+      "region": "华语",
+      "city": "网络",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "华语流行与怀旧"
+    },
+    {
+      "id": "intl-classic-500",
+      "name": "500 首华语经典",
+      "url": "https://lhttp-hw.qtfm.cn/live/5022308/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/5022308.m3u8"
+      ],
+      "region": "华语",
+      "city": "网络",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "华语经典歌曲"
+    },
+    {
+      "id": "intl-asiafm-cantopop",
+      "name": "AsiaFM 亚洲粤语台",
+      "url": "https://lhttp-hw.qtfm.cn/live/15318569/64k.mp3",
+      "alternateUrls": [
+        "https://ls.qingting.fm/live/15318569.m3u8"
+      ],
+      "region": "华语",
+      "city": "网络",
+      "category": "音乐",
+      "level": "网络台",
+      "note": "经典粤语与港乐"
+    },
+    {
+      "id": "intl-rthk-1",
+      "name": "香港电台第一台",
+      "url": "https://rthkradio1-live.akamaized.net/hls/live/2035313/radio1/master.m3u8",
+      "region": "香港",
+      "city": "香港",
+      "category": "新闻综合",
+      "level": "港台",
+      "note": "粤语新闻与公共资讯"
+    },
+    {
+      "id": "intl-rthk-2",
+      "name": "香港电台第二台",
+      "url": "https://rthkradio2-live.akamaized.net/hls/live/2040078/radio2/index_64_a.m3u8",
+      "region": "香港",
+      "city": "香港",
+      "category": "音乐",
+      "level": "港台",
+      "note": "粤语流行与娱乐"
+    },
+    {
+      "id": "intl-tw-taipei",
+      "name": "台北广播电台",
+      "url": "https://stream.ginnet.cloud/live0130lo-yfyo/_definst_/fm/playlist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "台北公共资讯与音乐"
+    },
+    {
+      "id": "intl-tw-bcc-news",
+      "name": "中广新闻网",
+      "url": "https://n03.rcs.revma.com/78fm9wyy2tzuv",
+      "region": "台湾",
+      "city": "台北",
+      "category": "新闻综合",
+      "level": "城市台",
+      "note": "BCC 新闻直播"
+    },
+    {
+      "id": "intl-tw-good-news",
+      "name": "佳音电台",
+      "url": "https://stream.ginnet.cloud/live0119lo-p4rb/_definst_/fm909/playlist.m3u8",
+      "region": "台湾",
+      "city": "台北",
+      "category": "生活",
+      "level": "城市台",
+      "note": "FM90.9 · 生活与音乐"
+    }
+  ]
+}
