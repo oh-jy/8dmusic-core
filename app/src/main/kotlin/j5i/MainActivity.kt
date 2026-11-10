@@ -62,6 +62,9 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var queue = listOf<MusicItem>()
     internal var currentIndex = -1
     internal var currentQueue = listOf<MusicItem>()
+    /** 合集/在线结果的暂存队列，独立于本地库，切列表、重建页面后仍可上下首切换。 */
+    internal var onlineQueue = listOf<MusicItem>()
+    internal var onlineQueueProvider = ""
     internal var preset = DEFAULT_SPACE_PRESET
     internal var customPresets = mutableListOf<SpacePreset>()
     internal var loading = false
@@ -97,6 +100,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal lateinit var lyricsView: LyricsView
     internal lateinit var visualizerView: VisualizerView
     internal lateinit var curveLegend: LinearLayout
+    internal lateinit var curveTabs: LinearLayout
     internal lateinit var curveContent: FrameLayout
     internal val lyrics by lazy { Lyrics(this) }
     internal var lyricsGeneration = 0
@@ -308,6 +312,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         displayedLanguage = AppLanguage.resolved(this)
         j5i.spatial8d.provider.ProviderMigration.run(this)
         musicStore = MusicStore(this)
+        musicStore.readOnlineQueue()?.let { snapshot ->
+            onlineQueue = snapshot.items
+            onlineQueueProvider = snapshot.providerId
+        }
         presetStore = PresetStore(this)
         customPresets = presetStore.load().toMutableList()
         // 首屏只读缓存；MediaStore 查询统一走后台，避免冷启动阻塞所有点击。
@@ -404,6 +412,37 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     }
 
     override fun isLocalMusicPlaying(): Boolean = !isLive && service?.player?.isPlaying == true
+
+    override fun isMicRecording(): Boolean = recordingKind == "mic"
+
+    override fun toggleMicRecording() {
+        if (recordingKind == "mic") {
+            micRecorder ?: return
+            val statusView = android.widget.TextView(this)
+            finishMicRecording(statusView)
+            playlistDialog?.refreshContent()
+            return
+        }
+        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音"); return }
+        requestMic.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    override fun pruneOnlineReferences() {
+        val leftovers = songs.filter { it.uri.startsWith("online://") }
+        if (leftovers.isEmpty()) { toast("本地歌曲中没有在线记录"); return }
+        android.app.AlertDialog.Builder(this).setTitle("清理在线记录")
+            .setMessage("本地歌曲中残留 ${leftovers.size} 首在线歌曲记录，批量移出本地库？不会删除任何音频文件，歌单中的引用按歌单规则保留。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("清理") { _, _ ->
+                leftovers.forEach { musicStore.removePermanently(it) }
+                songs = musicStore.cached().toMutableList()
+                queue = musicStore.view(songs)
+                currentQueue = queue
+                service?.syncQueue(queue, currentUri)
+                playlistDialog?.refreshContent()
+                toast("已清理 ${leftovers.size} 首在线记录")
+            }.show()
+    }
 
     override fun scanMusic() {
         if (loading) return

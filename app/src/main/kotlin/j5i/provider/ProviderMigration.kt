@@ -8,7 +8,10 @@ import org.json.JSONObject
 internal object ProviderMigration {
     @Synchronized fun run(context: Context) {
         val prefs = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
-        if (prefs.getBoolean("provider_migration_v1", false)) return
+        if (prefs.getBoolean("provider_migration_v1", false)) {
+            removeKuwo(context, prefs)
+            return
+        }
         val (favorites, playlists) = filteredReferences(
             prefs.getString("songs", "[]") ?: "[]", prefs.getString("added", "[]") ?: "[]",
             prefs.getString("favorites", "[]") ?: "[]", prefs.getString("playlists", "[]") ?: "[]")
@@ -34,6 +37,18 @@ internal object ProviderMigration {
         check(context.getSharedPreferences("online_provider_sessions", Context.MODE_PRIVATE).edit().clear().commit())
         check(context.getSharedPreferences("qq_music_session", Context.MODE_PRIVATE).edit().clear().commit())
         check(prefs.edit().putBoolean("provider_migration_v1", true).commit())
+        removeKuwo(context, prefs)
+    }
+
+    private fun removeKuwo(context: Context, prefs: android.content.SharedPreferences) {
+        if (prefs.getBoolean("provider_migration_remove_kuwo", false)) return
+        val store = ProviderPluginStore(context)
+        if (store.list().any { it.descriptor.id == "platform.kuwo" }) store.remove("platform.kuwo")
+        val imported = ProviderStore(context)
+        if (imported.list().any { it.definition.id == "platform.kuwo" }) imported.remove("platform.kuwo")
+        ProviderCredentials(context).clear("platform.kuwo")
+        ProviderLoginBackup.delete(context, "platform.kuwo")
+        check(prefs.edit().putBoolean("provider_migration_remove_kuwo", true).commit())
     }
     internal fun filteredReferences(songs: String, added: String, favorites: String, playlists: String): Pair<JSONArray, JSONArray> {
         val remoteIds = mutableSetOf<Long>()

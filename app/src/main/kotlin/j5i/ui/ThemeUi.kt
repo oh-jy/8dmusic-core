@@ -321,7 +321,11 @@ object ThemeUi {
         root.addView(FrameLayout(context).apply {
             tag = "sheetHeader"
             layoutParams = LinearLayout.LayoutParams(-1, -2)
-            addView(text(context, title, 15f, p, bold = true), FrameLayout.LayoutParams(-2, -2, Gravity.START or Gravity.CENTER_VERTICAL))
+            addView(text(context, title, 15f, p, bold = true).apply {
+                // 满屏弹层右上角有关闭按钮；限制标题宽度并单行省略，避免长合集名遮挡“取消”。
+                hideOverflow(this)
+                setPadding(0, 0, dp(context, 56f), 0)
+            }, FrameLayout.LayoutParams(-1, -2, Gravity.START or Gravity.CENTER_VERTICAL))
         })
         if (subtitle != null) {
             root.addView(text(context, subtitle, 11f, p, role = ROLE_SUB))

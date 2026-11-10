@@ -416,26 +416,10 @@ internal fun MainActivity.transformCard(): LinearLayout {
 
 internal fun MainActivity.curveCard(): LinearLayout {
         val card = card {
-            addView(tabRow(listOf(t("curve"), t("visualizer"), t("lyrics")), curvePanel, compact = true) {
-                curvePanel = it
-                if (it == 1) installPcmRenderer()
-                curve.visibility = if (it == 0) View.VISIBLE else View.GONE
-                visualizerView.visibility = if (it == 1) View.VISIBLE else View.GONE
-                lyricsView.visibility = if (it == 2) View.VISIBLE else View.GONE
-                // 非"空间曲线" tab 隐藏图例并把它的高度转移给 curveContent，
-                // 避免图例行占位造成波形/频谱顶部一片空白。
-                val legendHeight = curveLegend.height.takeIf { h -> h > 0 }
-                    ?: ThemeUi.dp(this@curveCard, 22f)
-                val showLegend = it == 0
-                val wasVisible = curveLegend.visibility == View.VISIBLE
-                curveLegend.visibility = if (showLegend) View.VISIBLE else View.GONE
-                if (isViewReady(this@curveCard::curveContent) && wasVisible != showLegend) {
-                    val current = curveContent.layoutParams.height
-                    val next = if (showLegend) (current - legendHeight).coerceAtLeast(ThemeUi.dp(this@curveCard, 80f))
-                    else current + legendHeight
-                    curveContent.layoutParams = curveContent.layoutParams.apply { height = next }
-                }
-            })
+            curveTabs = tabRow(listOf(t("curve"), t("visualizer"), t("lyrics")), curvePanel, compact = true) {
+                selectCurvePanel(it)
+            }
+            addView(curveTabs)
             curveLegend = ThemeUi.row(this@curveCard).apply {
                 visibility = if (curvePanel == 0) View.VISIBLE else View.GONE
                 listOf(
@@ -489,6 +473,45 @@ internal fun MainActivity.curveCard(): LinearLayout {
     }
 
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
+
+internal fun MainActivity.selectCurvePanel(index: Int) {
+    curvePanel = index
+    for (tab in 0 until curveTabs.childCount) {
+        (curveTabs.getChildAt(tab) as? android.widget.Button)?.let { button ->
+            button.tag = if (tab == index) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
+            ThemeUi.applyButton(button, palette)
+            button.setTextColor(if (tab == index) palette.accent else palette.sub)
+        }
+    }
+    if (index == 1) installPcmRenderer()
+    curve.visibility = if (index == 0) View.VISIBLE else View.GONE
+    visualizerView.visibility = if (index == 1) View.VISIBLE else View.GONE
+    lyricsView.visibility = if (index == 2) View.VISIBLE else View.GONE
+    // 非"空间曲线" tab 隐藏图例并把它的高度转移给 curveContent，
+    // 避免图例行占位造成波形/频谱顶部一片空白。
+    val legendHeight = curveLegend.height.takeIf { it > 0 } ?: ThemeUi.dp(this, 22f)
+    val showLegend = index == 0
+    val wasVisible = curveLegend.visibility == View.VISIBLE
+    curveLegend.visibility = if (showLegend) View.VISIBLE else View.GONE
+    if (isViewReady(this::curveContent) && wasVisible != showLegend) {
+        val current = curveContent.layoutParams.height
+        val next = if (showLegend) (current - legendHeight).coerceAtLeast(ThemeUi.dp(this, 80f))
+        else current + legendHeight
+        curveContent.layoutParams = curveContent.layoutParams.apply { height = next }
+    }
+}
+
+/** 点按播放栏当前歌词行时，直接切到歌词 tab 并滚动到卡片位置。 */
+internal fun MainActivity.openLyricsTab() {
+    if (isLive || currentLyrics == null) {
+        toast("当前没有可查看的歌词")
+        return
+    }
+    selectCurvePanel(2)
+    val scroll = root.parent as? android.widget.ScrollView ?: return
+    val card = curveContent.parent as? View ?: return
+    scroll.post { scroll.smoothScrollTo(0, card.top) }
+}
 
 internal fun MainActivity.installPcmRenderer() {
         var lastHistoryAt = 0L

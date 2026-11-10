@@ -82,9 +82,12 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         addView(shade, LayoutParams(-1, -2, Gravity.BOTTOM))
         addView(ThemeUi.button(context, ThemeUi.palette(true), AppLanguage.text(context, "driving.close"),
             ThemeUi.ROLE_ACCENT_FILL, minHeightDp = 48f).apply {
+            // 退出按钮固定淡绿色，不随深浅主题变化；尺寸保持 48dp 高、wrap 宽。
+            ThemeUi.bg(this, 0xFFB9F6CA.toInt(), 12f)
+            setTextColor(0xFF1B5E20.toInt())
             setOnClickListener { onClose?.invoke() }
         }, LayoutParams(-2, dp(48), Gravity.TOP or Gravity.END).apply {
-            topMargin = dp(34); rightMargin = dp(36)
+            topMargin = dp(58); rightMargin = dp(14)
         })
     }
 

@@ -21,7 +21,6 @@ internal object ProviderLogin {
         id == "platform.bilibili" -> Site("https://passport.bilibili.com/login", "https://www.bilibili.com/", setOf("SESSDATA"))
         id == "platform.netease" -> Site("https://music.163.com/#/login", "https://music.163.com/", setOf("MUSIC_U"))
         id == "platform.kugou" -> Site("https://www.kugou.com/", "https://www.kugou.com/", setOf("KugooID"))
-        id == "platform.kuwo" -> Site("https://www.kuwo.cn/login", "https://www.kuwo.cn/", setOf("kw_token"))
         else -> null
     }
 
@@ -41,11 +40,32 @@ internal object ProviderLogin {
         }
         content.addView(view, FrameLayout.LayoutParams(-1, -1))
         content.addView(close, FrameLayout.LayoutParams(56, 56, Gravity.TOP or Gravity.END))
+        val finish = TextView(context).apply {
+            text = "完成登录"; textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            contentDescription = "已在网页完成登录，手动保存凭据"
+            setBackgroundColor(0x66000000)
+            setPadding(28, 0, 28, 0)
+            setOnClickListener {
+                val cookie = ProviderCookie.normalize(manager.getCookie(site.cookieUrl).orEmpty())
+                if (cookie.isBlank()) { text = "未检测到凭据"; return@setOnClickListener }
+                val result = runCatching { ProviderCredentials(context).save(id, cookie); ProviderLoginBackup.save(context, id, cookie) }
+                if (result.isSuccess) {
+                    completed = true
+                    done(null)
+                    dialog.dismiss()
+                } else {
+                    close.text = "!"
+                    done("登录成功，但凭据加密保存或备份失败，请重试")
+                }
+            }
+        }
+        content.addView(finish, FrameLayout.LayoutParams(-2, 56, Gravity.TOP or Gravity.START))
         val checkCookies = object : Runnable {
             override fun run() {
                 if (completed || !dialog.isShowing) return
                 val cookie = ProviderCookie.normalize(manager.getCookie(site.cookieUrl).orEmpty())
-                val valid = site.required.all { ProviderCookie.field(cookie, it).isNotEmpty() } &&
+                val baseValid = site.required.all { ProviderCookie.field(cookie, it).isNotEmpty() }
+                val valid = baseValid &&
                     (id != "platform.qq" || ProviderCookie.field(cookie, "wxuin").isNotEmpty() || ProviderCookie.field(cookie, "uin").isNotEmpty())
                 if (valid && System.currentTimeMillis() - openedAt >= 1500) {
                     val result = runCatching { ProviderCredentials(context).save(id, cookie); ProviderLoginBackup.save(context, id, cookie) }
@@ -78,7 +98,7 @@ internal object ProviderLogin {
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            if (id == "platform.qq" || id == "platform.kugou" || id == "platform.kuwo")
+            if (id == "platform.qq" || id == "platform.kugou")
                 userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36"
         }
         manager.setAcceptThirdPartyCookies(view, true)

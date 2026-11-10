@@ -64,6 +64,25 @@ internal fun MainActivity.addAndPlay(uri: Uri) {
         load(item)
     }
 
+/** 暂存在线结果/合集队列：独立于本地库持久化，切列表或页面重建后上下首仍按这份列表走。 */
+internal fun MainActivity.stageOnlineQueue(items: List<MusicItem>, providerId: String, startId: Long? = null) {
+    if (items.isEmpty()) return
+    onlineQueue = items
+    onlineQueueProvider = providerId
+    currentQueue = items
+    musicStore.saveOnlineQueue(items, startId, providerId)
+    service?.syncQueue(items, currentUri)
+}
+
+/** 播放与暂存在线队列无关的内容（本地文件、电台等）时，释放合集上下文。 */
+private fun MainActivity.releaseOnlineQueueIfOutside(item: MusicItem) {
+    if (onlineQueue.isNotEmpty() && onlineQueue.none { it.id == item.id }) {
+        onlineQueue = emptyList()
+        onlineQueueProvider = ""
+        musicStore.clearOnlineQueue()
+    }
+}
+
 internal fun MainActivity.load(item: MusicItem) {
         load(item, true)
     }
@@ -97,6 +116,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         }
         // 所有选歌、切歌和冷启动恢复共用同一条加载链路，旧代号回调全部丢弃。
         if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
+        releaseOnlineQueueIfOutside(item)
         if (isViewReady(this@load::visualizerView)) visualizerView.pcmClock.reset()
         val generation = ++loadGeneration
         ++radioGeneration
@@ -105,8 +125,16 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         val online = item.isOnlineAudio()
         val previous = currentItem
         val previousOnline = previous != null && previous.isOnlineAudio()
-        if (autoplay && (isLive || previous == null || online != previousOnline)) {
-            preset = if (online) SPACE_PRESETS[0] else DEFAULT_SPACE_PRESET
+        // 规则：FM/在线一律直通；从 FM 或在线切回本地才恢复默认；
+        // 本地切本地（含首次手动选歌）保持用户当前选择，不自动还原。
+        val targetPreset = when {
+            online -> SPACE_PRESETS[0]
+            isLive || previousOnline -> DEFAULT_SPACE_PRESET
+            else -> null
+        }
+        if (autoplay && targetPreset != null && targetPreset.name != preset.name) {
+            preset = targetPreset
+            if (isViewReady(this@load::homePresetButton)) refreshPresetSummary()
         }
         isLive = false
         offlineAsrEnabled = false
@@ -123,10 +151,8 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         currentItem = item
         loadLyrics(item)
         queue = musicStore.view(songs)
-        val isProviderTrack = item.album.startsWith("plugin:") || item.album.startsWith("provider:") ||
-            item.album.startsWith("在线缓存:")
-        val keepProviderQueue = isProviderTrack && currentQueue.any { it.id == item.id }
-        if (!keepProviderQueue) currentQueue = queue
+        val keepProviderQueue = onlineQueue.any { it.id == item.id }
+        currentQueue = if (keepProviderQueue) onlineQueue else queue
         currentIndex = currentQueue.indexOfFirst { it.id == item.id }
         currentUri = item.uri
         playbackStatus = t("status.preparing")
@@ -204,12 +230,14 @@ internal fun MainActivity.adoptServiceTrack(item: MusicItem) {
         if (currentUri == item.uri) return
         if (isViewReady(this@adoptServiceTrack::visualizerView)) visualizerView.pcmClock.reset()
         currentQueue = service?.queueSnapshot?.ifEmpty { currentQueue } ?: currentQueue
+        val presetChanged = service?.controlsPreset?.let { preset.name != it.name } == true
         service?.controlsPreset?.let { preset = it }
         currentItem = item
         currentUri = item.uri
         currentIndex = currentQueue.indexOfFirst { it.uri == item.uri }
         loadLyrics(item)
         playbackStatus = t("status.auto.next")
+        if (presetChanged && isViewReady(this@adoptServiceTrack::homePresetButton)) refreshPresetSummary()
         refreshPlayback()
     }
 
@@ -354,9 +382,13 @@ internal fun MainActivity.previous() {
 internal fun MainActivity.showPlaylist() {
         // 弹层回调的视图队列会成为切歌快照，过滤/排序改变时同步更新。
         playlistDialog = PlaylistDialog(this, musicStore, dark, currentItem?.id ?: -1L,
-            { item -> onlinePlayingUri = null; currentQueue = queue; load(item) }, {
+            { item ->
+                onlinePlayingUri = null
+                if (onlineQueue.none { it.id == item.id }) currentQueue = queue
+                load(item)
+            }, {
                 queue = it
-                if (!isLive && (onlinePlayingUri == null || currentUri != onlinePlayingUri)) {
+                if (!isLive && onlineQueue.isEmpty() && (onlinePlayingUri == null || currentUri != onlinePlayingUri)) {
                     currentQueue = it
                     service?.syncQueue(it, currentUri)
                 }

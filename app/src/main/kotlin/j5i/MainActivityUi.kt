@@ -820,6 +820,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             tag = "playerStatus"
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             ThemeUi.hideOverflow(this)
+            setOnClickListener { openLyricsTab() }
         }
         meta.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -985,6 +986,7 @@ internal fun MainActivity.finishRecording(label: String, statusView: TextView) {
         dismissSource()
         publishRecording(java.io.File(path))
         refreshPlayback()
+        playlistDialog?.refreshContent()
     }
 
 internal fun MainActivity.publishRecording(file: java.io.File) {

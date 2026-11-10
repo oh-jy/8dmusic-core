@@ -336,11 +336,6 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             addView(rows)
             post { activeStation?.let { active -> smoothScrollTo(0, (active.top - height / 3).coerceAtLeast(0)) } }
         }, LinearLayout.LayoutParams(-1, 0, 1f))
-        body.addView(ThemeUi.button(this, palette,
-            if (recordingKind == "mic") "停止麦克风录音" else "麦克风录音") {
-            if (recordingKind == "mic") sourceStatusView?.let(::finishMicRecording)
-            else requestMic.launch(android.Manifest.permission.RECORD_AUDIO)
-        })
         return
     }
     val sources = listOf("@aggregate" to "聚合") + entries.map { it.definition.id to it.definition.name } + plugins.map { it.descriptor.id to it.descriptor.name }
@@ -422,25 +417,23 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             bottomMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
         }
         addView(compactButton("全部加入队列") {
-            currentQueue = (currentQueue.ifEmpty { queue } + visibleTracks).distinctBy { it.id }
-            service?.syncQueue(currentQueue, currentUri)
+            stageOnlineQueue((onlineQueue + visibleTracks).distinctBy { it.id }, providerSelection ?: "")
             toast("已加入 ${visibleTracks.size} 首在线歌曲")
         })
         addView(compactButton("保存到歌单") { showOnlinePlaylistPicker(visibleTracks) })
     })
     val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    var activeTrack: android.view.View? = null
     fun addTrack(title: String, artist: String, sourceId: String, item: MusicItem, available: Boolean = true,
         badge: String = "", play: () -> Unit) {
         rows.addView(ThemeUi.row(this).apply {
+            tag = "track:${item.id}"
             val active = !isLive && currentItem?.id == item.id
-            if (active) activeTrack = this
             setPadding(ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f),
                 ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f))
             if (active) background = ThemeUi.bgDrawable(this@populateSourceSheet, palette.control, 8f)
             addView(LinearLayout(this@populateSourceSheet).apply {
                 orientation = LinearLayout.VERTICAL
-                val label = if (badge.isEmpty()) title else "[$badge] $title"
+                val label = if (badge.isEmpty()) title else "$badge $title"
                 addView(ThemeUi.text(this@populateSourceSheet, (if (active) "▶ " else "") + label,
                     13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
                 addView(ThemeUi.text(this@populateSourceSheet, "$artist · ${sources.firstOrNull { it.first == sourceId }?.second ?: sourceId}", 11f, palette, role = ThemeUi.ROLE_SUB))
@@ -457,12 +450,17 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }.forEach { (id, track) ->
         val item = j5i.spatial8d.provider.ProviderTrackRef.plugin(id, track)
         val parts = track.optInt("partCount", 1)
-        val badge = if (track.optBoolean("compilation")) "合集 $parts 首" else if (id == "platform.bilibili") "视频 · $parts P" else ""
+        val badges = buildList {
+            if (track.optBoolean("vip")) add("【V】")
+            if (track.optBoolean("compilation")) add("合集 $parts 首") else if (id == "platform.bilibili") add("视频")
+        }
+        val badge = badges.joinToString(" ")
             addTrack(item.name, item.artist, id, item, badge = badge) {
                 val visibleResults = pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }
-                currentQueue = visibleResults.map { (providerId, result) ->
+                val visibleItems = visibleResults.map { (providerId, result) ->
                     j5i.spatial8d.provider.ProviderTrackRef.plugin(providerId, result)
                 }
+                stageOnlineQueue(visibleItems, id, item.id)
             // Search metadata can under-report Bilibili's P count. Always ask
             // the provider for the authoritative pagelist before playing.
             if (id == "platform.bilibili" || track.optBoolean("compilation")) expandPluginTrack(id, track)
@@ -473,9 +471,10 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val item = j5i.spatial8d.provider.ProviderTrackRef.declarative(id, track)
             addTrack(track.title, track.artist, id, item, track.audioUrl != null) {
                 val visibleResults = providerResults.filter { selected.first == "@aggregate" || it.first == selected.first }
-                currentQueue = visibleResults.map { (providerId, result) ->
+                val visibleItems = visibleResults.map { (providerId, result) ->
                     j5i.spatial8d.provider.ProviderTrackRef.declarative(providerId, result)
                 }
+                stageOnlineQueue(visibleItems, id, item.id)
             val entry = providerStore.list().firstOrNull { it.enabled && it.definition.id == id }
             val url = track.audioUrl
             if (entry == null || url == null) { toast("来源已停用或未提供播放地址"); return@addTrack }
@@ -484,7 +483,6 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 return@addTrack
             }
             onlinePlayingUri = item.uri
-            dismissSource()
             load(item)
         }
     }
@@ -496,7 +494,6 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     })
     body.addView(ScrollView(this).apply {
         addView(rows)
-        post { activeTrack?.let { active -> smoothScrollTo(0, (active.top - height / 3).coerceAtLeast(0)) } }
     }, LinearLayout.LayoutParams(-1, 0, 1f))
 }
 
@@ -504,8 +501,8 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
     lateinit var sheet: android.app.Dialog
     sheet = ThemeUi.showSheet(this, palette, item.name.take(28), "${item.artist} · 在线歌曲不下载到本机") {
         addView(ThemeUi.button(this@showOnlineTrackActions, palette, "加入当前播放队列") {
-            currentQueue = (currentQueue.ifEmpty { queue } + item).distinctBy { it.id }
-            service?.syncQueue(currentQueue, currentUri)
+            stageOnlineQueue((onlineQueue + item).distinctBy { it.id },
+                item.album.substringAfter(':').substringAfter(':'))
             sheet.dismiss(); toast("已加入当前播放队列")
         })
         addView(ThemeUi.button(this@showOnlineTrackActions, palette, "加入 / 新建歌单") {
@@ -520,8 +517,7 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
                     return@button
                 }
                 runCatching {
-                    startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW,
-                        android.net.Uri.parse("https://www.bilibili.com/video/$bvid")))
+                    if (!openBilibiliVideo(bvid)) toast("无法打开哔哩哔哩")
                 }.onFailure { toast("无法打开哔哩哔哩：${it.message}") }
                 sheet.dismiss()
             })
@@ -546,6 +542,18 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
             }
         }
     sheet.show()
+}
+
+private fun MainActivity.openBilibiliVideo(bvid: String): Boolean {
+    val intents = listOf(
+        android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("bilibili://video/$bvid"))
+            .setPackage("tv.danmaku.bili"),
+        android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("bilibili://video/$bvid")),
+        android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse("https://www.bilibili.com/video/$bvid"))
+    )
+    val target = intents.firstOrNull { it.resolveActivity(packageManager) != null } ?: return false
+    startActivity(target)
+    return true
 }
 
 internal fun MainActivity.showOnlinePlaylistPicker(items: List<MusicItem>) {
@@ -574,10 +582,8 @@ internal fun MainActivity.showOnlinePlaylistPicker(items: List<MusicItem>) {
 }
 
 internal fun MainActivity.addOnlineToPlaylist(index: Int, items: List<MusicItem>, name: String = ""): Int {
-    musicStore.rememberAll(items)
-    songs = (songs + items).distinctBy { it.id }.toMutableList()
-    musicStore.saveLibrary(songs)
-    queue = musicStore.view(songs)
+    // 在线引用只进独立在线库和歌单，不污染本地歌曲列表。
+    musicStore.rememberOnline(items)
     val count = if (index < 0) {
         if (musicStore.addPlaylist(name, items)) items.size else 0
     } else musicStore.addToPlaylist(index, items)
@@ -595,11 +601,36 @@ private fun MainActivity.pluginSearch(entry: j5i.spatial8d.provider.ProviderPlug
 }
 
 private fun MainActivity.refreshOnlineResults(body: LinearLayout, scrollY: Int) {
-    populateSourceSheet(body, true)
-    body.post {
-        (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }
-            .lastOrNull()?.scrollTo(0, scrollY)
+    val oldScroll = (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }.lastOrNull()
+    val oldRows = oldScroll?.getChildAt(0) as? LinearLayout
+    var anchor: Pair<String, Int>? = null
+    if (oldRows != null && oldScroll != null) {
+        for (index in 0 until oldRows.childCount) {
+            val row = oldRows.getChildAt(index)
+            if (row.tag?.toString()?.startsWith("track:") == true && row.top - oldScroll.scrollY >= 0) {
+                anchor = row.tag.toString() to (row.top - oldScroll.scrollY)
+                break
+            }
+        }
     }
+    populateSourceSheet(body, true)
+    val newScroll = (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }.lastOrNull() ?: return
+    newScroll.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+        override fun onPreDraw(): Boolean {
+            newScroll.viewTreeObserver.removeOnPreDrawListener(this)
+            val rows = newScroll.getChildAt(0) as? LinearLayout
+            var row: android.view.View? = null
+            if (rows != null && anchor != null) {
+                for (index in 0 until rows.childCount) {
+                    val candidate = rows.getChildAt(index)
+                    if (candidate.tag == anchor.first) { row = candidate; break }
+                }
+            }
+            val currentAnchor = anchor
+            newScroll.scrollTo(0, if (row == null || currentAnchor == null) scrollY else row.top - currentAnchor.second)
+            return true
+        }
+    })
 }
 
 private fun MainActivity.searchAggregateProviders(body: LinearLayout, providers: List<ProviderDefinition>,

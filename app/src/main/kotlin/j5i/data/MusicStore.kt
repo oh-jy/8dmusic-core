@@ -14,6 +14,7 @@ import org.json.JSONObject
 /** 本机歌曲索引、手动添加歌曲、队列视图与播放列表的持久化入口。 */
 class MusicStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
+    init { splitOnlineReferences() }
     var sort = preferences.getString("sort", "name") ?: "name"
         private set
     var ascending = preferences.getBoolean("ascending", true)
@@ -213,11 +214,59 @@ class MusicStore(private val context: Context) {
         save("songs", JSONArray().apply { songs.forEach { put(songJson(it)) } }.toString())
     }
 
+    /** 纯在线引用（online://）独立存储，不进入本地歌曲库；播放时再按需解析真实地址。 */
+    fun onlineCached(): List<MusicItem> = jsonSongs(preferences.getString("onlineSongs", "[]"))
+
+    fun rememberOnline(items: List<MusicItem>) {
+        if (items.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val existing = onlineCached().associateBy { it.id }
+        val merged = items.map { item ->
+            item.copy(addedAt = existing[item.id]?.addedAt ?: now, modifiedAt = now)
+        }
+        val next = (onlineCached().filterNot { old -> items.any { it.id == old.id } } + merged).distinctBy { it.id }
+        save("onlineSongs", JSONArray().apply { next.forEach { put(songJson(it)) } }.toString())
+    }
+
+    fun removeOnline(ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        val removed = ids.toSet()
+        val next = onlineCached().filterNot { it.id in removed }
+        save("onlineSongs", JSONArray().apply { next.forEach { put(songJson(it)) } }.toString())
+    }
+
+    data class OnlineQueue(val items: List<MusicItem>, val currentId: Long?, val providerId: String)
+
+    fun saveOnlineQueue(items: List<MusicItem>, currentId: Long?, providerId: String) {
+        if (items.isEmpty()) { preferences.edit().remove("onlineQueue").apply(); return }
+        preferences.edit().putString("onlineQueue", JSONObject().apply {
+            put("items", JSONArray().apply { items.forEach { put(songJson(it)) } })
+            put("currentId", currentId ?: JSONObject.NULL)
+            put("providerId", providerId)
+        }.toString()).apply()
+    }
+
+    fun readOnlineQueue(): OnlineQueue? {
+        val text = preferences.getString("onlineQueue", null) ?: return null
+        return runCatching {
+            val root = JSONObject(text)
+            OnlineQueue(
+                jsonSongs(root.optJSONArray("items")?.toString()),
+                if (root.isNull("currentId")) null else root.optLong("currentId"),
+                root.optString("providerId")
+            )
+        }.getOrNull()?.takeIf { it.items.isNotEmpty() }
+    }
+
+    fun clearOnlineQueue() { preferences.edit().remove("onlineQueue").apply() }
+
     fun view(songs: List<MusicItem>): List<MusicItem> {
         val playlist = playlists.getOrNull(playlistIndex)
         val favoritesView = playlistIndex == FAVORITES_INDEX
+        // 本地“全部”视图只展示本机歌曲；打开自建歌单时合并在线引用，歌单里的在线歌才能解析出来。
+        val pool = if (playlist == null) songs else (songs + onlineCached()).distinctBy { it.id }
         val q = sanitizeQuery(query).trim().lowercase()
-        val filtered = songs.filter { song ->
+        val filtered = pool.filter { song ->
             (if (favoritesView) song.id in favorites
                 else playlist == null || if (playlist.rule.isNotEmpty()) matches(song, playlist.rule) else song.id in playlist.ids) &&
             (q.isEmpty() || matches(song, q))
@@ -285,6 +334,7 @@ class MusicStore(private val context: Context) {
     fun removePermanently(item: MusicItem) {
         val library = cached().filterNot { it.uri == item.uri }
         saveLibrary(library)
+        removeOnline(listOf(item.id))
         val added = loadAdded().filterNot { it.uri == item.uri }
         saveAdded(added)
         playlists.indices.forEach { index ->
@@ -330,9 +380,12 @@ class MusicStore(private val context: Context) {
 
     fun deletePlaylist(index: Int) {
         if (index !in playlists.indices) return
+        val removedIds = playlists[index].ids
         playlists.removeAt(index)
         playlistIndex = -1
         savePlaylists()
+        val liveIds = playlists.flatMap { it.ids }.toSet() + favorites
+        removeOnline(removedIds.filter { it !in liveIds && onlineCached().any { online -> online.id == it } })
     }
 
     fun toggleFavorite(id: Long) {
@@ -349,6 +402,19 @@ class MusicStore(private val context: Context) {
         it in charArrayOf('\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u00ad') || (it.code < 0x20 && it != '\t')
     }
     private fun saveOrder() = save("manual", JSONArray(manualOrder).toString())
+
+    /** 一次性迁移：历史版本把纯在线引用写进了本地库，拆出到 onlineSongs，歌单 id 引用保持不变。 */
+    private fun splitOnlineReferences() {
+        if (preferences.getBoolean("online_split_v1", false)) return
+        val local = cached()
+        val moved = local.filter { it.uri.startsWith("online://") }
+        if (moved.isNotEmpty()) {
+            rememberOnline(moved)
+            saveLibrary(local.filterNot { it.uri.startsWith("online://") })
+            saveAdded(loadAdded().filterNot { it.uri.startsWith("online://") })
+        }
+        preferences.edit().putBoolean("online_split_v1", true).apply()
+    }
     private fun savePlaylists() {
         save("playlists", JSONArray().apply {
             playlists.forEach { put(JSONObject().apply {

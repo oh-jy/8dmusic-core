@@ -84,6 +84,8 @@ class PlaylistDialog(
     }
     private var saveOpen = false
     private var reorderMode = false
+    private lateinit var recordButton: View
+    private lateinit var cleanupButton: View
     private fun t(key: String) = AppLanguage.text(context, key)
 
     fun isShowing(): Boolean = dialog?.isShowing == true
@@ -143,6 +145,10 @@ class PlaylistDialog(
             saveButton = button(t("playlist.save")) { toggleSave() }
             addView(saveButton)
             addView(count)
+            recordButton = button("录音") { (context as? PlaylistHost)?.toggleMicRecording() }
+            addView(recordButton)
+            cleanupButton = button("清在线") { (context as? PlaylistHost)?.pruneOnlineReferences() }
+            addView(cleanupButton)
             addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
         })
         search = ThemeUi.input(c, p, t("playlist.filter")).apply {
@@ -227,6 +233,13 @@ class PlaylistDialog(
     private fun refresh(scrollToPlaying: Boolean = true) {
         if (!::list.isInitialized) return
         songs = store.view(source)
+        if (::recordButton.isInitialized) {
+            (recordButton as? TextView)?.text =
+                if ((context as? PlaylistHost)?.isMicRecording() == true) "停止录音" else "录音"
+        }
+        if (::cleanupButton.isInitialized) {
+            cleanupButton.visibility = if (source.any { it.uri.startsWith("online://") }) View.VISIBLE else View.GONE
+        }
         saveButton.visibility = if (store.query.isNotBlank() && songs.isNotEmpty()) View.VISIBLE else View.GONE
         count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
         tabs.removeAllViews()
@@ -567,6 +580,9 @@ interface PlaylistHost {
     fun scanMusic()
     fun addAudio()
     fun isLocalMusicPlaying(): Boolean = false
+    fun isMicRecording(): Boolean = false
+    fun toggleMicRecording() {}
+    fun pruneOnlineReferences() {}
 }
 interface PlaylistMetadataHost { fun editMetadata(item: MusicItem) }
 interface PlaylistLibraryHost {

@@ -141,7 +141,7 @@ internal fun MainActivity.playPluginTrack(id: String, track: JSONObject) {
                 songs = (musicStore.cached().filterNot { it.id == cached.id } + cached).toMutableList()
                 musicStore.saveLibrary(songs)
                 queue = musicStore.view(songs)
-                onlinePlayingUri = item.uri; dismissSource(); load(cached)
+                onlinePlayingUri = item.uri; load(cached)
             }
                 .onFailure {
                     android.util.Log.w("8DProvider", "bilibili audio cache failed: ${it.message}")
@@ -151,7 +151,6 @@ internal fun MainActivity.playPluginTrack(id: String, track: JSONObject) {
         return
     }
     onlinePlayingUri = item.uri
-    dismissSource()
     load(item)
 }
 
@@ -211,7 +210,7 @@ internal fun MainActivity.showPluginParts(id: String, parent: JSONObject, parts:
                     providerSelection = id
                     pluginResults = parts.map { id to it }
                     providerResults = emptyList()
-                    currentQueue = partQueue
+                    stageOnlineQueue(partQueue, id, item.id)
                     sheet.dismiss(); playPluginTrack(id, part)
                 }
             })
@@ -355,7 +354,6 @@ private fun MainActivity.savePluginCookie(id: String, raw: String) {
         "platform.bilibili" -> has("SESSDATA")
         "platform.netease" -> has("MUSIC_U")
         "platform.kugou" -> has("KugooID") || has("KugooSID")
-        "platform.kuwo" -> has("kw_token")
         else -> fields.isNotEmpty()
     }
     require(valid) { "登录凭据缺少该平台必需字段" }

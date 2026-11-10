@@ -141,7 +141,7 @@ object AppLanguage {
         "metadata.saved" to e("歌曲信息已保存", "歌曲資訊已儲存", "Song metadata saved"),
         "metadata.read.only" to e("当前文件不可写，无法保存到原文件", "目前檔案不可寫，無法儲存到原檔案", "This file is not writable"),
         "driving" to e("驾驶", "駕駛", "Drive"),
-        "driving.close" to e("退出驾驶", "退出駕駛", "Exit driving"),
+        "driving.close" to e("退出", "退出", "Exit"),
         "driving.hint" to e("左右滑动切换视图", "左右滑動切換視圖", "Swipe to change view"),
         "driving.next.view" to e("切换可视化", "切換視覺化", "Change visualization"),
         "lyrics" to e("歌词", "歌詞", "Lyrics"),

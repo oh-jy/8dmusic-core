@@ -11,6 +11,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.RadioButton
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.content.Intent
+import android.net.Uri
 import android.content.res.ColorStateList
 import j5i.spatial8d.core.PARAM_INFO
 import j5i.spatial8d.ui.ThemeUi
@@ -252,9 +256,41 @@ internal fun MainActivity.showInfoSheet() {
                 setPadding(0, ThemeUi.dp(this@showInfoSheet, 6f), 0, ThemeUi.dp(this@showInfoSheet, 3f))
             })
             val version = packageManager.getPackageInfo(packageName, 0)
-            addView(ThemeUi.text(this@showInfoSheet, "${t("app.name")}  v${version.versionName}  ·  Version Code ${PackageInfoCompat.getLongVersionCode(version)}",
+            val code = PackageInfoCompat.getLongVersionCode(version)
+            addView(ThemeUi.text(this@showInfoSheet, "${t("app.name")}  v${version.versionName}  ·  ${formatReleaseTime(code)}",
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 4f))
+            })
+            addView(ThemeUi.text(this@showInfoSheet, "开源地址：github.com/oh-jy/8dmusic-core",
+                12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 6f))
+                setOnClickListener {
+                    val uri = Uri.parse("https://github.com/oh-jy/8dmusic-core")
+                    val opened = runCatching {
+                        startActivity(Intent(Intent.ACTION_VIEW, uri))
+                    }.isSuccess
+                    if (!opened) {
+                        val web = WebView(this@showInfoSheet).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            webViewClient = WebViewClient()
+                            loadUrl(uri.toString())
+                        }
+                        val dialog = Dialog(this@showInfoSheet)
+                        dialog.setContentView(FrameLayout(this@showInfoSheet).apply {
+                            addView(web, FrameLayout.LayoutParams(-1, -1))
+                            addView(ThemeUi.text(this@showInfoSheet, "关闭", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                                gravity = Gravity.CENTER
+                                setPadding(ThemeUi.dp(this@showInfoSheet, 14f), 0, ThemeUi.dp(this@showInfoSheet, 14f), 0)
+                                setOnClickListener { dialog.dismiss() }
+                            }, FrameLayout.LayoutParams(-2, ThemeUi.dp(this@showInfoSheet, 48f), Gravity.TOP or Gravity.END))
+                        })
+                        dialog.window?.setLayout(-1, -1)
+                        dialog.setOnDismissListener { web.destroy() }
+                        dialog.show()
+                        dialog.window?.setLayout(-1, -1)
+                    }
+                }
             })
             addView(ThemeUi.divider(this@showInfoSheet, palette, 2f))
             listOf(
@@ -344,3 +380,15 @@ internal fun MainActivity.showExportSheet() {
         exportDialog = sheet
         sheet.show()
     }
+
+/** versionCode 为 yyMMddHH + 同小时序号（共 9 位），换算成可读发布时间。 */
+private fun formatReleaseTime(code: Long): String {
+    val text = code.toString()
+    if (text.length != 9 || text.any { !it.isDigit() }) return "构建号 $code"
+    val year = "20${text.substring(0, 2)}"
+    val month = text.substring(2, 4)
+    val day = text.substring(4, 6)
+    val hour = text.substring(6, 8)
+    val sequence = text.substring(8).toInt()
+    return "发布于$year-$month-$day ${hour}时 第${sequence}次构建"
+}

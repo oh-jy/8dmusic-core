@@ -47,8 +47,8 @@ internal fun MainActivity.tabRow(labels: List<String>, selected: Int, compact: B
                         for (index in 0 until childCount) {
                             (getChildAt(index) as? Button)?.let { button ->
                                 button.tag = if (index == i) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
-                                button.setTextColor(if (index == i) palette.accent else palette.sub)
                                 ThemeUi.applyButton(button, palette)
+                                button.setTextColor(if (index == i) palette.accent else palette.sub)
                             }
                         }
                         action(i)

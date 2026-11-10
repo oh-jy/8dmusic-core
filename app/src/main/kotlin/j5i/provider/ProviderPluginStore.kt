@@ -13,7 +13,7 @@ internal class ProviderPluginStore(private val context: Context) {
 
     @Synchronized fun list(): List<Entry> {
         val root = JSONObject(prefs.getString("plugins", "{}") ?: "{}")
-        val order = listOf("platform.bilibili", "platform.netease", "platform.qq", "platform.kugou", "platform.kuwo")
+        val order = listOf("platform.bilibili", "platform.netease", "platform.qq", "platform.kugou")
         return root.keys().asSequence().sortedWith(compareBy<String> { order.indexOf(it).let { index -> if (index < 0) order.size else index } }.thenBy { it }).map { id ->
             val item = root.getJSONObject(id)
             val digest = item.getString("digest")

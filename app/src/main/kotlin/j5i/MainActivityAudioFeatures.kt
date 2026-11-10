@@ -111,7 +111,7 @@ internal fun MainActivity.startMicRecording() {
             }
             micRecorder = recorder
             if (offlineAsrEnabled) offlineAsr.start()
-            main.post { sourceStatusView?.let { beginRecording("mic", path, it) } }
+            main.post { beginRecording("mic", path, sourceStatusView ?: android.widget.TextView(this@startMicRecording)) }
         }.start()
     }
 
@@ -120,6 +120,7 @@ internal fun MainActivity.beginRecording(kind: String, path: String, statusView:
         statusView.text = "${if (kind == "mic") "麦克风" else "播放"}录音已开始"
         dismissSource()
         refreshPlayback()
+    playlistDialog?.refreshContent()
     }
 
 internal fun MainActivity.finishMicRecording(statusView: TextView) {
