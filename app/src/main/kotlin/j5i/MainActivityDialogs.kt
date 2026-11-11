@@ -209,6 +209,70 @@ internal fun MainActivity.showExitDialog() {
         exitDialog?.show()
     }
 
+internal fun MainActivity.withUsageGuide(kind: String, action: () -> Unit) {
+    if (preferences.getBoolean("guideConfirmed.$kind", false)) action()
+    else showUsageGuide(kind, action)
+}
+
+internal fun MainActivity.showUsageGuide(kind: String, onConfirmed: (() -> Unit)? = null) {
+    lateinit var dialog: Dialog
+    dialog = ThemeUi.showSheet(this, palette, t("guide.$kind.title"), cancelLabel = t("guide.later")) {
+        addView(ThemeUi.text(this@showUsageGuide, t("guide.$kind.body"), 13f, palette, role = ThemeUi.ROLE_SUB).apply {
+            setPadding(0, ThemeUi.dp(this@showUsageGuide, 8f), 0, ThemeUi.dp(this@showUsageGuide, 8f))
+        })
+        addView(ThemeUi.button(this@showUsageGuide, palette, t("guide.confirm"), ThemeUi.ROLE_ACCENT_FILL) {
+            preferences.edit().putBoolean("guideConfirmed.$kind", true).apply()
+            dialog.dismiss()
+            onConfirmed?.invoke()
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showUsageGuide, 42f)).apply {
+                topMargin = ThemeUi.dp(this@showUsageGuide, 10f)
+            }
+        })
+    }
+    dialog.show()
+}
+
+private val featureGuideSteps = listOf("music", "space", "visuals")
+
+internal fun MainActivity.showPendingFeatureGuide() {
+    val index = featureGuideSteps.indexOfFirst { !preferences.getBoolean("featureGuideConfirmed.$it", false) }
+    if (index >= 0 && !isFinishing && !isDestroyed) showFeatureGuide(index)
+}
+
+internal fun MainActivity.showFeatureGuide(index: Int = 0) {
+    val step = featureGuideSteps[index]
+    lateinit var dialog: Dialog
+    dialog = ThemeUi.showSheet(this, palette, t("featureGuide.$step.title"),
+        subtitle = "${index + 1} / ${featureGuideSteps.size}", cancelLabel = t("guide.later")) {
+        addView(ThemeUi.text(this@showFeatureGuide, t("featureGuide.$step.body"), 13f, palette, role = ThemeUi.ROLE_SUB).apply {
+            setPadding(0, ThemeUi.dp(this@showFeatureGuide, 8f), 0, ThemeUi.dp(this@showFeatureGuide, 8f))
+        })
+        addView(ThemeUi.button(this@showFeatureGuide, palette, t("featureGuide.$step.action"), ThemeUi.ROLE_CONTROL) {
+            preferences.edit().putBoolean("featureGuideConfirmed.$step", true).apply()
+            dialog.dismiss()
+            when (step) {
+                "music" -> showPlaylist()
+                "space" -> homePresetButton.performClick()
+                "visuals" -> showVisualizerSheet()
+            }
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showFeatureGuide, 42f))
+        })
+        addView(ThemeUi.button(this@showFeatureGuide, palette,
+            t(if (index == featureGuideSteps.lastIndex) "guide.confirm" else "featureGuide.next"), ThemeUi.ROLE_ACCENT_FILL) {
+            preferences.edit().putBoolean("featureGuideConfirmed.$step", true).apply()
+            dialog.dismiss()
+            if (index < featureGuideSteps.lastIndex) showFeatureGuide(index + 1)
+        }.apply {
+            layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showFeatureGuide, 42f)).apply {
+                topMargin = ThemeUi.dp(this@showFeatureGuide, 10f)
+            }
+        })
+    }
+    dialog.show()
+}
+
 internal fun MainActivity.showInfoSheet() {
         if (infoDialog?.isShowing == true) return
         val expandedSections = mutableSetOf(t("info.quick"))
@@ -260,6 +324,29 @@ internal fun MainActivity.showInfoSheet() {
             addView(ThemeUi.text(this@showInfoSheet, "${t("app.name")}  v${version.versionName}  ·  ${formatReleaseTime(code)}",
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 4f))
+            })
+            addView(ThemeUi.row(this@showInfoSheet).apply {
+                addView(ThemeUi.text(this@showInfoSheet, t("guide.restart"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    minHeight = ThemeUi.dp(this@showInfoSheet, 48f)
+                    setPadding(0, 0, ThemeUi.dp(this@showInfoSheet, 24f), 0)
+                    setOnClickListener {
+                        infoDialog?.dismiss()
+                        showUsageGuide("notification") {
+                            showUsageGuide("audio") {
+                                showUsageGuide("microphone")
+                            }
+                        }
+                    }
+                }, LinearLayout.LayoutParams(-2, -2))
+                addView(ThemeUi.text(this@showInfoSheet, t("featureGuide.restart"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    minHeight = ThemeUi.dp(this@showInfoSheet, 48f)
+                    setOnClickListener {
+                        infoDialog?.dismiss()
+                        showFeatureGuide()
+                    }
+                }, LinearLayout.LayoutParams(-2, -2))
             })
             addView(ThemeUi.text(this@showInfoSheet, "开源地址：github.com/oh-jy/8dmusic-core",
                 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {

@@ -128,29 +128,34 @@ internal fun MainActivity.showPluginSources() {
 
 internal fun MainActivity.playPluginTrack(id: String, track: JSONObject) {
     val item = j5i.spatial8d.provider.ProviderTrackRef.plugin(id, track)
+    if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return }
     if (currentQueue.isEmpty()) currentQueue = listOf(item)
+    onlinePlayingUri = item.uri
+    dismissSource()
     if (id == "platform.bilibili") {
         j5i.spatial8d.provider.ProviderAudioCache.cached(this, item)?.let { cached ->
-            onlinePlayingUri = item.uri; dismissSource(); load(cached); return
+            load(cached); refreshPlayback(); return
         }
-        toast("正在缓存哔哩哔哩音频…")
+        val generation = prepareOnlineSelection(item, "正在缓存哔哩哔哩音频…")
         Thread {
             val result = runCatching { j5i.spatial8d.provider.ProviderAudioCache.cache(this, item, false) }
-            runOnUiThread { result.onSuccess { cached ->
+            runOnUiThread {
+                if (generation != loadGeneration) return@runOnUiThread
+                result.onSuccess { cached ->
                 musicStore.remember(cached)
                 songs = (musicStore.cached().filterNot { it.id == cached.id } + cached).toMutableList()
                 musicStore.saveLibrary(songs)
                 queue = musicStore.view(songs)
-                onlinePlayingUri = item.uri; load(cached)
+                load(cached); refreshPlayback()
             }
                 .onFailure {
                     android.util.Log.w("8DProvider", "bilibili audio cache failed: ${it.message}")
-                    toast("哔哩哔哩音频加载失败：${it.message}")
+                    playbackStatus = "哔哩哔哩音频加载失败：${it.message}"
+                    toast(playbackStatus); refreshPlayback()
                 } }
         }.start()
         return
     }
-    onlinePlayingUri = item.uri
     load(item)
 }
 
