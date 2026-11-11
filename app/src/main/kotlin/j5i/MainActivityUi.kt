@@ -22,6 +22,9 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.Toast
 import android.content.res.ColorStateList
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import androidx.core.content.ContextCompat
 import j5i.spatial8d.audio.PlaybackService
 import j5i.spatial8d.audio.Lyrics
@@ -429,6 +432,7 @@ internal fun MainActivity.refreshPlayback() {
                 ?: if (it.type == "网络台") "网络电台" else "电台直播"
         }.orEmpty()
         modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
+        playerBar.findViewWithTag<View>("radioSchedule")?.visibility = if (isLive) View.VISIBLE else View.GONE
         val effectiveStatus = when {
             playing -> t("status.playing")
             playbackStatus == t("status.preparing") && service?.player?.isPrepared == true -> t("status.ready")
@@ -448,7 +452,9 @@ internal fun MainActivity.refreshPlayback() {
             else currentLine ?: effectiveStatus
         val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.let { subtitle ->
-            subtitle.text = if (!isLive && playing && currentLine == null)
+            subtitle.text = if (isLive) SpannableString(statusLine).apply {
+                setSpan(ForegroundColorSpan(if (dark) 0xff66d990.toInt() else 0xff168345.toInt()), 0, "● LIVE".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            } else if (playing && currentLine == null)
                 playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
             val showingCaption = isLive && asrTranscript.isNotBlank()
             subtitle.textSize = if (showingCaption) 12f else 11f
@@ -796,10 +802,12 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
                     info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
-                        android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK, t("edit.metadata")))
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK, if (isLive) "查看节目单" else t("edit.metadata")))
                 }
             }
-            setOnClickListener { showMetadataEditor() }
+            setOnClickListener {
+                if (isLive) openCurrentRadioSchedule() else showMetadataEditor()
+            }
         }
         val sub = ThemeUi.row(this)
         position = ThemeUi.text(this, "00:00 / 00:00", 11f, palette, role = ThemeUi.ROLE_SUB)
@@ -811,8 +819,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         }
         sub.addView(position)
         sub.addView(modeTextView.apply {
-            setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), 0, 0, 0)
-            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 56f), ViewGroup.LayoutParams.WRAP_CONTENT)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         sub.addView(recordingLabel)
         // 状态栏（含当前行歌词）独立成行，跟歌曲名左缘对齐，不再被时间/模式字段挤到右边。
@@ -857,6 +864,13 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             }
         }
         meta.addView(favoriteButton)
+        meta.addView(ThemeUi.text(this, "节目单", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            tag = "radioSchedule"
+            gravity = Gravity.CENTER
+            contentDescription = "查看节目单"
+            setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), 0, ThemeUi.dp(this@nowPlayingBar, 8f), 0)
+            setOnClickListener { openCurrentRadioSchedule() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ThemeUi.dp(this, 48f)))
         exportButton = ImageButton(this).apply {
             background = null
             scaleType = ImageView.ScaleType.CENTER_INSIDE

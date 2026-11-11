@@ -17,6 +17,11 @@ import java.util.concurrent.TimeUnit
 internal data class RadioScheduleSource(val provider: String, val id: String)
 internal data class RadioProgram(val name: String, val start: String, val end: String, val hosts: String)
 
+internal fun MainActivity.openCurrentRadioSchedule() {
+    val station = importedStations().firstOrNull { it.id == currentStationId }
+    if (station != null) showRadioSchedule(station) else toast("该电台暂无可用节目单")
+}
+
 internal fun isRadioProgramCurrent(program: RadioProgram, time: String): Boolean =
     if (program.end <= program.start) time >= program.start || time < program.end
     else time >= program.start && time < program.end

@@ -323,7 +323,10 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                         setPadding(ThemeUi.dp(this@populateSourceSheet, 10f), 0, ThemeUi.dp(this@populateSourceSheet, 10f), 0)
                         setOnClickListener { showRadioSchedule(station) }
                     })
-                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE ▸" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                        minWidth = kotlin.math.ceil(maxOf(paint.measureText("LIVE ▸"), paint.measureText("播放 ▸"))).toInt()
+                    })
                     setOnClickListener { playRadio(station) }
                 })
             }
