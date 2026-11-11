@@ -305,7 +305,9 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal val scanProvider = registerForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { result ->
         result.contents?.let { importProviderQr(it) }
     }
-    internal val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    internal val requestNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        showPendingFeatureGuide()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -353,13 +355,17 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             }
         }
         startService(Intent(this, PlaybackService::class.java))
-        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
         bindService(Intent(this, PlaybackService::class.java), connection, Context.BIND_AUTO_CREATE)
         if (hasAudioPermission()) scanMusic()
         scheduleLyricsPrefetch()
         main.post(ticker)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+            !preferences.getBoolean("guideConfirmed.notification", false)) {
+            showUsageGuide("notification") { requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
+        } else {
+            showPendingFeatureGuide()
+        }
     }
 
     override fun onDestroy() {
@@ -424,7 +430,11 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             return
         }
         if (recordingKind.isNotEmpty()) { toast("请先停止当前录音"); return }
-        requestMic.launch(Manifest.permission.RECORD_AUDIO)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startMicRecording()
+        } else {
+            withUsageGuide("microphone") { requestMic.launch(Manifest.permission.RECORD_AUDIO) }
+        }
     }
 
     override fun pruneOnlineReferences() {
@@ -448,7 +458,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         if (loading) return
         if (!hasAudioPermission()) {
             // 仅在用户主动扫描时申请，冷启动静默扫描不能突然弹权限框。
-            requestAudio.launch(audioPermission())
+            withUsageGuide("audio") { requestAudio.launch(audioPermission()) }
             return
         }
         playbackStatus = "正在扫描音乐库…"

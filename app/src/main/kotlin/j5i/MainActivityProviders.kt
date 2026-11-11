@@ -318,7 +318,15 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                         addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · ${station.type} · ${station.sources.size} 路源", 10f, palette, role = ThemeUi.ROLE_SUB))
                         if (station.note.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT))
                     }, LinearLayout.LayoutParams(0, -2, 1f))
-                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT))
+                    addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        contentDescription = "${station.name}，查看节目单"
+                        setPadding(ThemeUi.dp(this@populateSourceSheet, 10f), 0, ThemeUi.dp(this@populateSourceSheet, 10f), 0)
+                        setOnClickListener { showRadioSchedule(station) }
+                    })
+                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE ▸" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                        gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                        minWidth = kotlin.math.ceil(maxOf(paint.measureText("LIVE ▸"), paint.measureText("播放 ▸"))).toInt()
+                    })
                     setOnClickListener { playRadio(station) }
                 })
             }
@@ -482,7 +490,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 toast("该来源未授权明文 HTTP 播放")
                 return@addTrack
             }
+            if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return@addTrack }
             onlinePlayingUri = item.uri
+            dismissSource()
             load(item)
         }
     }

@@ -87,13 +87,34 @@ internal fun MainActivity.load(item: MusicItem) {
         load(item, true)
     }
 
+internal fun MainActivity.prepareOnlineSelection(item: MusicItem, status: String): Int {
+    val generation = ++loadGeneration
+    ++radioGeneration
+    radioProbes.forEach { it.stop() }
+    radioProbes = emptyList()
+    service?.radio?.stop()
+    service?.stopLocal()
+    isLive = false
+    currentStationId = ""
+    currentItem = item
+    currentUri = item.uri
+    ++lyricsGeneration
+    currentLyrics = null
+    if (isViewReady(this@prepareOnlineSelection::lyricsView)) lyricsView.clear()
+    pushLyricsToVisualizer()
+    playbackStatus = status
+    refreshPlayback()
+    return generation
+}
+
 internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
     if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
-        playbackStatus = "正在解析在线歌曲…"
-        refreshPlayback()
+        if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return }
+        val generation = prepareOnlineSelection(item, "正在解析在线歌曲…")
         Thread {
             val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
             main.post {
+                if (generation != loadGeneration) return@post
                 resolved.onSuccess { load(it, autoplay) }
                     .onFailure { playbackStatus = "在线歌曲解析失败：${it.message}"; toast(playbackStatus); refreshPlayback() }
             }
