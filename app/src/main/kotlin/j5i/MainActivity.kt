@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal val favoriteDownloads = mutableSetOf<Long>()
     internal var pageActive = true
     internal var exporting = false
+    internal var exportProgressDialog: android.app.Dialog? = null
+    internal var exportProgressText: android.widget.TextView? = null
+    internal var exportStartedAt = 0L
     internal var dark = true
     /** 0=深色 1=浅色 2=跟随系统。dark 字段始终是"当前生效"的结果，由 themeMode 派生。 */
     internal var themeMode = 0
@@ -138,6 +141,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var infoDialog: Dialog? = null
     internal var exportDialog: Dialog? = null
     internal var visualizerDialog: Dialog? = null
+    internal var lyricsFullscreenDialog: Dialog? = null
     internal var drivingDialog: Dialog? = null
     internal var drivingView: DrivingView? = null
     internal var drivingAutoDismissed = false
@@ -281,11 +285,30 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal val openAudio = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) addAndPlay(uri)
     }
+    internal val openVisualImage = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                .onSuccess { visualizerView.setCreativeBackground(uri.toString()) }
+                .onFailure { toast("无法保存图片访问权限，请重新选择") }
+        }
+    }
     internal val saveWav = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
         if (uri != null) exportWav(uri)
     }
     internal val saveMp3 = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mpeg")) { uri ->
         if (uri != null) exportMp3(uri)
+    }
+    internal var exportVideoLandscape = false
+    internal var exportVideoResolution = 720
+    internal var exportVideoStart = 0.0
+    internal var exportVideoDuration = 0.0
+    internal var exportVideoSmoothGifLoop = false
+    internal val saveMp4 = registerForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri ->
+        if (uri != null) exportMp4(uri, exportVideoLandscape, exportVideoResolution, exportVideoStart, exportVideoDuration)
+    }
+    internal val saveGif = registerForActivityResult(ActivityResultContracts.CreateDocument("image/gif")) { uri ->
+        if (uri != null) exportMp4(uri, exportVideoLandscape, exportVideoResolution, exportVideoStart, exportVideoDuration,
+            gif = true, smoothGifLoop = exportVideoSmoothGifLoop)
     }
     internal val requestAudio = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         if (it) scanMusic() else toast("未授予音乐库权限，仍可通过“添加音频”选择文件")
@@ -338,7 +361,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             override fun handleOnBackPressed() {
                 if (exitDialog?.isShowing == true) { exitDialog?.dismiss(); return }
                 var dismissed = false
-                listOf(fmDialog, onlineDialog, infoDialog, exportDialog, visualizerDialog, lyricsDialog).forEach { dialog ->
+                listOf(fmDialog, onlineDialog, infoDialog, exportDialog, visualizerDialog, lyricsFullscreenDialog, lyricsDialog).forEach { dialog ->
                     if (dialog?.isShowing == true) { dialog.dismiss(); dismissed = true }
                 }
                 if (playlistDialog?.isShowing() == true) { playlistDialog?.dismiss(); dismissed = true }
@@ -369,6 +392,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     }
 
     override fun onDestroy() {
+        lyricsFullscreenDialog?.dismiss()
         providerLoginDialog?.dismiss()
         providerLoginDialog = null
         main.removeCallbacks(prefetchLyrics)

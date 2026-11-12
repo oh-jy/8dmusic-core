@@ -44,6 +44,28 @@ class PcmVisualClock {
     @Volatile var peak = 0.0; private set
     @Volatile var beatAtNs = 0L; private set
     private var lastInputNs = 0L
+    private var offlineNs: Long? = null
+    fun nowNs(): Long = offlineNs ?: System.nanoTime()
+    val active: Boolean
+        @Synchronized get() = offlineNs != null || lastInputNs != 0L && System.nanoTime() - lastInputNs <= 500_000_000L
+
+    @Synchronized fun acceptOffline(data: ByteArray, bytes: Int, timeUs: Long) {
+        val now = 1_000_000_000L + timeUs * 1_000L
+        offlineNs = now
+        val input = ByteBuffer.wrap(data, 0, bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        var sum = 0.0
+        var loudest = 0.0
+        var count = 0
+        while (input.hasRemaining()) {
+            val sample = input.get() / 32768.0
+            sum += sample * sample
+            loudest = maxOf(loudest, kotlin.math.abs(sample))
+            count++
+        }
+        rms = if (count > 0) sqrt(sum / count) else 0.0
+        peak = loudest
+        if (count > 0 && detector.accept(rms, now)) beatAtNs = now
+    }
 
     @Synchronized fun accept(data: ByteArray, bytes: Int) {
         val startedAt = System.nanoTime()
@@ -64,6 +86,7 @@ class PcmVisualClock {
     }
 
     @Synchronized fun consume() {
+        if (offlineNs != null) return
         val now = System.nanoTime()
         while (chunks.firstOrNull()?.atNs?.let { it <= now } == true) {
             val current = chunks.removeFirst()
@@ -75,7 +98,7 @@ class PcmVisualClock {
 
     @Synchronized fun reset() {
         chunks.clear(); detector.reset(); rms = 0.0; peak = 0.0
-        beatAtNs = 0L; lastInputNs = 0L; generation++
+        beatAtNs = 0L; lastInputNs = 0L; offlineNs = null; generation++
     }
 
     private companion object { const val DELAY_NS = 80_000_000L }

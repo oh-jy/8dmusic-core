@@ -63,7 +63,7 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         shade.addView(ThemeUi.button(context, ThemeUi.palette(true), AppLanguage.text(context, "driving.next.view"),
             ThemeUi.ROLE_SURFACE_ALT, minHeightDp = 48f).apply {
             setOnClickListener {
-                visualizerChild?.let { it.restoreVisualState(true to nextMode(it.visualState.second, true)) }
+                visualizerChild?.let { it.restoreVisualState(true to nextVisualMode(it.visualState.second, true)) }
             }
         }, LinearLayout.LayoutParams(-1, dp(48)))
         shade.addView(ThemeUi.row(context).apply {
@@ -143,19 +143,13 @@ class DrivingView(context: Context, visualizer: VisualizerView) : FrameLayout(co
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> downX = event.x
             MotionEvent.ACTION_UP -> if (abs(event.x - downX) > dp(80)) {
-                visualizerChild?.let { it.restoreVisualState(true to nextMode(it.visualState.second, event.x < downX)) }
+                visualizerChild?.let { it.restoreVisualState(true to nextVisualMode(it.visualState.second, event.x < downX)) }
             }
         }
         return true
     }
 
     private val visualizerChild: VisualizerView? get() = (getChildAt(0) as? VisualizerView)
-    private fun nextMode(current: Int, forward: Boolean): Int {
-        val modes = listOf(3, 2, 1, 4)
-        val index = modes.indexOf(current).coerceAtLeast(0)
-        return modes[(index + if (forward) 1 else -1).mod(modes.size)]
-    }
-
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) downX = event.x
         return event.actionMasked == MotionEvent.ACTION_MOVE && abs(event.x - downX) > dp(24)

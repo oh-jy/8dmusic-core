@@ -91,7 +91,6 @@ internal fun MainActivity.showLanguagePicker() {
 internal fun MainActivity.showDrivingMode() {
         if (drivingDialog?.isShowing == true) return
         (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
-        visualizerView.showLayerOptions = false
         visualizerView.drivingLyrics = true
         visualizerView.visibility = View.VISIBLE
         visualizerView.restoreVisualState(true to 3)
@@ -109,7 +108,6 @@ internal fun MainActivity.showDrivingMode() {
                 drivingAutoDismissed = true
                 (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
                 curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
-                visualizerView.showLayerOptions = false
                 visualizerView.drivingLyrics = false
                 visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
                 drivingView = null
@@ -421,25 +419,118 @@ internal fun MainActivity.showInfoSheet() {
 
 internal fun MainActivity.showExportSheet() {
         if (exportDialog?.isShowing == true) return
-        if (exporting) { toast("正在导出，请等待完成"); return }
+        if (exporting) { showExportProgress(); return }
         if (isLive) { toast("电台直播没有完整时间轴，请先录音再导出"); return }
         if (service?.player?.duration ?: 0.0 <= 0.0) { toast("请先加载音频"); return }
-        var mp3 = false
-        val sheet = ThemeUi.showSheet(this, palette, "导出音频", subtitle = "选择格式与保存位置") {
+        var format = 0
+        var landscape = false
+        var resolution = 720
+        val sheet = ThemeUi.showSheet(this, palette, "导出", subtitle = "选择格式与保存位置") {
             val formatRow = ThemeUi.row(this@showExportSheet)
             val wav = RadioButton(this@showExportSheet).apply { text = "WAV\n无损音质"; textSize = 12f; gravity = Gravity.CENTER }
             val mp3Btn = RadioButton(this@showExportSheet).apply { text = "MP3\n192 kbps · 体积小"; textSize = 12f; gravity = Gravity.CENTER }
-            fun setFormat(v: Boolean) {
-                mp3 = v
-                wav.isChecked = !v; mp3Btn.isChecked = v
-                listOf(wav, mp3Btn).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
+            val mp4Btn = RadioButton(this@showExportSheet).apply { text = "MP4\n音乐可视化"; textSize = 12f; gravity = Gravity.CENTER }
+            val gifBtn = RadioButton(this@showExportSheet).apply { text = "GIF\n无声动图"; textSize = 12f; gravity = Gravity.CENTER }
+            val orientationRow = ThemeUi.row(this@showExportSheet)
+            val portrait = RadioButton(this@showExportSheet).apply { text = "竖屏"; textSize = 12f }
+            val horizontal = RadioButton(this@showExportSheet).apply { text = "横屏"; textSize = 12f }
+            val resolutionRow = ThemeUi.row(this@showExportSheet)
+            val clipRow = ThemeUi.row(this@showExportSheet)
+            val smoothGifLoop = android.widget.CheckBox(this@showExportSheet).apply {
+                text = "尽量平滑 GIF 首尾循环"; setTextColor(palette.text)
+                buttonTintList = ColorStateList.valueOf(palette.accent)
             }
-            wav.setOnClickListener { setFormat(false) }
-            mp3Btn.setOnClickListener { setFormat(true) }
-            setFormat(false)
+            val creativeButton = ThemeUi.button(this@showExportSheet, palette, "画面创作设置", ThemeUi.ROLE_CONTROL) {
+                showVisualCreative()
+            }
+            val copyrightHint = ThemeUi.text(this@showExportSheet, "分享前请确认音乐、歌词及图片的使用授权", 11f, palette, role = ThemeUi.ROLE_SUB)
+            val clipStart = ThemeUi.input(this@showExportSheet, palette, "起始秒数（默认 0）").apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            }
+            val clipDuration = ThemeUi.input(this@showExportSheet, palette, "时长秒数（留空为整曲）").apply {
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            }
+            fun clip(): Pair<Double, Double>? {
+                val startText = clipStart.text.toString().trim()
+                val durationText = clipDuration.text.toString().trim()
+                val start = if (startText.isEmpty()) 0.0 else startText.toDoubleOrNull()
+                val length = if (durationText.isEmpty()) 0.0 else durationText.toDoubleOrNull()
+                if (start == null || length == null || !start.isFinite() || !length.isFinite() || start < 0 || length < 0 ||
+                    start >= (service?.player?.duration ?: 0.0) / (service?.player?.transform?.speed ?: 1.0)) {
+                    toast("片段范围无效"); return null
+                }
+                if (format == 3 && length != 0.0 && length !in 1.0..10.0) {
+                    toast("GIF 时长需在 1 到 10 秒之间"); return null
+                }
+                if (format == 3 && visualizerView.creative.outroText.isNotBlank() &&
+                    (if (length == 0.0) 5.0 else length) + visualizerView.creative.outroDuration > 10.0) {
+                    toast("添加片尾后，GIF 总时长不能超过 10 秒"); return null
+                }
+                return start to length
+            }
+            val previewButton = ThemeUi.button(this@showExportSheet, palette, "预览前 2 秒", ThemeUi.ROLE_CONTROL) {
+                val selectedClip = clip() ?: return@button
+                exportMp4(null, landscape, resolution, selectedClip.first,
+                    if (selectedClip.second > 0) minOf(2.0, selectedClip.second) else 2.0, preview = true)
+            }
+            val durationRow = ThemeUi.row(this@showExportSheet)
+            listOf("15 秒" to "15", "30 秒" to "30", "整曲" to "").forEach { (label, seconds) ->
+                durationRow.addView(ThemeUi.button(this@showExportSheet, palette, label, ThemeUi.ROLE_CONTROL) {
+                    clipDuration.setText(seconds)
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            val hd = RadioButton(this@showExportSheet).apply { text = "720p"; textSize = 12f }
+            val fullHd = RadioButton(this@showExportSheet).apply { text = "1080p"; textSize = 12f }
+            fun setResolution(value: Int) {
+                resolution = value; hd.isChecked = value == 720; fullHd.isChecked = value == 1080
+                listOf(hd, fullHd).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
+            }
+            fun setOrientation(value: Boolean) {
+                landscape = value; portrait.isChecked = !value; horizontal.isChecked = value
+                listOf(portrait, horizontal).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
+            }
+            fun setFormat(value: Int) {
+                format = value
+                wav.isChecked = value == 0; mp3Btn.isChecked = value == 1; mp4Btn.isChecked = value == 2; gifBtn.isChecked = value == 3
+                orientationRow.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                resolutionRow.visibility = if (value == 2) View.VISIBLE else View.GONE
+                clipRow.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                smoothGifLoop.visibility = if (value == 3) View.VISIBLE else View.GONE
+                creativeButton.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                copyrightHint.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                previewButton.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                durationRow.visibility = if (value == 2) View.VISIBLE else View.GONE
+                clipDuration.hint = if (value == 3) "时长 1–10 秒（默认 5）" else "时长秒数（留空为整曲）"
+                listOf(wav, mp3Btn, mp4Btn, gifBtn).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
+            }
+            wav.setOnClickListener { setFormat(0) }
+            mp3Btn.setOnClickListener { setFormat(1) }
+            mp4Btn.setOnClickListener { setFormat(2) }
+            gifBtn.setOnClickListener { setFormat(3) }
+            portrait.setOnClickListener { setOrientation(false) }
+            horizontal.setOnClickListener { setOrientation(true) }
+            hd.setOnClickListener { setResolution(720) }
+            fullHd.setOnClickListener { setResolution(1080) }
+            setOrientation(false); setResolution(720); setFormat(0)
             formatRow.addView(wav.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
             formatRow.addView(mp3Btn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
+            formatRow.addView(mp4Btn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
+            formatRow.addView(gifBtn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
             addView(formatRow)
+            orientationRow.addView(portrait, LinearLayout.LayoutParams(0, -2, 1f))
+            orientationRow.addView(horizontal, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(orientationRow)
+            resolutionRow.addView(hd, LinearLayout.LayoutParams(0, -2, 1f))
+            resolutionRow.addView(fullHd, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(resolutionRow)
+            clipRow.addView(clipStart, LinearLayout.LayoutParams(0, -2, 1f))
+            clipRow.addView(clipDuration, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(clipRow)
+            addView(smoothGifLoop)
+            addView(durationRow)
+            addView(creativeButton)
+            addView(previewButton)
+            addView(copyrightHint)
             fun destination(title: String, description: String, actionLabel: String, action: () -> Unit) = ThemeUi.row(this@showExportSheet).apply {
                 background = ThemeUi.bgDrawable(this@showExportSheet, palette.surfaceAlt, 8f)
                 setPadding(ThemeUi.dp(this@showExportSheet, 12f), 0, ThemeUi.dp(this@showExportSheet, 12f), 0)
@@ -453,15 +544,23 @@ internal fun MainActivity.showExportSheet() {
                 addView(ThemeUi.text(this@showExportSheet, actionLabel, 12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener { action() }
             }
-            addView(destination("默认位置", "保存到公共 Music/8D 目录", "导出 ▸") {
+            addView(destination("默认位置", "音频保存到 Music/8D，视频保存到 Movies/8D", "导出 ▸") {
+                val selectedClip = if (format >= 2) clip() ?: return@destination else 0.0 to 0.0
                 exportDialog?.dismiss()
                 val name = currentItem?.name?.substringBeforeLast('.') ?: "8d_export"
-                exportPublic(name, mp3)
+                if (format >= 2) exportPublicVideo(name, landscape, resolution, selectedClip.first, selectedClip.second, format == 3,
+                    smoothGifLoop.isChecked) else exportPublic(name, format == 1)
             })
             addView(destination("自选位置…", "拉起系统对话框，自选目录与文件名", "选择 ▸") {
+                val selectedClip = if (format >= 2) clip() ?: return@destination else 0.0 to 0.0
                 exportDialog?.dismiss()
                 val name = currentItem?.name?.substringBeforeLast('.') ?: "8d_export"
-                if (mp3) saveMp3.launch("$name-8D.mp3") else saveWav.launch("$name-8D.wav")
+                when (format) {
+                    2 -> { exportVideoLandscape = landscape; exportVideoResolution = resolution; exportVideoStart = selectedClip.first; exportVideoDuration = selectedClip.second; saveMp4.launch("$name-8D.mp4") }
+                    3 -> { exportVideoLandscape = landscape; exportVideoResolution = resolution; exportVideoStart = selectedClip.first; exportVideoDuration = selectedClip.second; exportVideoSmoothGifLoop = smoothGifLoop.isChecked; saveGif.launch("$name-8D.gif") }
+                    1 -> saveMp3.launch("$name-8D.mp3")
+                    else -> saveWav.launch("$name-8D.wav")
+                }
             })
         }
         exportDialog = sheet

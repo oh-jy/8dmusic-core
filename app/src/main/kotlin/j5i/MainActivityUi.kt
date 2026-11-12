@@ -418,8 +418,14 @@ internal fun MainActivity.refreshPlayback() {
         if (isLive && isViewReady(this@refreshPlayback::lyricsView)) {
             lyricsView.setLiveCaption(asrTranscript)
         }
-        if (isViewReady(this@refreshPlayback::lyricsView)) lyricsView.setPosition(lyricPositionMs)
-        if (isViewReady(this@refreshPlayback::visualizerView)) visualizerView.setPosition(lyricPositionMs)
+        if (isViewReady(this@refreshPlayback::lyricsView)) {
+            lyricsView.seekEnabled = !isLive && player?.isPrepared == true
+            lyricsView.setPosition(lyricPositionMs)
+        }
+        if (isViewReady(this@refreshPlayback::visualizerView)) {
+            visualizerView.setVisualTrack(currentItem?.uri?.toString())
+            visualizerView.setPosition(lyricPositionMs)
+        }
         popupVisualizer?.setPosition(lyricPositionMs)
         songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
         refreshTrackTechnicalInfo()
@@ -587,24 +593,73 @@ internal fun MainActivity.togglePlaylist() {
     }
 
 internal fun MainActivity.showVisualizerSheet() {
-        if (visualizerDialog?.isShowing == true) return
-        val dialog = ThemeUi.showSheet(this, palette, t("visualizer.popup"), t("visualizer.popup.subtitle"),
-            fullHeight = true, scrollable = false) {
-            (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
-            addView(visualizerView, LinearLayout.LayoutParams(-1, 0, 1f))
-            visualizerView.showLayerOptions = true
-            popupVisualizer = visualizerView
+        if (drivingDialog?.isShowing == true) return
+        if (visualizerDialog?.isShowing == true) { visualizerDialog?.dismiss(); return }
+        (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
+        visualizerView.fullScreen = true
+        visualizerView.visibility = View.VISIBLE
+        popupVisualizer = visualizerView
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+            setContentView(visualizerView, ViewGroup.LayoutParams(-1, -1))
+            window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         dialog.setOnDismissListener {
             popupVisualizer = null
             (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
-            visualizerView.showLayerOptions = false
+            visualizerView.fullScreen = false
             visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
         }
         visualizerDialog = dialog
         dialog.show()
     }
+
+internal fun MainActivity.showLyricsFullScreen() {
+    if (lyricsFullscreenDialog?.isShowing == true) {
+        lyricsFullscreenDialog?.dismiss()
+        return
+    }
+    (lyricsView.parent as? ViewGroup)?.removeView(lyricsView)
+    lyricsView.dark = dark
+    lyricsView.fullScreen = true
+    lyricsView.visibility = View.VISIBLE
+    val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+        val body = LinearLayout(this@showLyricsFullScreen).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(palette.surface)
+            addView(ThemeUi.row(this@showLyricsFullScreen).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(ThemeUi.dp(context, 16f), ThemeUi.dp(context, 8f), ThemeUi.dp(context, 8f), 0)
+                addView(ThemeUi.text(context, currentItem?.name?.let(Lyrics::displayTitle) ?: t("lyrics"), 16f, palette, bold = true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(ThemeUi.button(context, palette, t("driving.close")) { dismiss() })
+            })
+            addView(ThemeUi.text(context, t("lyrics.gestures"), 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                setPadding(ThemeUi.dp(context, 16f), ThemeUi.dp(context, 4f), ThemeUi.dp(context, 16f), ThemeUi.dp(context, 8f))
+            })
+            addView(lyricsView, LinearLayout.LayoutParams(-1, 0, 1f))
+        }
+        setContentView(body, ViewGroup.LayoutParams(-1, -1))
+        window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window?.navigationBarColor = palette.surface
+        if (Build.VERSION.SDK_INT >= 30) {
+            window?.insetsController?.setSystemBarsAppearance(
+                if (dark) 0 else WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS)
+        }
+    }
+    dialog.setOnDismissListener {
+        (lyricsView.parent as? ViewGroup)?.removeView(lyricsView)
+        curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
+        lyricsView.fullScreen = false
+        lyricsView.visibility = if (curvePanel == 2) View.VISIBLE else View.GONE
+        lyricsFullscreenDialog = null
+    }
+    lyricsFullscreenDialog = dialog
+    dialog.show()
+}
 
 internal fun MainActivity.saveCustomPreset() {
         lateinit var dialog: Dialog
