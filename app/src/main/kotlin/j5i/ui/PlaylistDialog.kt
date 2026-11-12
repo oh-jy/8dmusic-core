@@ -8,6 +8,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.ViewConfiguration
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
@@ -83,6 +84,7 @@ class PlaylistDialog(
         }
     }
     private var saveOpen = false
+    private var selectedSourceTab = 0
     private var reorderMode = false
     private lateinit var recordButton: View
     private lateinit var cleanupButton: View
@@ -114,7 +116,44 @@ class PlaylistDialog(
 
     private fun createDialog(): Dialog {
         val c = context
-        root = LinearLayout(c).apply {
+        root = object : LinearLayout(c) {
+            private var downX = 0f
+            private var downY = 0f
+            private var horizontalChild = false
+            private val slop = ViewConfiguration.get(c).scaledTouchSlop
+
+            private fun hasHorizontalScroller(view: View, x: Float, y: Float): Boolean {
+                if (view.visibility != View.VISIBLE || x < 0 || y < 0 || x >= view.width || y >= view.height) return false
+                if (view is HorizontalScrollView) return true
+                if (view is ViewGroup) for (index in view.childCount - 1 downTo 0) {
+                    val child = view.getChildAt(index)
+                    if (hasHorizontalScroller(child, x + view.scrollX - child.left, y + view.scrollY - child.top)) return true
+                }
+                return false
+            }
+
+            override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        downX = event.x; downY = event.y
+                        horizontalChild = hasHorizontalScroller(this, downX, downY)
+                    }
+                    MotionEvent.ACTION_MOVE -> if (!horizontalChild && dragging < 0 &&
+                        abs(event.x - downX) > slop * 2 && abs(event.x - downX) > abs(event.y - downY) * 1.5f) return true
+                }
+                return super.onInterceptTouchEvent(event)
+            }
+
+            override fun onTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_UP) {
+                    val distance = event.x - downX
+                    if (abs(distance) >= dp(72) && abs(distance) > abs(event.y - downY) * 1.5f) {
+                        selectSourceTab((selectedSourceTab + if (distance > 0) 1 else 2) % 3)
+                    }
+                }
+                return true
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(14), 0, dp(14), dp(12))
             background = ThemeUi.bgDrawable(c, p.surface, 18f)
@@ -211,6 +250,7 @@ class PlaylistDialog(
     }
 
     private fun selectSourceTab(index: Int) {
+        selectedSourceTab = index
         localBody.visibility = if (index == 0) View.VISIBLE else View.GONE
         sourceBody.visibility = if (index == 0) View.GONE else View.VISIBLE
         renderSourceTabs(index)

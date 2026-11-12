@@ -6,6 +6,148 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.widget.TextView
 import com.j5i.spatial8d.MicWavRecorder
+import j5i.spatial8d.ui.VideoExport
+import j5i.spatial8d.ui.ThemeUi
+import j5i.spatial8d.ui.GifExport
+import java.io.File
+
+internal fun MainActivity.updateExportProgress(message: String) {
+    playbackStatus = message
+    exportProgressText?.text = message
+    refreshPlayback()
+}
+
+internal fun MainActivity.showExportProgress() {
+    if (exportProgressDialog?.isShowing == true) return
+    val dialog = ThemeUi.showSheet(this, palette, "导出进度", subtitle = "可关闭此窗口，导出会继续") {
+        addView(ThemeUi.text(this@showExportProgress, playbackStatus, 15f, palette).also { exportProgressText = it })
+    }
+    exportProgressDialog = dialog
+    dialog.setOnDismissListener { exportProgressText = null; exportProgressDialog = null }
+    dialog.show()
+}
+
+internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: Int, startSeconds: Double, durationSeconds: Double, gif: Boolean = false, preview: Boolean = false, smoothGifLoop: Boolean = false, onComplete: () -> Unit = {}) {
+    if (exporting) { showExportProgress(); return }
+    val player = service?.player ?: return
+    val state = visualizerView.exportState()
+    val lyrics = currentLyrics
+    val speed = player.transform.speed
+    val reversed = player.reverse
+    val wav = File.createTempFile("8d-export-", ".wav", cacheDir)
+    val video = File.createTempFile("8d-export-", if (gif) ".gif" else ".mp4", cacheDir)
+    exporting = true
+    exportStartedAt = SystemClock.elapsedRealtime()
+    updateExportProgress("准备音频，等待解码完成")
+    showExportProgress()
+    player.export(wav.outputStream(), onProgress = { value -> main.post {
+        updateExportProgress(if (value == 10) "正在预处理音频" else "正在渲染空间音频，请稍候")
+    } }, onDone = { ok, message ->
+        if (!ok) {
+            wav.delete(); video.delete(); if (uri != null) discardPending(uri)
+            exportProgressDialog?.dismiss()
+            exporting = false; playbackStatus = message; refreshPlayback(); toast(message)
+        } else Thread {
+            exportStartedAt = SystemClock.elapsedRealtime()
+            var error: String? = null
+            try {
+                var previousProgress = -1
+                val report: (Int) -> Unit = { value ->
+                    if (value / 5 != previousProgress) {
+                        previousProgress = value / 5
+                        main.post {
+                            val elapsed = (SystemClock.elapsedRealtime() - exportStartedAt) / 1000
+                            val remaining = if (value >= 5) (elapsed * (100 - value) / value).coerceAtLeast(0) else null
+                            val eta = remaining?.let { " · 预计剩余 ${it} 秒" } ?: ""
+                            updateExportProgress("编码${if (gif) "GIF" else "视频"} $value% · 已用时 ${elapsed} 秒$eta")
+                        }
+                    }
+                }
+                if (gif) GifExport.render(applicationContext, wav, video, state, lyrics, landscape, startSeconds,
+                    if (durationSeconds == 0.0) 5.0 else durationSeconds, speed, reversed, smoothGifLoop, report)
+                else VideoExport.render(applicationContext, wav, video,
+                    if (preview) state.copy(creative = state.creative.copy(outroText = "")) else state,
+                    lyrics, landscape, resolution, speed, reversed, startSeconds, durationSeconds, report)
+                if (!preview) {
+                    main.post { updateExportProgress("正在保存文件") }
+                    val stream = contentResolver.openOutputStream(uri ?: error("缺少导出位置")) ?: error("无法创建导出文件")
+                    stream.use { output -> video.inputStream().use { it.copyTo(output) } }
+                }
+            } catch (exception: Exception) {
+                android.util.Log.e("8DExport", "video export failed", exception)
+                error = exception.message ?: "未知错误"
+            } finally { wav.delete(); if (!preview || error != null) video.delete() }
+            main.post {
+                var saved = false
+                try {
+                    if (error == null) { onComplete(); saved = true } else if (uri != null) discardPending(uri)
+                    playbackStatus = if (error == null) if (preview) "预览已生成" else "${if (gif) "GIF" else "MP4"} 导出完成" else "导出失败: $error"
+                } catch (exception: Exception) {
+                    if (uri != null) discardPending(uri); video.delete(); playbackStatus = "MP4 保存失败: ${exception.message}"
+                }
+                exporting = false; exportProgressDialog?.dismiss(); refreshPlayback(); toast(playbackStatus)
+                if (saved) {
+                    if (preview) showVideoPreview(video)
+                    else if (uri != null) showExportedVideoActions(uri, if (gif) "image/gif" else "video/mp4")
+                }
+            }
+        }.start()
+    })
+}
+
+internal fun MainActivity.showVideoPreview(file: File) {
+    lateinit var player: android.widget.VideoView
+    val dialog = ThemeUi.showSheet(this, palette, "导出预览") {
+        player = android.widget.VideoView(this@showVideoPreview)
+        addView(player, android.widget.LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoPreview, 300f)))
+    }
+    dialog.setOnDismissListener { player.stopPlayback(); file.delete() }
+    player.setVideoPath(file.absolutePath)
+    player.setOnPreparedListener { it.isLooping = true; player.start() }
+    player.setOnErrorListener { _, _, _ -> toast("无法播放预览"); dialog.dismiss(); true }
+    dialog.show()
+}
+
+internal fun MainActivity.exportPublicVideo(name: String, landscape: Boolean, resolution: Int, startSeconds: Double, durationSeconds: Double, gif: Boolean = false, smoothGifLoop: Boolean = false) {
+    if (android.os.Build.VERSION.SDK_INT < 29) {
+        exportVideoLandscape = landscape; exportVideoResolution = resolution
+        exportVideoStart = startSeconds; exportVideoDuration = durationSeconds
+        exportVideoSmoothGifLoop = smoothGifLoop
+        if (gif) saveGif.launch("$name-8D.gif") else saveMp4.launch("$name-8D.mp4")
+        return
+    }
+    val values = ContentValues().apply {
+        put(MediaStore.Video.Media.DISPLAY_NAME, "$name-8D.${if (gif) "gif" else "mp4"}")
+        put(MediaStore.Video.Media.MIME_TYPE, if (gif) "image/gif" else "video/mp4")
+        put(MediaStore.Video.Media.RELATIVE_PATH, if (gif) "Pictures/8D" else "Movies/8D")
+        put(MediaStore.Video.Media.IS_PENDING, 1)
+    }
+    val collection = if (gif) MediaStore.Images.Media.EXTERNAL_CONTENT_URI else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+    val uri = contentResolver.insert(collection, values) ?: return
+        exportMp4(uri, landscape, resolution, startSeconds, durationSeconds, gif, smoothGifLoop = smoothGifLoop) {
+        values.clear(); values.put(MediaStore.Video.Media.IS_PENDING, 0)
+        contentResolver.update(uri, values, null, null)
+    }
+}
+
+internal fun MainActivity.showExportedVideoActions(uri: Uri, mime: String) {
+    ThemeUi.showSheet(this, palette, "导出完成") {
+        addView(ThemeUi.button(this@showExportedVideoActions, palette, "预览", ThemeUi.ROLE_SURFACE) {
+            runCatching {
+                startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                    .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            }.onFailure { toast("没有可用的视频播放器") }
+        })
+        addView(ThemeUi.button(this@showExportedVideoActions, palette, "分享", ThemeUi.ROLE_ACCENT_FILL) {
+            val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType(mime)
+                .putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            intent.clipData = android.content.ClipData.newRawUri("export", uri)
+            runCatching { startActivity(android.content.Intent.createChooser(intent, "分享作品")) }
+                .onFailure { toast("没有可用的分享应用") }
+        })
+    }.show()
+}
 
 internal fun MainActivity.exportWav(uri: Uri, onComplete: () -> Unit = {}) {
         if (exporting) { toast("已有导出任务，请等待完成"); return }

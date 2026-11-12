@@ -57,17 +57,14 @@ class WaveformView(context: Context) : View(context) {
         val (snapshotSamples, snapshotCount, snapshotPeak, snapshotJump, snapshotRms) = synchronized(lock) {
             Snapshot(samples.clone(), count, peak, jump, rms)
         }
-        val w = width.toFloat()
         val h = height.toFloat()
         val visible = minOf(snapshotCount, snapshotSamples.size)
-        paint.textSize = 11f * resources.displayMetrics.density
-        paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
         val density = resources.displayMetrics.density
         val horizontalPadding = 6f * density
         paint.color = if (dark) 0xff91b9e8.toInt() else 0xff315f91.toInt()
         paint.strokeWidth = 1f
-        val contentTop = 50f * density
-        val contentBottom = h - 52f * density
+        val contentTop = 0f
+        val contentBottom = h
         val contentHeight = (contentBottom - contentTop).coerceAtLeast(24f * density)
         val middle = contentTop + contentHeight * 0.5f
         for (x in 0 until width) {
@@ -75,24 +72,34 @@ class WaveformView(context: Context) : View(context) {
             val y = middle - snapshotSamples[index] / 32768f * contentHeight * 0.42f
             canvas.drawLine(x.toFloat(), middle, x.toFloat(), y, paint)
         }
-        paint.color = if (dark) 0xffd8dee8.toInt() else 0xff263446.toInt()
-        // 各段固定起点，避免数字位数变化推动后续文本左右抖动。
         val labels = listOf(
-            "峰值 $snapshotPeak",
-            "最大突变 $snapshotJump",
+            AppLanguage.text(context, "graph"),
+            "${AppLanguage.text(context, "graph.window")} ${visible / 2} ${AppLanguage.text(context, "graph.frames")}",
+            "${AppLanguage.text(context, "graph.peak")} $snapshotPeak",
             "RMS ${snapshotRms.toInt()}",
-            "采样窗 ${visible / 2} 帧"
+            "${AppLanguage.text(context, "graph.jump")} $snapshotJump"
         )
-        // 四段均分，按列中心对齐绘制；超长时按列宽截断，避免相邻段相互挤占。
-        val padding = horizontalPadding
-        val columnWidth = (w - padding * 2) / labels.size
         val oldAlign = paint.textAlign
-        paint.textAlign = Paint.Align.CENTER
+        paint.textAlign = Paint.Align.LEFT
+        paint.textSize = 9f * density
+        paint.color = ThemeUi.palette(dark).sub
+        paint.setShadowLayer(2f * density, 0f, 0f, if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+        var x = horizontalPadding
+        var y = 14f * density
         labels.forEachIndexed { index, label ->
-            val centerX = padding + index * columnWidth + columnWidth / 2
-            // 四列本身已有足够空间，不主动截断文本。
-            canvas.drawText(label, centerX, 30f * density + paint.textSize, paint)
+            val text = if (index == 0 || x == horizontalPadding) label else "  ·  $label"
+            val textWidth = paint.measureText(text)
+            if (x > horizontalPadding && x + textWidth > width - horizontalPadding) {
+                x = horizontalPadding
+                y += 12f * density
+                canvas.drawText(label, x, y, paint)
+                x += paint.measureText(label)
+            } else {
+                canvas.drawText(text, x, y, paint)
+                x += textWidth
+            }
         }
+        paint.clearShadowLayer()
         paint.textAlign = oldAlign
     }
     private data class Snapshot(val samples: ShortArray, val count: Int, val peak: Int, val jump: Int, val rms: Double)

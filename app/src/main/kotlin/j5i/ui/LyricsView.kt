@@ -3,10 +3,12 @@ package j5i.spatial8d.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Typeface
-import android.os.SystemClock
 import android.view.Gravity
+import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -15,14 +17,28 @@ import kotlin.math.abs
 
 /**
  * 可嵌入空间曲线同尺寸面板的歌词视图。进度单位是毫秒，主线程周期性调用 setPosition。
- * 用户拖动后暂停自动滚动三秒；点击当前行或松手三秒后继续跟随人声。
+ * 用户拖动时预览居中歌词时间，点击时间跳播；停止操作三秒后继续跟随人声。
  */
-class LyricsView(context: Context) : ScrollView(context) {
+class LyricsView(context: Context) : FrameLayout(context) {
     var onSearch: ((String) -> Unit)? = null
     var onManual: (() -> Unit)? = null
+    var onSeek: ((Long) -> Unit)? = null
+    var onExpand: (() -> Unit)? = null
 
     var dark = true
         set(value) { field = value; applyColors() }
+    var fullScreen = false
+        set(value) {
+            field = value
+            rows.forEach { it.textSize = if (value) 22f else 15f }
+            resetPreview()
+            applyColors()
+        }
+    var seekEnabled = true
+        set(value) {
+            field = value
+            if (!value) resetPreview()
+        }
 
     private val palette get() = ThemeUi.palette(dark)
     private val content = LinearLayout(context).apply {
@@ -34,19 +50,102 @@ class LyricsView(context: Context) : ScrollView(context) {
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
     private var activeIndex = -2
-    private var manualUntil = 0L
     private var touching = false
-    private var topPadding = 0
-    private var bottomPadding = 0
     private var liveCaption = ""
+    private var previewIndex = -1
+    private var browsing = false
+    private var touchStartY = 0f
+    private var doubleTapped = false
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val resumeFollowing = Runnable {
+        resetPreview()
+        if (!touching) scrollToLine(activeIndex)
+    }
+    private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
+        override fun onDown(e: MotionEvent) = true
 
-    init {
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            doubleTapped = true
+            post { onExpand?.invoke() }
+            return true
+        }
+    })
+    private val scroller = object : ScrollView(context) {
+        override fun onScrollChanged(left: Int, top: Int, oldLeft: Int, oldTop: Int) {
+            super.onScrollChanged(left, top, oldLeft, oldTop)
+            if (browsing) {
+                updatePreview()
+                if (!touching) scheduleFollowing()
+            }
+        }
+
+        @SuppressLint("ClickableViewAccessibility")
+        override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    touching = true
+                    doubleTapped = false
+                    touchStartY = event.y
+                    this@LyricsView.removeCallbacks(resumeFollowing)
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (seekEnabled && liveCaption.isEmpty() && rows.isNotEmpty() &&
+                        abs(event.y - touchStartY) > touchSlop) {
+                        browsing = true
+                        updatePreview()
+                    }
+                }
+            }
+            gestures.onTouchEvent(event)
+            val handled = if (doubleTapped) {
+                val cancel = MotionEvent.obtain(event).apply { action = MotionEvent.ACTION_CANCEL }
+                super.dispatchTouchEvent(cancel)
+                cancel.recycle()
+                true
+            } else super.dispatchTouchEvent(event)
+            if (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL || doubleTapped) {
+                touching = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+                scheduleFollowing()
+            }
+            return handled
+        }
+    }.apply {
         isFillViewport = true
         isVerticalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         clipToPadding = false
         addView(content, ViewGroup.LayoutParams(-1, -2))
+    }
+    private val timeLabel = TextView(context).apply {
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(12f), 0, dp(12f), 0)
+        visibility = GONE
+        setOnClickListener {
+            lyrics?.lines?.getOrNull(previewIndex)?.timeMs?.let { target ->
+                if (seekEnabled) {
+                    resetPreview()
+                    onSeek?.invoke(target)
+                }
+            }
+        }
+    }
+
+    init {
+        contentDescription = t("lyrics.gestures")
+        addView(scroller, LayoutParams(-1, -1))
+        addView(timeLabel, LayoutParams(-2, dp(48f), Gravity.CENTER_VERTICAL or Gravity.END).apply {
+            rightMargin = dp(8f)
+        })
+        content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            updatePadding()
+            if (!browsing && !touching) scrollToLine(activeIndex, false)
+        }
         setLyrics(null)
+        applyColors()
     }
 
     /** null 表示暂无歌词；instrumental 和无时间轴文本不会伪造逐行高亮。 */
@@ -55,25 +154,20 @@ class LyricsView(context: Context) : ScrollView(context) {
         lyrics = value
         if (positionMs < 0) positionMs = 0
         activeIndex = -2
-        manualUntil = 0
+        resetPreview()
         content.removeAllViews()
         rows.clear()
-        val p = palette
         when {
             value == null -> message(t("no.lyrics"))
             value.instrumental -> message(t("instrumental"), allowCorrection = true)
             value.synchronized -> value.lines.forEach { line ->
                 val row = TextView(context).apply {
                     text = line.text
-                    textSize = 15f
+                    textSize = if (fullScreen) 22f else 15f
                     gravity = Gravity.CENTER
                     maxLines = 3
                     setPadding(dp(20f), dp(4f), dp(20f), dp(4f))
                     layoutParams = LinearLayout.LayoutParams(-1, -2)
-                    setOnClickListener {
-                        manualUntil = 0
-                        setPosition(line.timeMs, true)
-                    }
                     setOnLongClickListener {
                         onManual?.invoke()
                         true
@@ -113,10 +207,41 @@ class LyricsView(context: Context) : ScrollView(context) {
             activeIndex = index
             applyColors()
         }
-        if (force || (!touching && SystemClock.uptimeMillis() >= manualUntil)) {
-            if (force) manualUntil = 0
+        if (force || (!touching && !browsing)) {
+            if (force) resetPreview()
             scrollToLine(index)
         }
+    }
+
+    private fun updatePreview() {
+        val center = scroller.scrollY + scroller.height / 2
+        previewIndex = rows.indices.minByOrNull { index ->
+            abs(rows[index].top + rows[index].height / 2 - center)
+        } ?: -1
+        val target = lyrics?.lines?.getOrNull(previewIndex)?.timeMs ?: return
+        val label = formatTime(target)
+        val wasHidden = timeLabel.visibility != VISIBLE
+        timeLabel.text = "▶ $label"
+        timeLabel.contentDescription = t("lyrics.seek.time").format(label)
+        timeLabel.visibility = VISIBLE
+        if (wasHidden) {
+            removeCallbacks(resumeFollowing)
+            postDelayed(resumeFollowing, 3_000L)
+        }
+        applyColors()
+    }
+
+    private fun resetPreview() {
+        removeCallbacks(resumeFollowing)
+        browsing = false
+        previewIndex = -1
+        timeLabel.visibility = GONE
+        applyColors()
+    }
+
+    private fun scheduleFollowing() {
+        removeCallbacks(resumeFollowing)
+        postDelayed(resumeFollowing, 3_000)
     }
 
     /** 清除旧曲目的歌词和进度，避免异步加载返回前显示上一首歌。 */
@@ -160,20 +285,15 @@ class LyricsView(context: Context) : ScrollView(context) {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                touching = true
-                parent?.requestDisallowInterceptTouchEvent(true)
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                touching = false
-                manualUntil = SystemClock.uptimeMillis() + 3_000
-                parent?.requestDisallowInterceptTouchEvent(false)
-            }
-        }
-        return super.onTouchEvent(event)
+    override fun onDetachedFromWindow() {
+        touching = false
+        resetPreview()
+        super.onDetachedFromWindow()
+    }
+
+    private fun formatTime(timeMs: Long): String {
+        val seconds = (timeMs / 1000).coerceAtLeast(0)
+        return String.format(java.util.Locale.US, "%02d:%02d", seconds / 60, seconds % 60)
     }
 
     private fun message(text: String, allowCorrection: Boolean = false) {
@@ -192,16 +312,20 @@ class LyricsView(context: Context) : ScrollView(context) {
 
     private fun applyColors() {
         val p = palette
+        setBackgroundColor(p.surface)
+        timeLabel.setTextColor(p.darkInk)
+        timeLabel.background = ThemeUi.bgDrawable(context, p.accent, 12f)
         rows.forEachIndexed { index, row ->
             val current = index == activeIndex
+            val selected = browsing && index == previewIndex
             val played = index < activeIndex
             row.setTextColor(when {
-                current -> p.accent
+                current || selected -> p.accent
                 played -> p.sub
                 else -> p.faint
             })
-            row.typeface = if (index == activeIndex) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            row.alpha = if (index == activeIndex) 1f else if (played) 0.85f else 0.72f
+            row.typeface = if (current || selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            row.alpha = if (current || selected) 1f else if (played) 0.85f else 0.72f
         }
         if (rows.isEmpty()) {
             (content.getChildAt(0) as? TextView)?.setTextColor(p.sub)
@@ -210,20 +334,17 @@ class LyricsView(context: Context) : ScrollView(context) {
 
     private fun updatePadding() {
         val compact = rows.isEmpty()
-        // 首行需要占据第一行；后续滚动由 scrollToLine 给当前行保留上一行。
-        topPadding = if (compact) dp(8f) else 0
-        bottomPadding = if (compact) dp(8f) else (height - rows.last().height * 2 - dp(12f)).coerceAtLeast(dp(24f))
+        val topPadding = if (compact) dp(8f) else ((height - rows.first().height) / 2).coerceAtLeast(0)
+        val bottomPadding = if (compact) dp(8f) else ((height - rows.last().height) / 2).coerceAtLeast(0)
         content.setPadding(0, topPadding, 0, bottomPadding)
     }
 
     private fun scrollToLine(index: Int, animated: Boolean = true) {
         val target = if (index < 0) 0 else rows.getOrNull(index)?.let {
-            val previous = rows.getOrNull(index - 1)
-            // it.top 已包含 content 的顶部 padding，不能再次叠加。
-            (it.top - (previous?.height ?: it.height)).coerceAtLeast(0)
+            (it.top + it.height / 2 - scroller.height / 2).coerceAtLeast(0)
         } ?: 0
-        if (abs(scrollY - target) < 2) return
-        if (animated) smoothScrollTo(0, target) else scrollTo(0, target)
+        if (abs(scroller.scrollY - target) < 2) return
+        if (animated) scroller.smoothScrollTo(0, target) else scroller.scrollTo(0, target)
     }
 
     private fun dp(value: Float) = ThemeUi.dp(context, value)

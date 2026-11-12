@@ -17,6 +17,15 @@ import j5i.spatial8d.provider.ProviderArchive
 import j5i.spatial8d.provider.ProviderCredentials
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import org.json.JSONArray
+
+internal fun orderedRadioStationIds(stationIds: List<String>, pinnedIds: List<String>, unfiltered: Boolean): List<String> {
+    if (!unfiltered) return stationIds
+    val available = stationIds.toSet()
+    val pinned = pinnedIds.distinct().filter { it in available }
+    val pinnedSet = pinned.toSet()
+    return pinned + stationIds.filterNot { it in pinnedSet }
+}
 
 internal data class ImportPreviewCard(val name: String, val summary: String, val details: String)
 
@@ -266,6 +275,8 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val filters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val stations = importedStations()
+        val pinnedArray = runCatching { JSONArray(preferences.getString("pinnedRadioStations", "[]")) }.getOrDefault(JSONArray())
+        val pinnedStations = (0 until pinnedArray.length()).mapNotNull { pinnedArray.optString(it).takeIf(String::isNotEmpty) }.toMutableList()
         var activeStation: android.view.View? = null
         fun filterRow(label: String, values: List<String>, selected: String, choose: (String) -> Unit) {
             val line = ThemeUi.row(this).apply {
@@ -303,10 +314,14 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         }
         fun renderStations() {
             rows.removeAllViews()
+            activeStation = null
             val text = query.text.toString().trim()
-            stations.filter { (sourceRegion == "全部" || it.region == sourceRegion) &&
+            val filtered = stations.filter { (sourceRegion == "全部" || it.region == sourceRegion) &&
                 (sourceCity == "全部" || it.city == sourceCity) && (sourceType == "全部" || it.type == sourceType) &&
-                (text.isEmpty() || "${it.name} ${it.region} ${it.city} ${it.type} ${it.note}".contains(text, true)) }.forEach { station ->
+                (text.isEmpty() || "${it.name} ${it.region} ${it.city} ${it.type} ${it.note}".contains(text, true)) }
+            val unfiltered = sourceRegion == "全部" && sourceCity == "全部" && sourceType == "全部" && text.isEmpty()
+            val byId = filtered.associateBy { it.id }
+            orderedRadioStationIds(filtered.map { it.id }, pinnedStations, unfiltered).mapNotNull(byId::get).forEach { station ->
                 rows.addView(ThemeUi.row(this).apply {
                     val active = isLive && currentStationId == station.id
                     if (active) activeStation = this
@@ -314,14 +329,28 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                     background = ThemeUi.bgDrawable(this@populateSourceSheet, if (active) palette.surfaceAlt else palette.surface, 8f)
                     addView(LinearLayout(this@populateSourceSheet).apply {
                         orientation = LinearLayout.VERTICAL
-                        addView(ThemeUi.text(this@populateSourceSheet, "${station.name} · ${station.level}", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
+                        addView(ThemeUi.text(this@populateSourceSheet, "${if (station.id in pinnedStations) "📌 " else ""}${station.name} · ${station.level}", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
                         addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · ${station.type} · ${station.sources.size} 路源", 10f, palette, role = ThemeUi.ROLE_SUB))
                         if (station.note.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT))
                     }, LinearLayout.LayoutParams(0, -2, 1f))
                     addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
-                        contentDescription = "${station.name}，查看节目单"
+                        contentDescription = "${station.name}，更多操作"
                         setPadding(ThemeUi.dp(this@populateSourceSheet, 10f), 0, ThemeUi.dp(this@populateSourceSheet, 10f), 0)
-                        setOnClickListener { showRadioSchedule(station) }
+                        setOnClickListener {
+                            lateinit var menu: android.app.Dialog
+                            menu = ThemeUi.showSheet(this@populateSourceSheet, palette, station.name) {
+                                addView(ThemeUi.button(this@populateSourceSheet, palette, if (station.id in pinnedStations) "取消置顶" else "置顶电台") {
+                                    menu.dismiss()
+                                    if (!pinnedStations.remove(station.id)) pinnedStations.add(0, station.id)
+                                    preferences.edit().putString("pinnedRadioStations", JSONArray(pinnedStations).toString()).apply()
+                                    renderStations()
+                                })
+                                addView(ThemeUi.button(this@populateSourceSheet, palette, "节目单") {
+                                    menu.dismiss(); showRadioSchedule(station)
+                                })
+                            }
+                            menu.show()
+                        }
                     })
                     addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE ▸" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                         gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
@@ -342,7 +371,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         renderStations()
         body.addView(ScrollView(this).apply {
             addView(rows)
-            post { activeStation?.let { active -> smoothScrollTo(0, (active.top - height / 3).coerceAtLeast(0)) } }
+            post { if (pinnedStations.isEmpty() || sourceRegion != "全部" || sourceCity != "全部" || sourceType != "全部") activeStation?.let { active -> smoothScrollTo(0, (active.top - height / 3).coerceAtLeast(0)) } }
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return
     }

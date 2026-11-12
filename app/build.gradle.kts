@@ -40,7 +40,7 @@ android {
         targetSdk = 34
         // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
         versionCode = hourlyVersionCode
-        versionName = "2.14.7"
+        versionName = "2.17.5"
         buildConfigField("boolean", "WITH_ASR", withAsr.toString())
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -67,6 +67,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup:gifencoder:0.10.1")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.0")
     testImplementation("org.json:json:20240303")

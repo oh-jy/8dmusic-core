@@ -610,7 +610,7 @@ class SpatialPlayer(context: Context) {
     fun export(stream: OutputStream, mp3: Boolean = false, wavPath: String? = null,
         mp3Path: String? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val source = decoded
-        if (source == null) { onDone(false, "没有已加载的音频"); return }
+        if (source == null) { stream.close(); onDone(false, "没有已加载的音频"); return }
         // 立即回报失败并关闭 SAF 输出流，避免界面只留下一个空文档。
         fun fail(message: String) {
             try { stream.close() } catch (_: Exception) {}
