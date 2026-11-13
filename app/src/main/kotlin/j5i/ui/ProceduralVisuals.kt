@@ -49,6 +49,14 @@ internal fun flowerMotion(index: Int, time: Double): FlowerMotion {
         .36 + between(5) * .47, opening, flowerRandom(index, 0, 6) * 2 * PI)
 }
 
+internal fun flowerPosition(index: Int, time: Double): Pair<Double, Double> {
+    val motion = flowerMotion(index, time)
+    val rotation = (time * 8.5 + sin(time * .23) * 15.0) * PI / 180.0
+    val angle = index * 2.0 * PI / 5.0 + rotation + motion.x * .35
+    val radius = .72 + motion.y * .25 + sin(time * .10 + motion.phase) * .06
+    return cos(angle) * radius to sin(angle) * radius
+}
+
 internal class ProceduralVisuals {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val path = Path()
@@ -75,36 +83,50 @@ internal class ProceduralVisuals {
         when (mode) {
             35 -> {
                 val globalSpin = (time * 8.5 + sin(time * .23) * 15.0).toFloat()
-                val globalBreath = (1.0 + energy * .025 + pulse * .008).toFloat()
-                val globalTilt = (sin(time * .17) * 4.0 + sin(time * .43) * 1.8).toFloat()
-                val orbitPhase = time * .12
-                canvas.save()
-                canvas.rotate(globalSpin)
-                canvas.scale(globalBreath, globalBreath * (.97 + .025 * sin(time * .29)).toFloat())
-                canvas.rotate(globalTilt)
+                for (index in 0 until 28) {
+                    val drift = time * (.008 + flowerRandom(index, 0, 8) * .008)
+                    val rawX = flowerRandom(index, 0, 9) + drift
+                    val rawY = flowerRandom(index, 0, 10) + drift * .6
+                    val x = ((rawX - floor(rawX) - .5) * width).toFloat()
+                    val y = ((rawY - floor(rawY) - .5) * height).toFloat()
+                    val petalSize = unit * (.018f + flowerRandom(index, 0, 11).toFloat() * .032f)
+                    canvas.save()
+                    canvas.translate(x, y)
+                    canvas.rotate((time * (5 + index % 4) + index * 43).toFloat())
+                    path.rewind()
+                    path.moveTo(0f, -petalSize)
+                    path.quadTo(petalSize * .75f, 0f, 0f, petalSize)
+                    path.quadTo(-petalSize * .75f, 0f, 0f, -petalSize)
+                    paint.style = Paint.Style.FILL
+                    color(195f + index * 4f + (time * 3).toFloat(), 38 + (energy * 25).toInt())
+                    canvas.drawPath(path, paint)
+                    paint.style = Paint.Style.STROKE
+                    canvas.restore()
+                }
                 for (flowerIndex in 0 until 5) {
                     val flower = flowerMotion(flowerIndex, time)
-                    val localX = flower.x * unit + sin(time * (.11 + flowerIndex * .013) + flower.phase) * unit * .035f
-                    val localY = flower.y * unit + cos(time * (.13 + flowerIndex * .011) + flower.phase) * unit * .025f
-                    val flowerOrbit = orbitPhase + flower.phase * .12
-                    val orbitRadius = unit * (.018 + flowerIndex * .006)
-                    val centerX = (localX + cos(flowerOrbit) * orbitRadius).toFloat()
-                    val centerY = (localY + sin(flowerOrbit) * orbitRadius * .72f).toFloat()
-                    val flowerSize = (unit * flower.size * (.90f + energy * .12f + pulse * .025f)).toFloat()
-                    val rotation = time * (.09 + flowerIndex * .018) + flower.phase + sin(time * .21 + flower.phase) * .25
+                    val position = flowerPosition(flowerIndex, time)
+                    val centerX = (position.first * width * .46).toFloat()
+                    val centerY = (position.second * height * .46).toFloat()
+                    val flowerSize = (unit * flower.size * (1.12f + energy * .10f + pulse * .02f)).toFloat()
+                    val rotation = time * (.09 + flowerIndex * .018) + flower.phase + globalSpin * PI / 180.0
                     val tilt = .78 + .22 * sin(time * .15 + flower.phase)
                     val petals = ArrayList<FlowerPetal>(110)
                     canvas.save()
                     canvas.translate(centerX, centerY)
+                    paint.style = Paint.Style.FILL
+                    color(42f + flowerIndex * 18f + (time * 6).toFloat(), 85 + (energy * 40).toInt())
+                    canvas.drawCircle(0f, 0f, flowerSize * (.045f + energy * .008f), paint)
+                    paint.style = Paint.Style.STROKE
                     for (layer in 6 downTo 0) {
                         val opening = flowerEase((flower.opening - layer * .035) / (1.0 - layer * .035))
                         val count = 12 + ((layer + flowerIndex) % 4) * 2
-                        val length = (.54 + layer * .025) * (1 - layer * .035)
+                        val length = (.65 + layer * .038) * (1 - layer * .025)
                         for (petal in 0 until count) {
                             val angle = 2 * PI * petal / count + rotation + layer * .13
                             val petalWave = sin(time * (.52 + layer * .025) + petal * 1.71 + flower.phase)
-                            val baseRadius = .025 + layer * .012
-                            val radial = baseRadius + length * (.12 + opening * .88)
+                            val baseRadius = .045 + layer * .017
+                            val radial = baseRadius + length * (.13 + opening * .98)
                             val tipHeight = length * (.96 - opening * .78) + petalWave * .025
                             val middleRadius = baseRadius + length * (.09 + opening * .52)
                             val middleHeight = length * (.56 - opening * .25)
@@ -142,13 +164,8 @@ internal class ProceduralVisuals {
                             canvas.drawPath(path, paint)
                         }
                     }
-                    paint.style = Paint.Style.FILL
-                    color(42f + flowerIndex * 18f + (time * 6).toFloat(), 130 + (energy * 65).toInt())
-                    canvas.drawCircle(0f, 0f, flowerSize * (.035f + energy * .012f), paint)
-                    paint.style = Paint.Style.STROKE
                     canvas.restore()
                 }
-                canvas.restore()
             }
             36 -> {
                 for (ring in 0 until 22) {
