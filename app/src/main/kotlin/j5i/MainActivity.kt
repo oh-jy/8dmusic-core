@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var currentItem: MusicItem? = null
     internal val favoriteDownloads = mutableSetOf<Long>()
     internal var pageActive = true
+    internal var updateNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     internal var exporting = false
     internal var exportProgressDialog: android.app.Dialog? = null
     internal var exportProgressText: android.widget.TextView? = null
@@ -508,6 +509,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     override fun onPause() {
         // 取消而不是只 return，避免后台保留无意义的 UI 任务。
         pageActive = false
+        stopUpdateNetworkMonitor()
         service?.appInForeground = false
         // 后台播放时立刻补一条通知，保持服务存活。
         service?.let { s ->
@@ -524,6 +526,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     override fun onResume() {
         super.onResume()
         pageActive = true
+        startUpdateNetworkMonitor()
         installPcmRenderer()
         service?.appInForeground = true
         // 回到前台立即撤掉播放通知，不打扰使用。
