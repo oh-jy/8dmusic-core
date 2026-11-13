@@ -52,10 +52,10 @@ internal fun flowerMotion(index: Int, time: Double): FlowerMotion {
 }
 
 internal fun flowerPositions(time: Double, width: Double, height: Double): List<Pair<Double, Double>> {
-    val frame = floor(time * 2)
-    val blend = time * 2 - frame
-    val first = flowerAvoidedPositions(frame / 2, width, height)
-    val second = flowerAvoidedPositions((frame + 1) / 2, width, height)
+    val frame = floor(time * 5.4)
+    val blend = time * 5.4 - frame
+    val first = flowerAvoidedPositions(frame / 4, width, height)
+    val second = flowerAvoidedPositions((frame + 1) / 4, width, height)
     return first.indices.map { index ->
         first[index].first * (1 - blend) + second[index].first * blend to
             first[index].second * (1 - blend) + second[index].second * blend
@@ -143,7 +143,7 @@ internal fun ringShape(birth: Long, seed: Long): Int {
     return ((value xor (value ushr 31)) ushr 1).rem(RING_SHAPE_COUNT).toInt()
 }
 
-internal const val RING_SCENE_SECONDS = 16.0
+internal const val RING_SCENE_SECONDS = 10.0
 
 internal fun ringScene(epoch: Long, seed: Long): Int {
     val block = Math.floorDiv(epoch, RING_SHAPE_COUNT.toLong())
@@ -252,6 +252,14 @@ internal class ProceduralVisuals {
                 val scale = unit * .33f
                 val currentEffect = Math.floorMod(epoch * 7 + stardustShape(epoch), 4)
                 val nextEffect = Math.floorMod((epoch + 1) * 7 + stardustShape(epoch + 1), 4)
+                paint.style = Paint.Style.FILL
+                for (index in 0 until 90) {
+                    val starX = (flowerRandom(index, 0, 41) - .5) * width
+                    val starY = (flowerRandom(index, 0, 42) - .5) * height
+                    val sparkle = .5 + .5 * sin(time * (.45 + flowerRandom(index, 0, 43)) + index)
+                    color(190f + (flowerRandom(index, 0, 44) * 95).toFloat(), (25 + sparkle * 65).toInt())
+                    canvas.drawCircle(starX.toFloat(), starY.toFloat(), density * (.35f + sparkle.toFloat() * .45f), paint)
+                }
                 fun movement(shapeEpoch: Int, effect: Int, seed: Double, x: Float, y: Float): Pair<Float, Float> {
                     val wave = sin(time * .32 + seed * 6.0 + shapeEpoch)
                     val variation = when (effect) {
@@ -278,12 +286,16 @@ internal class ProceduralVisuals {
                     canvas.drawCircle((x + driftX) * scale, (y + driftY) * scale, density * (.35f + shimmer.toFloat() * .55f), paint)
                 }
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = density * .55f
+                paint.strokeWidth = density * .8f
+                canvas.save()
+                canvas.rotate((8 * sin(time * .12)).toFloat())
                 for (ring in 0 until 5) {
-                    val radius = scale * (.78f + ring * .13f + .015f * sin(time * .3 + ring).toFloat())
-                    color(205f + ring * 14f, 28 - ring * 4)
-                    canvas.drawOval(-radius, -radius * .28f, radius, radius * .28f, paint)
+                    val radius = scale * (.78f + ring * .13f + .025f * sin(time * .3 + ring).toFloat())
+                    val flattening = .27f + .035f * sin(time * .17 + ring * .5).toFloat()
+                    color(205f + ring * 14f, 65 - ring * 7)
+                    canvas.drawOval(-radius, -radius * flattening, radius, radius * flattening, paint)
                 }
+                canvas.restore()
                 val kind = stardustKinds[stardustShape(if (blend < .5f) epoch else epoch + 1)]
                 val label = when (language) {
                     AppLanguage.TRADITIONAL -> kind.traditional
@@ -298,6 +310,22 @@ internal class ProceduralVisuals {
                 paint.textAlign = Paint.Align.LEFT
             }
             35 -> {
+                for (index in 0 until 20) {
+                    val motion = flowerMotion(index + 5, time * .8)
+                    val centerX = (motion.x * width * .58).toFloat()
+                    val centerY = (motion.y * height * .58).toFloat()
+                    val size = unit * (.018f + flowerRandom(index, 0, 52).toFloat() * .018f)
+                    val hue = (flowerRandom(index, 0, 53) * 360 + 28 * sin(time * (.05 + flowerRandom(index, 0, 54) * .05) + index)).toFloat()
+                    paint.style = Paint.Style.FILL
+                    for (petal in 0 until 5) {
+                        val angle = petal * 2 * PI / 5 + motion.rotation
+                        color(hue + petal * 3, 90)
+                        canvas.drawCircle(centerX + (cos(angle) * size * .55).toFloat(),
+                            centerY + (sin(angle) * size * .55).toFloat(), size * .5f, paint)
+                    }
+                    color(48f, 160)
+                    canvas.drawCircle(centerX, centerY, size * .22f, paint)
+                }
                 val positions = flowerPositions(time, width.toDouble(), height.toDouble())
                 for (flowerIndex in 0 until 5) {
                     val flower = flowerMotion(flowerIndex, time)
@@ -307,11 +335,13 @@ internal class ProceduralVisuals {
                     val flowerSize = (unit * (.13 + (flower.size - .22) * .2) * 1.5).toFloat()
                     val rotation = flower.phase + flower.rotation
                     val tilt = .35 + flower.opening * .75
+                    val flowerHue = (flowerRandom(flowerIndex, 0, 55) * 360 +
+                        45 * sin(time * (.045 + flowerRandom(flowerIndex, 0, 56) * .06) + flower.phase)).toFloat()
                     val petals = ArrayList<FlowerPetal>(24)
                     canvas.save()
                     canvas.translate(centerX, centerY)
                     paint.style = Paint.Style.FILL
-                    color(42f + flowerIndex * 18f + (time * 6).toFloat(), 85 + (energy * 40).toInt())
+                    color(flowerHue + 55f, 85 + (energy * 40).toInt())
                     canvas.drawCircle(0f, 0f, flowerSize * (.045f + energy * .008f), paint)
                     paint.style = Paint.Style.STROKE
                     for (layer in 2 downTo 0) {
@@ -334,7 +364,7 @@ internal class ProceduralVisuals {
                             val left = point(middleRadius, middleHeight, -petalWidth)
                             val right = point(middleRadius, middleHeight, petalWidth)
                             petals.add(FlowerPetal(base, left, tip, right,
-                                185f + layer * 10f + petal * 1.3f + (time * 4).toFloat(),
+                                flowerHue + layer * 10f + petal * 1.3f,
                                 (base.depth + tip.depth + left.depth + right.depth) / 4, layer))
                         }
                     }
@@ -390,7 +420,7 @@ internal class ProceduralVisuals {
                 val next = fieldTrackCount(epoch + 1, ringSeed)
                 val trackCount = current + (next - current) * blend
                 val slots = maxOf(current, next)
-                for (index in 0 until (520 * particleDensity).toInt().coerceIn(130, 1040)) {
+                for (index in 0 until (850 * particleDensity).toInt().coerceIn(250, 1600)) {
                     val track = index % slots
                     val opacity = (trackCount - track).coerceIn(0.0, 1.0)
                     if (opacity == 0.0) continue
@@ -398,11 +428,16 @@ internal class ProceduralVisuals {
                     val travel = (seed + time * (.025 + (index % 7) * .002)) % 1.0
                     val angle = track * 2 * PI / trackCount + phase + travel * (3.0 + morph * 6.0)
                     val radius = unit * (.05 + travel * .67)
-                    val bend = sin(angle * 3 + phase * 2) * morph * unit * .08
+                    val bend = (sin(angle * 3 + phase * 2) * morph * .08 +
+                        sin(angle * 5 - phase * 1.4 + travel * 8) * .025) * unit
                     val x = (cos(angle) * radius + bend).toFloat()
                     val y = (sin(angle) * radius * (.55 + .4 * sin(phase * .4) * sin(phase * .4))).toFloat()
                     color(180f + (travel * 170).toFloat() + (time * 6).toFloat(), ((45 + 185 * (1 - travel)) * opacity).toInt())
                     canvas.drawCircle(x, y, density * (.6f + (1 - travel).toFloat() * 1.5f + pulse), paint)
+                    if (index % 13 == 0) {
+                        color(200f + (travel * 120).toFloat(), (45 * opacity).toInt())
+                        canvas.drawCircle(x, y, density * (2f + pulse * 1.5f), paint)
+                    }
                 }
                 paint.style = Paint.Style.STROKE
             }
