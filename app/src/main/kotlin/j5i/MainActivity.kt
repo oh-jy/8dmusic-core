@@ -293,6 +293,9 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
                 .onFailure { toast("无法保存图片访问权限，请重新选择") }
         }
     }
+    internal val openSandImages = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        if (uris.isNotEmpty() && ::visualizerView.isInitialized) visualizerView.setSandImages(uris)
+    }
     internal val saveWav = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
         if (uri != null) exportWav(uri)
     }

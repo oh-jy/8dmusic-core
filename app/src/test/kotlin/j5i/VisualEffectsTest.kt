@@ -7,6 +7,16 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun sandTimelineFollowsPlaybackAndHandlesBoundaries() {
+        assertEquals(null, sandProgress(0, 0, 1))
+        assertEquals(null, sandProgress(0, 120000, 0))
+        assertEquals(0 to 0f, sandProgress(0, 120000, 2))
+        assertEquals(0 to .5f, sandProgress(30000, 120000, 2))
+        assertEquals(1 to 0f, sandProgress(60000, 120000, 2))
+        assertEquals(1 to 1f, sandProgress(120000, 120000, 2))
+        assertEquals(0 to .5f, sandProgress(60000, 120000, 1))
+        assertEquals(39, exclusiveVisualModes.last().second)
+    }
     @Test fun particleFieldTrackCountVariesWithinBounds() {
         val counts = (0L..1000L).map { fieldTrackCount(it, 1234L) }
         assertEquals((4..12).toSet(), counts.toSet())
@@ -242,7 +252,7 @@ class VisualEffectsTest {
 
     @Test fun drivingCyclesThroughEveryEffectInBothDirections() {
         val modes = exclusiveVisualModes.map { it.second }
-        assertEquals((1..38).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
+        assertEquals((1..39).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
         assertEquals(modes.toSet(), visualModeGroups.flatMap { it.second }.toSet())
         assertEquals(modes.size, visualModeGroups.sumOf { it.second.size })
         var current = 3

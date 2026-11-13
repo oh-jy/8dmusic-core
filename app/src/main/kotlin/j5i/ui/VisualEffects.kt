@@ -21,15 +21,22 @@ internal val exclusiveVisualModes = listOf(
     "visual.nebula" to 25, "visual.tunnel" to 26,
     "visual.prism" to 27, "visual.lightpaint" to 28, "visual.vortex" to 29,
     "visual.notes" to 30, "visual.grid" to 31, "visual.metal" to 32,
-    "visual.kaleidoscope" to 33
+    "visual.kaleidoscope" to 33, "visual.sand" to 39
 )
 
 internal val visualModeGroups = listOf(
     "visual.group.analysis" to setOf(1, 4, 5, 7, 11),
     "visual.group.nature" to setOf(6, 13, 17, 18, 19, 20, 21, 23, 25),
     "visual.group.cosmic" to setOf(2, 3, 8, 10, 14, 16, 26, 27, 29, 34, 36, 37, 38),
-    "visual.group.abstract" to setOf(12, 15, 22, 28, 30, 31, 32, 33, 35)
+    "visual.group.abstract" to setOf(12, 15, 22, 28, 30, 31, 32, 33, 35, 39)
 )
+
+internal fun sandProgress(positionMs: Long, durationMs: Long, count: Int): Pair<Int, Float>? {
+    if (durationMs <= 0 || count <= 0) return null
+    val scaled = positionMs.coerceIn(0L, durationMs).toDouble() / durationMs * count
+    val index = scaled.toInt().coerceAtMost(count - 1)
+    return index to (scaled - index).toFloat().coerceIn(0f, 1f)
+}
 
 internal fun nextVisualMode(current: Int, forward: Boolean): Int {
     val index = exclusiveVisualModes.indexOfFirst { it.second == current }

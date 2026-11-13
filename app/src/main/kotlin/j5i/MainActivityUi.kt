@@ -424,6 +424,7 @@ internal fun MainActivity.refreshPlayback() {
         }
         if (isViewReady(this@refreshPlayback::visualizerView)) {
             visualizerView.setVisualTrack(currentItem?.uri?.toString())
+            visualizerView.setSandPlayback((player?.duration?.times(1000))?.toLong() ?: 0L, isLive)
             visualizerView.setPosition(lyricPositionMs)
         }
         popupVisualizer?.setPosition(lyricPositionMs)
