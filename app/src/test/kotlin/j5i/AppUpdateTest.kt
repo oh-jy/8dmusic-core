@@ -6,6 +6,8 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import java.io.File
+import java.security.MessageDigest
 
 class AppUpdateTest {
     private val digest = "a".repeat(64)
@@ -31,5 +33,20 @@ class AppUpdateTest {
         val beta = release().replace("\"tag_name\":\"mainv2-v2.19.0\"", "\"tag_name\":\"beta-latest\",\"name\":\"测试版 v2.19.0\",\"prerelease\":true")
         assertEquals("2.19.0", parseAppRelease(beta, false).version)
         assertFailsWith<IllegalArgumentException> { parseAppRelease(beta.replace("\"prerelease\":true", "\"prerelease\":false"), false) }
+    }
+
+    @Test fun cacheRequiresMatchingCompleteContent() {
+        val file = File.createTempFile("update-test", ".apk")
+        try {
+            file.writeText("cached apk")
+            val hash = MessageDigest.getInstance("SHA-256").digest("cached apk".toByteArray())
+                .joinToString("") { "%02x".format(it.toInt() and 255) }
+            assertTrue(validUpdateCache(file, hash))
+            file.appendText("modified")
+            assertFalse(validUpdateCache(file, hash))
+            assertFalse(validUpdateCache(file, digest))
+        } finally {
+            file.delete()
+        }
     }
 }

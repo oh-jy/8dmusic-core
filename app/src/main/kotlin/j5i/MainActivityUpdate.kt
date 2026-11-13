@@ -71,19 +71,64 @@ internal fun isNewerRelease(latest: String, current: String): Boolean {
 
 internal fun MainActivity.updateChannel(): String = preferences.getString("updateChannel", "stable") ?: "stable"
 
-private fun MainActivity.unmeteredWifi(): Network? {
+private fun MainActivity.activeWifi(): Network? {
     val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     val network = manager.activeNetwork ?: return null
     val caps = manager.getNetworkCapabilities(network) ?: return null
     return network.takeIf { caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
-        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) }
 }
 
 internal fun MainActivity.checkAppUpdateAutomatically() {
-    if (unmeteredWifi() == null || System.currentTimeMillis() - preferences.getLong("updateLastCheck", 0L) < 6 * 60 * 60 * 1000L) return
+    val recent = System.currentTimeMillis() - preferences.getLong("updateLastCheck", 0L) < 6 * 60 * 60 * 1000L
+    if (recent && (activeWifi() == null || preferences.getBoolean("updateLastCheckWifi", false))) return
     checkAppUpdate(automatic = true)
 }
+
+internal fun MainActivity.startUpdateNetworkMonitor() {
+    if (updateNetworkCallback != null) return
+    val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val callback = object : ConnectivityManager.NetworkCallback() {
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+            if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+                capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                main.postDelayed({ if (pageActive && !isFinishing && !isDestroyed) checkAppUpdateAutomatically() }, 4000)
+            }
+        }
+    }
+    runCatching { manager.registerDefaultNetworkCallback(callback) }.onSuccess { updateNetworkCallback = callback }
+}
+
+internal fun MainActivity.stopUpdateNetworkMonitor() {
+    val callback = updateNetworkCallback ?: return
+    updateNetworkCallback = null
+    val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    runCatching { manager.unregisterNetworkCallback(callback) }
+}
+
+private fun MainActivity.recordUpdateCheck() {
+    preferences.edit().putLong("updateLastCheck", System.currentTimeMillis())
+        .putBoolean("updateLastCheckWifi", activeWifi() != null).apply()
+}
+
+internal fun validUpdateCache(file: File, sha256: String): Boolean {
+    if (!file.isFile || file.length() <= 0 || file.length() > MAX_APK_BYTES) return false
+    return runCatching {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) } == sha256
+    }.getOrDefault(false)
+}
+
+private fun MainActivity.updateCacheFile(release: AppRelease): File =
+    File(File(cacheDir, "updates"), "update-${requireNotNull(release.sha256)}.apk")
 
 internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
     if (!updateBusy.compareAndSet(false, true)) {
@@ -91,8 +136,7 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
         return
     }
     val channel = updateChannel()
-    val wifi = unmeteredWifi()
-    if (automatic && wifi == null) { updateBusy.set(false); return }
+    val wifi = activeWifi()
     var status: TextView? = null
     val dialog = if (automatic) null else ThemeUi.showSheet(this, palette, "检查更新", compactPicker = true) {
         status = ThemeUi.text(this@checkAppUpdate, "正在检查 GitHub 最新版本…", 14f, palette)
@@ -105,22 +149,28 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
             client.newCall(Request.Builder().url(if (channel == "beta") BETA_UPDATE_URL else UPDATE_URL).header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "8dmusic-android").build()).execute().use { response ->
                 check(response.isSuccessful) { "GitHub 返回 ${response.code}" }
-                parseAppRelease(response.body?.string() ?: error("更新信息为空"), BuildConfig.WITH_ASR)
+                val release = parseAppRelease(response.body?.string() ?: error("更新信息为空"), BuildConfig.WITH_ASR)
+                val file = if (release.sha256 != null) updateCacheFile(release) else null
+                release to file?.takeIf { validUpdateCache(it, release.sha256!!) }
             }
         }
         runOnUiThread {
             updateBusy.set(false)
-            if (isFinishing || isDestroyed || updateChannel() != channel || (!automatic && dialog?.isShowing != true)) return@runOnUiThread
-            result.fold(onSuccess = { release ->
+            if (isFinishing || isDestroyed || updateChannel() != channel || (automatic && !pageActive) || (!automatic && dialog?.isShowing != true)) return@runOnUiThread
+            result.fold(onSuccess = { (release, cached) ->
                 dialog?.dismiss()
                 val newer = runCatching { isNewerRelease(release.version, BuildConfig.VERSION_NAME) }
+                val currentWifi = activeWifi()
                 if (newer.isFailure) {
                     if (!automatic) showUpdateMessage("检查失败", newer.exceptionOrNull()?.message ?: "版本号无效")
-                } else if (newer.getOrDefault(false) && release.apkUrl != null && wifi != null && unmeteredWifi() == wifi) {
-                    downloadAppUpdate(release, silent = true, wifi = wifi, channel = channel, automatic = automatic)
+                } else if (newer.getOrDefault(false) && cached != null) {
+                    recordUpdateCheck()
+                    offerInstall(cached, release)
+                } else if (newer.getOrDefault(false) && release.apkUrl != null && currentWifi != null) {
+                    downloadAppUpdate(release, silent = true, wifi = currentWifi, channel = channel, automatic = automatic)
                 } else {
-                    preferences.edit().putLong("updateLastCheck", System.currentTimeMillis()).apply()
-                    if (!automatic) showRelease(release, newer.getOrDefault(false))
+                    recordUpdateCheck()
+                    if (!automatic || newer.getOrDefault(false)) showRelease(release, newer.getOrDefault(false))
                 }
             }, onFailure = { status?.text = if (channel == "beta" && it.message?.contains("404") == true) "测试版暂未发布。" else "检查失败：${it.message ?: "网络不可用"}，请稍后重试。" })
         }
@@ -156,7 +206,8 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
     channel: String = updateChannel(), automatic: Boolean = false) {
     if (!updateBusy.compareAndSet(false, true)) return
     val directory = File(cacheDir, "updates").apply { mkdirs() }
-    val file = File(directory, "update-${System.nanoTime()}.apk")
+    val file = updateCacheFile(release)
+    val partial = File(directory, "download-${System.nanoTime()}.part")
     var status: TextView? = null
     val dialog = if (silent) null else ThemeUi.showSheet(this, palette, "下载更新", compactPicker = true) {
         status = ThemeUi.text(this@downloadAppUpdate, "正在下载…", 14f, palette)
@@ -165,6 +216,7 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
     dialog?.show()
     thread(name = "update-download") {
         val result = runCatching {
+            if (validUpdateCache(file, requireNotNull(release.sha256))) return@runCatching
             val client = if (wifi == null) updateClient else clientForWifi(wifi)
             client.newCall(Request.Builder().url(requireNotNull(release.apkUrl)).build()).execute().use { response ->
                 check(response.isSuccessful) { "下载失败 (${response.code})" }
@@ -175,10 +227,10 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                 var total = 0L
                 var lastPercent = -1
                 body.byteStream().use { input ->
-                    file.outputStream().use { output ->
+                    partial.outputStream().use { output ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
-                            check(wifi == null || unmeteredWifi() == wifi) { "Wi-Fi 已断开，下载已停止" }
+                            check(wifi == null || activeWifi() == wifi) { "Wi-Fi 已断开，下载已停止" }
                             val count = input.read(buffer)
                             if (count < 0) break
                             total += count
@@ -197,20 +249,22 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                 }
                 val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
                 check(actual == release.sha256) { "更新包校验失败" }
+                if (file.exists()) check(file.delete()) { "无法替换无效缓存" }
+                check(partial.renameTo(file)) { "无法保存更新包" }
             }
         }
         runOnUiThread {
             updateBusy.set(false)
             if (isFinishing || isDestroyed || updateChannel() != channel || (automatic && !pageActive)) {
-                file.delete()
+                partial.delete()
                 return@runOnUiThread
             }
             dialog?.dismiss()
             result.fold(onSuccess = {
-                preferences.edit().putLong("updateLastCheck", System.currentTimeMillis()).apply()
+                recordUpdateCheck()
                 offerInstall(file, release)
             }, onFailure = {
-                file.delete()
+                partial.delete()
                 if (!automatic) showUpdateMessage("下载失败", it.message ?: "请检查网络后重试")
             })
         }
