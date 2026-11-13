@@ -23,6 +23,9 @@ import android.view.MotionEvent
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.FrameLayout
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.graphics.drawable.ColorDrawable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -44,6 +47,45 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     private fun t(key: String) = AppLanguage.text(context, key)
     var onExpand: (() -> Unit)? = null
     var onChooseEffect: (() -> Unit)? = null
+    var onChooseSandImages: (() -> Unit)? = null
+    private var sandGeneration = 0
+    private var sandLive = false
+    private val sandButton = button(t("visual.sand.choose")) { onChooseSandImages?.invoke() }
+    private val sandLiveLabel = android.widget.TextView(context).apply { gravity = Gravity.CENTER }
+
+    fun setSandImages(uris: List<android.net.Uri>) {
+        val generation = ++sandGeneration
+        Thread {
+            val images = uris.mapNotNull { uri ->
+                runCatching {
+                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                    var sample = 1
+                    while (max(bounds.outWidth, bounds.outHeight) / sample > 256) sample *= 2
+                    context.contentResolver.openInputStream(uri)?.use {
+                        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                    }
+                }.getOrNull()
+            }
+            post {
+                if (generation == sandGeneration) {
+                    canvas.sandImages = images
+                    canvas.updateSand()
+                    updateMode()
+                    if (images.size != uris.size) android.widget.Toast.makeText(context, t("visual.sand.error"), android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    fun setSandPlayback(durationMs: Long, live: Boolean) {
+        if (canvas.sandDuration == durationMs && sandLive == live) return
+        canvas.sandDuration = durationMs
+        sandLive = live
+        canvas.sandLive = live
+        canvas.updateSand()
+        updateMode()
+    }
     var dark = true
         set(value) { field = value; canvas.dark = value; restyle() }
     private val canvas = AudioCanvas(context, pcmClock)
@@ -155,6 +197,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             MotionEvent.ACTION_UP -> {
                 if (!swipeHandled && !dragRecorded && abs(event.x - touchStartX) < dp(12f) && abs(event.y - touchStartY) < dp(12f) && canvas.width > 0 && canvas.height > 0) {
+                    if (exclusive && visualMode == 4 && !canvas.exporting) showGraphStyle()
                     if (touches.size >= 500) touches.removeAt(0)
                     touches.add(VisualTouch((event.x / canvas.width).coerceIn(0f, 1f), (event.y / canvas.height).coerceIn(0f, 1f), visualPositionMs))
                     canvas.visualTouches = touches.toList()
@@ -167,6 +210,33 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         return true
     }
     private val graphView = WaveformView(context)
+    private val graphStyle: Spinner = Spinner(context).apply {
+        adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, graphStyleKeys.map { t(it) }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        setSelection(creativePreferences.getInt("graph_style", 0).coerceIn(graphStyleKeys.indices))
+        graphView.style = selectedItemPosition
+        setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                this@VisualizerView.removeCallbacks(hideGraphStyle)
+                this@VisualizerView.postDelayed(hideGraphStyle, 10000L)
+            }
+            false
+        }
+        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                graphView.style = position
+                creativePreferences.edit().putInt("graph_style", position).apply()
+            }
+        }
+    }
+    private val hideGraphStyle = Runnable { graphStyle.visibility = View.GONE }
+    private fun showGraphStyle() {
+        graphStyle.visibility = View.VISIBLE
+        removeCallbacks(hideGraphStyle)
+        postDelayed(hideGraphStyle, 5000L)
+    }
     private val lyricOverlay = LyricOverlay(context, pcmClock)
     private var exclusive = false
     private var visualMode = 0
@@ -202,7 +272,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
     var drivingLyrics = false
         set(value) { field = value; updateMode() }
-    val showsLyrics: Boolean get() = exclusive && visualMode != 1
+    val showsLyrics: Boolean get() = exclusive && visualMode != 1 && visualMode != 39
 
     init {
         orientation = VERTICAL
@@ -213,6 +283,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         graphView.setOnTouchListener { _, event -> handleCanvasTouch(event) }
         stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
         stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(sandButton, FrameLayout.LayoutParams(-2, dp(44f), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        stage.addView(sandLiveLabel, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(graphStyle, FrameLayout.LayoutParams(dp(126f), dp(40f), Gravity.TOP or Gravity.START))
         stage.addView(effectButton, FrameLayout.LayoutParams(-2, dp(44f), Gravity.TOP or Gravity.END).apply {
             rightMargin = dp(4f); topMargin = dp(2f)
         })
@@ -246,10 +319,11 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
     internal data class ExportState(
         val exclusive: Boolean, val mode: Int, val layers: BooleanArray,
-        val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?
+        val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?, val graphStyle: Int,
+        val sandImages: List<Bitmap>, val sandDuration: Long
     )
     internal fun exportState() = ExportState(exclusive, visualMode, layers.copyOf(), singleVisualLayer,
-        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground)
+        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration)
 
     internal fun prepareExport(state: ExportState, lyrics: LyricsResult?, width: Int, height: Int, sampleRate: Int) {
         dark = state.dark
@@ -262,8 +336,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.creativeBackground = state.background?.let { loadCreativeBackground(context, it) }
         canvas.creativeBackgroundBlurred = canvas.creativeBackground?.let(::softBlur)
         canvas.exporting = true
+        canvas.sandImages = state.sandImages
+        canvas.sandDuration = state.sandDuration
+        sandButton.visibility = View.GONE
         canvas.immersive = true
         canvas.sampleRate = sampleRate
+        graphView.style = state.graphStyle
+        graphStyle.visibility = View.GONE
         effectButton.visibility = View.GONE
         setLyrics(lyrics)
         measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
@@ -273,9 +352,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     internal fun drawExportFrame(target: Canvas, data: ByteArray, bytes: Int, timeUs: Long, lyricPositionMs: Long) {
         pcmClock.acceptOffline(data, bytes, timeUs)
         canvas.acceptOffline(data, bytes)
-        if (graphView.visibility == View.VISIBLE) graphView.accept(data, bytes)
+        if (graphView.visibility == View.VISIBLE) {
+            graphView.accept(data, bytes)
+            graphView.setSpectrum(canvas.spectrumSnapshot())
+        }
         lyricOverlay.setPosition(lyricPositionMs)
         canvas.visualPositionMs = lyricPositionMs
+        if (canvas.mode == 39) canvas.updateSand()
         target.drawColor((canvas.exportPalette ?: ThemeUi.palette(dark)).surface)
         draw(target)
     }
@@ -295,6 +378,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             if (latest != null && isAttachedToWindow) {
                 canvas.accept(latest, latest.size)
                 graphView.accept(latest, latest.size)
+                if (graphView.visibility == View.VISIBLE) graphView.setSpectrum(canvas.spectrumSnapshot())
                 consumedPcm++
             }
             diagnoseRender()
@@ -315,6 +399,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
     override fun onDetachedFromWindow() {
         removeCallbacks(hideControls)
+        removeCallbacks(hideGraphStyle)
+        graphStyle.visibility = View.GONE
         removeCallbacks(consumePcm)
         renderPosted.set(false)
         pendingPcm.set(null)
@@ -338,18 +424,30 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     fun setPosition(positionMs: Long) {
         visualPositionMs = positionMs
         canvas.visualPositionMs = positionMs
+        if (exclusive && visualMode == 39) canvas.updateSand()
         lyricOverlay.setPosition(positionMs)
     }
 
     private fun updateMode() {
         canvas.mode = if (!exclusive) 0 else visualMode
+        if (canvas.mode == 39) canvas.updateSand()
         canvas.layers = layers.copyOf()
         canvas.singleLayer = singleVisualLayer
         graphView.dark = dark
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
+        if (graphView.visibility != View.VISIBLE || canvas.exporting) {
+            removeCallbacks(hideGraphStyle)
+            graphStyle.visibility = View.GONE
+        }
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
         lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
+        val sand = exclusive && visualMode == 39
+        sandButton.visibility = if (sand && !sandLive && !canvas.exporting) View.VISIBLE else View.GONE
+        sandButton.text = t(if (canvas.sandImages.isEmpty()) "visual.sand.choose" else "visual.sand.change")
+        sandLiveLabel.visibility = if (sand && sandLive) View.VISIBLE else View.GONE
+        sandLiveLabel.text = t("visual.sand.live")
+        sandLiveLabel.setTextColor(ThemeUi.palette(dark).text)
         if (showsLyrics) lyricOverlay.bringToFront()
         canvas.invalidate()
         effectButton.bringToFront()
@@ -376,8 +474,16 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
     private fun restyle() {
         val palette = ThemeUi.palette(dark)
+        val selectedGraphStyle = graphView.style
+        graphStyle.adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, graphStyleKeys.map { t(it) }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        ThemeUi.configureSpinner(graphStyle, palette)
+        graphStyle.setSelection(selectedGraphStyle)
         effectButton.setTextColor(palette.text)
         ThemeUi.bg(effectButton, palette.surface, 8f)
+        sandButton.setTextColor(palette.text)
+        ThemeUi.bg(sandButton, palette.surfaceAlt, 8f)
     }
 
     private fun dp(value: Float) = ThemeUi.dp(context, value)
@@ -391,6 +497,37 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         var creative = VisualCreative()
         var visualTouches: List<VisualTouch> = emptyList()
         var visualPositionMs = 0L
+        var sandImages: List<Bitmap> = emptyList()
+        var sandDuration = 0L
+        var sandLive = false
+        private var sandFrame: Bitmap? = null
+        private var sandFrameKey: Triple<Int, Int, Bitmap>? = null
+
+        fun updateSand() {
+            val progress = if (sandLive) null else sandProgress(visualPositionMs, sandDuration, sandImages.size)
+            if (progress == null) {
+                sandFrame = null
+                sandFrameKey = null
+                invalidate()
+                return
+            }
+            val image = sandImages[progress.first]
+            val step = (progress.second * 1000).toInt()
+            val key = Triple(progress.first, step, image)
+            if (key == sandFrameKey) return
+            sandFrameKey = key
+            val pixels = IntArray(image.width * image.height)
+            image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
+            for (index in pixels.indices) {
+                var hash = index * 0x45d9f3b
+                hash = (hash xor (hash ushr 16)) * 0x45d9f3b
+                val threshold = (hash xor (hash ushr 16)).ushr(1) % 1000 / 1000f
+                val alpha = ((progress.second - threshold * .94f) / .06f).coerceIn(0f, 1f)
+                pixels[index] = (pixels[index] and 0x00ffffff) or (((pixels[index] ushr 24) * alpha).toInt() shl 24)
+            }
+            sandFrame = Bitmap.createBitmap(pixels, image.width, image.height, Bitmap.Config.ARGB_8888)
+            invalidate()
+        }
         var creativeBackground: Bitmap? = null
         var creativeBackgroundBlurred: Bitmap? = null
         var exporting = false
@@ -405,6 +542,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var correlation = .0
         private var phase = 0f
         private val spectrum = DoubleArray(256)
+        fun spectrumSnapshot(): DoubleArray = synchronized(analysisLock) { spectrum.copyOf() }
         private val spectrogramRows = ArrayDeque<IntArray>()
         private var spectrogramGeneration = pcmClock.generation
         private var lastSpectrogramAt = 0L
@@ -647,6 +785,20 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 // 背景与卡片 surface 一致，避免独立"纯黑/纯白"造成视觉割裂。
                 val surface = (exportPalette ?: ThemeUi.palette(dark)).surface
                 c.drawColor(surface)
+                if (mode == 39) {
+                    if (!sandLive) sandFrame?.let { image ->
+                        val scale = min(width.toFloat() / image.width, height.toFloat() / image.height)
+                        val imageWidth = image.width * scale
+                        val imageHeight = image.height * scale
+                        effectBounds.set((width - imageWidth) / 2f, (height - imageHeight) / 2f,
+                            (width + imageWidth) / 2f, (height + imageHeight) / 2f)
+                        paint.alpha = 255
+                        paint.shader = null
+                        paint.isFilterBitmap = false
+                        c.drawBitmap(image, null, effectBounds, paint)
+                    }
+                    return
+                }
                 creativeBackground?.let { bitmap ->
                     val scale = max(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
                     val imageWidth = bitmap.width * scale
@@ -687,8 +839,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> drawParticles(c)
                     3 -> drawTravel(c)
                     34 -> drawDream(c)
-                    in 35..37 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
-                        delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f)
+                    in 35..38 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
+                        delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f,
+                        AppLanguage.resolved(context))
                     5 -> drawSpectrumTerrain(c)
                     6 -> drawWater(c)
                     7 -> drawStrings(c)
@@ -748,7 +901,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> "visual.particles"
                     3 -> "visual.travel"
                     34 -> "visual.dream"
-                    in 35..37 -> exclusiveVisualModes.first { it.second == mode }.first
+                    in 35..38 -> exclusiveVisualModes.first { it.second == mode }.first
                     5 -> "visual.3d.title"
                     6 -> "visual.water.title"
                     7 -> "visual.strings.title"

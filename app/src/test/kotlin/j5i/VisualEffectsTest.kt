@@ -7,6 +7,50 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun sandTimelineFollowsPlaybackAndHandlesBoundaries() {
+        assertEquals(null, sandProgress(0, 0, 1))
+        assertEquals(null, sandProgress(0, 120000, 0))
+        assertEquals(0 to 0f, sandProgress(0, 120000, 2))
+        assertEquals(0 to .5f, sandProgress(30000, 120000, 2))
+        assertEquals(1 to 0f, sandProgress(60000, 120000, 2))
+        assertEquals(1 to 1f, sandProgress(120000, 120000, 2))
+        assertEquals(0 to .5f, sandProgress(60000, 120000, 1))
+        assertEquals(39, exclusiveVisualModes.last().second)
+    }
+    @Test fun particleFieldTrackCountVariesWithinBounds() {
+        val counts = (0L..1000L).map { fieldTrackCount(it, 1234L) }
+        assertEquals((4..12).toSet(), counts.toSet())
+        assertTrue(counts.zipWithNext().any { (first, second) -> first != second })
+        assertEquals(counts, (0L..1000L).map { fieldTrackCount(it, 1234L) })
+    }
+    @Test fun ringShapesAreClosedDistinctAndRandomized() {
+        assertTrue(RING_SHAPE_COUNT > 16)
+        val outlines = (0 until RING_SHAPE_COUNT).map { shape ->
+            val first = ringPoint(shape, 0.0)
+            val last = ringPoint(shape, 2 * kotlin.math.PI)
+            assertEquals(first.first, last.first, .000001)
+            assertEquals(first.second, last.second, .000001)
+            (0 until 96).map { step -> ringPoint(shape, step * 2 * kotlin.math.PI / 96) }
+        }
+        assertEquals(RING_SHAPE_COUNT, outlines.toSet().size)
+        val sequence = (0L..999L).map { ringShape(it, 1234L) }
+        assertEquals(RING_SHAPE_COUNT, sequence.toSet().size)
+        assertTrue(sequence != (0L..999L).map { ringShape(it, 5678L) })
+        assertEquals(sequence, (0L..999L).map { ringShape(it, 1234L) })
+    }
+    @Test fun ringScenesHoldThenMorphWithoutRepeating() {
+        assertEquals(0.0, ringSceneBlend(0.0))
+        assertEquals(0.0, ringSceneBlend(RING_SCENE_SECONDS * .8))
+        assertTrue(ringSceneBlend(RING_SCENE_SECONDS - .001) > .999)
+        assertEquals(0.0, ringSceneBlend(RING_SCENE_SECONDS))
+        assertTrue((0L..1000L).all { ringScene(it, 1234L) != ringScene(it + 1, 1234L) })
+        assertEquals(RING_SHAPE_COUNT, (0L until RING_SHAPE_COUNT.toLong()).map { ringScene(it, 1234L) }.toSet().size)
+    }
+    @Test fun graphStylesAreDistinctAndKeepOriginalFirst() {
+        assertEquals(13, graphStyleKeys.size)
+        assertEquals(graphStyleKeys.size, graphStyleKeys.toSet().size)
+        assertEquals("graph.style.original", graphStyleKeys.first())
+    }
     @Test fun flowerProjectionHasDepthAndPerspective() {
         val near = projectFlowerPoint(.4, .2, .5, .8, 100f)
         val far = projectFlowerPoint(.4, .2, -.5, .8, 100f)
@@ -25,22 +69,65 @@ class VisualEffectsTest {
             assertTrue(abs(before.x - after.x) < .002)
             assertTrue(abs(before.y - after.y) < .002)
             assertTrue(abs(before.opening - after.opening) < .002)
+            assertTrue(abs(before.rotation - after.rotation) < .002)
         }
     }
-    @Test fun flowersRemainDistributedWhileMoving() {
-        for (step in 0..100) {
-            val positions = (0..4).map { flowerPosition(it, step.toDouble()) }
-            for (first in 0..4) for (second in first + 1..4) {
-                val dx = positions[first].first - positions[second].first
-                val dy = positions[first].second - positions[second].second
-                assertTrue(dx * dx + dy * dy > .15)
+    @Test fun flowersTravelAndTurnIndependently() {
+        for (index in 0..4) {
+            val positions = (0..600).map { flowerPositions(it.toDouble(), 1000.0, 1000.0)[index] }
+            val rotations = (0..120).map { flowerMotion(index, it.toDouble()).rotation }
+            assertTrue(positions.map { it.first }.toSet().size > 100)
+            assertTrue(positions.map { it.second }.toSet().size > 100)
+            assertTrue(positions.maxOf { it.first } - positions.minOf { it.first } > 400)
+            assertTrue(positions.maxOf { it.second } - positions.minOf { it.second } > 400)
+            assertTrue(rotations.toSet().size > 100)
+            assertTrue(rotations.zipWithNext().any { (first, second) -> second > first })
+            assertTrue(rotations.zipWithNext().any { (first, second) -> second < first })
+        }
+    }
+    @Test fun flowersAvoidCrowdingAndMoveContinuously() {
+        for ((width, height) in listOf(1000.0 to 1000.0, 400.0 to 900.0, 900.0 to 400.0)) {
+            for (step in 0..300) {
+                val positions = flowerPositions(step.toDouble(), width, height)
+                val next = flowerPositions(step + .001, width, height)
+                for (index in positions.indices) {
+                    assertTrue(kotlin.math.hypot(positions[index].first - next[index].first,
+                        positions[index].second - next[index].second) < minOf(width, height) * .01)
+                }
+                for (first in 0..4) for (second in first + 1..4) {
+                    val dx = positions[first].first - positions[second].first
+                    val dy = positions[first].second - positions[second].second
+                    assertTrue(dx * dx + dy * dy > .25 * .25 * minOf(width, height) * minOf(width, height))
+                }
             }
         }
-        assertTrue(flowerPosition(0, 0.0) != flowerPosition(0, 10.0))
+    }
+    @Test fun stardustShapesChangeWithoutImmediateRepeats() {
+        val count = stardustKinds.size
+        assertTrue(count >= 30)
+        assertTrue((0..10).all { block -> (0 until count).map { stardustShape(block * count + it) }.toSet().size == count })
+        assertTrue((0..1000).all { stardustShape(it) != stardustShape(it + 1) })
+        assertTrue(stardustKinds.all { it.simplified.isNotBlank() && it.traditional.isNotBlank() && it.english.isNotBlank() })
+    }
+    @Test fun stardustTimingUsesComplexityAndSupportsSeeking() {
+        val simple = StardustTimeline(DoubleArray(stardustKinds.size))
+        val complex = StardustTimeline(DoubleArray(stardustKinds.size) { 1.0 })
+        val durations = (0..100).map(simple::duration)
+        assertTrue(durations.all { it in 6.0..12.0 })
+        assertTrue((0..100).all { complex.duration(it) in 6.0..12.0 && complex.duration(it) > simple.duration(it) })
+        assertTrue(durations.toSet().size > 90)
+        val firstEnd = simple.duration(0)
+        assertEquals(0, simple.position(firstEnd - .001).first)
+        assertEquals(1, simple.position(firstEnd).first)
+        val later = simple.position(500.0)
+        simple.position(0.0)
+        assertEquals(later, simple.position(500.0))
+        assertTrue(simple.position(firstEnd - .001).second > .99)
+        assertEquals(0.0, simple.position(firstEnd).second)
     }
     @Test fun rainAndFollowingEffectsComeImmediatelyAfterTravel() {
-        assertEquals(listOf(3, 34, 35, 36, 37, 13, 14, 15, 16, 17, 5),
-            exclusiveVisualModes.map { it.second }.drop(3).take(11))
+        assertEquals(listOf(3, 34, 38, 35, 36, 37, 13, 14, 15, 16, 17, 5),
+            exclusiveVisualModes.map { it.second }.drop(3).take(12))
     }
     @Test fun dreamScenesChangeSmoothlyOverTime() {
         assertEquals(0f, dreamBlend(0.0))
@@ -165,7 +252,7 @@ class VisualEffectsTest {
 
     @Test fun drivingCyclesThroughEveryEffectInBothDirections() {
         val modes = exclusiveVisualModes.map { it.second }
-        assertEquals((1..37).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
+        assertEquals((1..39).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
         assertEquals(modes.toSet(), visualModeGroups.flatMap { it.second }.toSet())
         assertEquals(modes.size, visualModeGroups.sumOf { it.second.size })
         var current = 3

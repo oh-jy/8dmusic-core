@@ -481,6 +481,7 @@ internal fun MainActivity.curveCard(): LinearLayout {
                 visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
                 onExpand = { showVisualizerSheet() }
                 onChooseEffect = { showVisualEffectPicker() }
+                onChooseSandImages = { openSandImages.launch("image/*") }
             }
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
             addView(curveContent)
