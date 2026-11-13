@@ -98,7 +98,7 @@ class WaveformView(context: Context) : View(context) {
         paint.color = ThemeUi.palette(dark).sub
         paint.setShadowLayer(2f * density, 0f, 0f, if (dark) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
         var x = horizontalPadding
-        var y = 54f * density
+        var y = 14f * density
         labels.forEachIndexed { index, label ->
             val text = if (index == 0 || x == horizontalPadding) label else "  ·  $label"
             val textWidth = paint.measureText(text)
@@ -118,8 +118,8 @@ class WaveformView(context: Context) : View(context) {
 
     private fun drawStyled(canvas: Canvas, data: ShortArray, count: Int, visible: Int, height: Float, density: Float) {
         if (width <= 0 || visible < 2) return
-        val middle = height * .55f
-        val amplitude = height * .36f
+        val middle = height * .5f
+        val amplitude = height * .48f
         val frames = visible / 2
         val bands = synchronized(lock) { spectrum.copyOf() }
         paint.color = if (dark) 0xff48e1dc.toInt() else 0xff007e80.toInt()
@@ -166,7 +166,7 @@ class WaveformView(context: Context) : View(context) {
                     val u = column.toFloat() / (columns - 1)
                     val direction = if (style == 12 && line == 1) -1f else 1f
                     val shape = if (style == 12) value else value * sin(u * PI * (3 + line % 3) + line * .4).toFloat()
-                    val y = middle - direction * shape * amplitude * (1f + line * .08f)
+                    val y = (middle - direction * shape * amplitude * (1f + line * .08f)).coerceIn(0f, height)
                     val x = u * width
                     if (style == 11) canvas.drawCircle(x, y, density, paint)
                     else if (column == 0) path.moveTo(x, y) else path.lineTo(x, y)

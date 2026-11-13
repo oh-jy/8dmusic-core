@@ -158,6 +158,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             MotionEvent.ACTION_UP -> {
                 if (!swipeHandled && !dragRecorded && abs(event.x - touchStartX) < dp(12f) && abs(event.y - touchStartY) < dp(12f) && canvas.width > 0 && canvas.height > 0) {
+                    if (exclusive && visualMode == 4 && !canvas.exporting) showGraphStyle()
                     if (touches.size >= 500) touches.removeAt(0)
                     touches.add(VisualTouch((event.x / canvas.width).coerceIn(0f, 1f), (event.y / canvas.height).coerceIn(0f, 1f), visualPositionMs))
                     canvas.visualTouches = touches.toList()
@@ -170,12 +171,19 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         return true
     }
     private val graphView = WaveformView(context)
-    private val graphStyle = Spinner(context).apply {
+    private val graphStyle: Spinner = Spinner(context).apply {
         adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, graphStyleKeys.map { t(it) }).apply {
             setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         }
         setSelection(creativePreferences.getInt("graph_style", 0).coerceIn(graphStyleKeys.indices))
         graphView.style = selectedItemPosition
+        setOnTouchListener { _, event ->
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                this@VisualizerView.removeCallbacks(hideGraphStyle)
+                this@VisualizerView.postDelayed(hideGraphStyle, 10000L)
+            }
+            false
+        }
         onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -183,6 +191,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 creativePreferences.edit().putInt("graph_style", position).apply()
             }
         }
+    }
+    private val hideGraphStyle = Runnable { graphStyle.visibility = View.GONE }
+    private fun showGraphStyle() {
+        graphStyle.visibility = View.VISIBLE
+        removeCallbacks(hideGraphStyle)
+        postDelayed(hideGraphStyle, 5000L)
     }
     private val lyricOverlay = LyricOverlay(context, pcmClock)
     private var exclusive = false
@@ -339,6 +353,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
     override fun onDetachedFromWindow() {
         removeCallbacks(hideControls)
+        removeCallbacks(hideGraphStyle)
+        graphStyle.visibility = View.GONE
         removeCallbacks(consumePcm)
         renderPosted.set(false)
         pendingPcm.set(null)
@@ -371,7 +387,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.singleLayer = singleVisualLayer
         graphView.dark = dark
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
-        graphStyle.visibility = if (graphView.visibility == View.VISIBLE && !canvas.exporting) View.VISIBLE else View.GONE
+        if (graphView.visibility != View.VISIBLE || canvas.exporting) {
+            removeCallbacks(hideGraphStyle)
+            graphStyle.visibility = View.GONE
+        }
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
         lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
@@ -720,7 +739,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     3 -> drawTravel(c)
                     34 -> drawDream(c)
                     in 35..38 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
-                        delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f)
+                        delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f,
+                        AppLanguage.resolved(context))
                     5 -> drawSpectrumTerrain(c)
                     6 -> drawWater(c)
                     7 -> drawStrings(c)
