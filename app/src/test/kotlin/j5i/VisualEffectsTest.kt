@@ -27,6 +27,17 @@ class VisualEffectsTest {
             assertTrue(abs(before.opening - after.opening) < .002)
         }
     }
+    @Test fun flowersRemainDistributedWhileMoving() {
+        for (step in 0..100) {
+            val positions = (0..4).map { flowerPosition(it, step.toDouble()) }
+            for (first in 0..4) for (second in first + 1..4) {
+                val dx = positions[first].first - positions[second].first
+                val dy = positions[first].second - positions[second].second
+                assertTrue(dx * dx + dy * dy > .15)
+            }
+        }
+        assertTrue(flowerPosition(0, 0.0) != flowerPosition(0, 10.0))
+    }
     @Test fun rainAndFollowingEffectsComeImmediatelyAfterTravel() {
         assertEquals(listOf(3, 34, 35, 36, 37, 13, 14, 15, 16, 17, 5),
             exclusiveVisualModes.map { it.second }.drop(3).take(11))
