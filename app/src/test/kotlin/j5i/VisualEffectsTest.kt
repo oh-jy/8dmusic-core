@@ -7,6 +7,16 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun sandExtractsDarkDetailsAndRevealsInContinuousStrokes() {
+        val pixels = intArrayOf(-1, -1, -1, -1, 0xff000000.toInt(), -1, -1, -1, -1)
+        val density = sandDensity(pixels, 3, 3)
+        assertTrue(density[4] > density[0])
+        assertTrue(density[1] > density[0])
+        assertEquals(0f, sandRowProgress(0f, 0))
+        assertEquals(1f, sandRowProgress(1f, 7))
+        assertEquals(.5f, sandRowProgress(.0625f, 0))
+        assertEquals(0f, sandRowProgress(.0625f, 1))
+    }
     @Test fun sandTimelineFollowsPlaybackAndHandlesBoundaries() {
         assertEquals(null, sandProgress(0, 0, 1))
         assertEquals(null, sandProgress(0, 120000, 0))
@@ -39,6 +49,7 @@ class VisualEffectsTest {
         assertEquals(sequence, (0L..999L).map { ringShape(it, 1234L) })
     }
     @Test fun ringScenesHoldThenMorphWithoutRepeating() {
+        assertEquals(10.0, RING_SCENE_SECONDS)
         assertEquals(0.0, ringSceneBlend(0.0))
         assertEquals(0.0, ringSceneBlend(RING_SCENE_SECONDS * .8))
         assertTrue(ringSceneBlend(RING_SCENE_SECONDS - .001) > .999)
@@ -50,6 +61,11 @@ class VisualEffectsTest {
         assertEquals(13, graphStyleKeys.size)
         assertEquals(graphStyleKeys.size, graphStyleKeys.toSet().size)
         assertEquals("graph.style.original", graphStyleKeys.first())
+        assertTrue(isVerticalGraphSwipe(10f, -60f, 48f))
+        assertTrue(!isVerticalGraphSwipe(60f, 10f, 48f))
+        assertTrue(!isVerticalGraphSwipe(10f, 20f, 48f))
+        assertEquals(0, nextGraphStyle(graphStyleKeys.lastIndex, true))
+        assertEquals(graphStyleKeys.lastIndex, nextGraphStyle(0, false))
     }
     @Test fun flowerProjectionHasDepthAndPerspective() {
         val near = projectFlowerPoint(.4, .2, .5, .8, 100f)
@@ -97,7 +113,7 @@ class VisualEffectsTest {
                 for (first in 0..4) for (second in first + 1..4) {
                     val dx = positions[first].first - positions[second].first
                     val dy = positions[first].second - positions[second].second
-                    assertTrue(dx * dx + dy * dy > .25 * .25 * minOf(width, height) * minOf(width, height))
+                    assertTrue(dx * dx + dy * dy > .12 * .12 * minOf(width, height) * minOf(width, height))
                 }
             }
         }

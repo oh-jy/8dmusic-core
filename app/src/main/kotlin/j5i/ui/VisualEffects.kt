@@ -38,6 +38,27 @@ internal fun sandProgress(positionMs: Long, durationMs: Long, count: Int): Pair<
     return index to (scaled - index).toFloat().coerceIn(0f, 1f)
 }
 
+internal fun sandDensity(pixels: IntArray, width: Int, height: Int): FloatArray {
+    val luminance = FloatArray(pixels.size) { index ->
+        val color = pixels[index]
+        val alpha = (color ushr 24) / 255f
+        val light = ((color shr 16 and 255) * .299f + (color shr 8 and 255) * .587f + (color and 255) * .114f) / 255f
+        1f - (1f - light) * alpha
+    }
+    return FloatArray(pixels.size) { index ->
+        val x = index % width
+        val y = index / width
+        val left = luminance[y * width + (x - 1).coerceAtLeast(0)]
+        val right = luminance[y * width + (x + 1).coerceAtMost(width - 1)]
+        val top = luminance[(y - 1).coerceAtLeast(0) * width + x]
+        val bottom = luminance[(y + 1).coerceAtMost(height - 1) * width + x]
+        val edge = kotlin.math.abs(right - left) + kotlin.math.abs(bottom - top)
+        ((1f - luminance[index]) * .72f + edge * .8f).coerceIn(0f, 1f)
+    }
+}
+
+internal fun sandRowProgress(progress: Float, row: Int): Float = (progress * 8f - row).coerceIn(0f, 1f)
+
 internal fun nextVisualMode(current: Int, forward: Boolean): Int {
     val index = exclusiveVisualModes.indexOfFirst { it.second == current }
     return exclusiveVisualModes[(index + if (forward) 1 else -1).mod(exclusiveVisualModes.size)].second
@@ -45,6 +66,12 @@ internal fun nextVisualMode(current: Int, forward: Boolean): Int {
 
 internal fun isHorizontalVisualSwipe(deltaX: Float, deltaY: Float, threshold: Float): Boolean =
     kotlin.math.abs(deltaX) >= threshold && kotlin.math.abs(deltaX) > kotlin.math.abs(deltaY) * 1.25f
+
+internal fun isVerticalGraphSwipe(deltaX: Float, deltaY: Float, threshold: Float): Boolean =
+    kotlin.math.abs(deltaY) >= threshold && kotlin.math.abs(deltaY) > kotlin.math.abs(deltaX) * 1.25f
+
+internal fun nextGraphStyle(current: Int, forward: Boolean): Int =
+    (current + if (forward) 1 else -1).mod(graphStyleKeys.size)
 
 internal fun nextVisualizerState(exclusive: Boolean, mode: Int, forward: Boolean): Pair<Boolean, Int> {
     val modes = exclusiveVisualModes.map { it.second }

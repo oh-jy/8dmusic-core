@@ -43,6 +43,7 @@ import kotlin.math.sqrt
 
 /** 本地 PCM 可视化，不增加原生依赖；组合图表与独占动效共用同一份输出样本。 */
 class VisualizerView(context: Context) : LinearLayout(context) {
+    internal data class SandImage(val bitmap: Bitmap, val background: Int)
     val pcmClock = PcmVisualClock()
     private fun t(key: String) = AppLanguage.text(context, key)
     var onExpand: (() -> Unit)? = null
@@ -50,6 +51,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     var onChooseSandImages: (() -> Unit)? = null
     private var sandGeneration = 0
     private var sandLive = false
+    private var sandControlsVisible = false
     private val sandButton = button(t("visual.sand.choose")) { onChooseSandImages?.invoke() }
     private val sandLiveLabel = android.widget.TextView(context).apply { gravity = Gravity.CENTER }
 
@@ -61,15 +63,41 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
                     var sample = 1
-                    while (max(bounds.outWidth, bounds.outHeight) / sample > 256) sample *= 2
-                    context.contentResolver.openInputStream(uri)?.use {
+                    while (max(bounds.outWidth, bounds.outHeight) / sample > 1600) sample *= 2
+                    val bitmap = context.contentResolver.openInputStream(uri)?.use {
                         BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                    }
+                    bitmap?.let { decoded ->
+                        val scale = min(1f, 1024f / max(decoded.width, decoded.height))
+                        val image = if (scale < 1f) Bitmap.createScaledBitmap(decoded,
+                            (decoded.width * scale).toInt().coerceAtLeast(1),
+                            (decoded.height * scale).toInt().coerceAtLeast(1), true) else decoded
+                        if (image !== decoded) decoded.recycle()
+                        val pixels = IntArray(image.width * image.height)
+                        image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
+                        val density = sandDensity(pixels, image.width, image.height)
+                        for (index in pixels.indices) {
+                            var hash = index * 0x45d9f3b
+                            hash = (hash xor (hash ushr 16)) * 0x45d9f3b
+                            val grain = (hash xor (hash ushr 16)).ushr(1) % 1000 / 1000f
+                            val opacity = (density[index] * (.7f + grain * .6f) * 255).toInt().coerceIn(0, 245)
+                            pixels[index] = (opacity shl 24) or 0x003d250f
+                        }
+                        val sand = Bitmap.createBitmap(pixels, image.width, image.height, Bitmap.Config.ARGB_8888)
+                        image.recycle()
+                        val backgrounds = intArrayOf(
+                            Color.rgb(247, 218, 145), Color.rgb(199, 228, 235), Color.rgb(210, 232, 203),
+                            Color.rgb(224, 210, 236), Color.rgb(244, 209, 209), Color.rgb(244, 222, 200),
+                            Color.rgb(205, 232, 225), Color.rgb(217, 224, 242)
+                        )
+                        SandImage(sand, backgrounds.random())
                     }
                 }.getOrNull()
             }
             post {
                 if (generation == sandGeneration) {
                     canvas.sandImages = images
+                    sandControlsVisible = false
                     canvas.updateSand()
                     updateMode()
                     if (images.size != uris.size) android.widget.Toast.makeText(context, t("visual.sand.error"), android.widget.Toast.LENGTH_SHORT).show()
@@ -182,7 +210,14 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     swipeHandled = true
                     while (touches.size > gestureTouchStart) touches.removeAt(touches.lastIndex)
                     canvas.visualTouches = touches.toList()
-                } else if (!swipeHandled && abs(dy) > dp(12f) && abs(dy) > abs(dx) * 1.25f) {
+                } else if (!swipeHandled && exclusive && visualMode == 4 &&
+                    isVerticalGraphSwipe(dx, dy, dp(48f).toFloat())) {
+                    graphStyle.setSelection(nextGraphStyle(graphView.style, dy < 0f))
+                    showGraphStyle()
+                    swipeHandled = true
+                    while (touches.size > gestureTouchStart) touches.removeAt(touches.lastIndex)
+                    canvas.visualTouches = touches.toList()
+                } else if (!swipeHandled && !(exclusive && visualMode == 4) && abs(dy) > dp(12f) && abs(dy) > abs(dx) * 1.25f) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                 }
                 if (!swipeHandled && (abs(dx) > dp(10f) || abs(dy) > dp(10f)) &&
@@ -197,6 +232,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             }
             MotionEvent.ACTION_UP -> {
                 if (!swipeHandled && !dragRecorded && abs(event.x - touchStartX) < dp(12f) && abs(event.y - touchStartY) < dp(12f) && canvas.width > 0 && canvas.height > 0) {
+                    if (exclusive && visualMode == 39 && canvas.sandImages.isNotEmpty() && !sandLive) {
+                        sandControlsVisible = !sandControlsVisible
+                        updateMode()
+                        parent?.requestDisallowInterceptTouchEvent(false)
+                        return true
+                    }
                     if (exclusive && visualMode == 4 && !canvas.exporting) showGraphStyle()
                     if (touches.size >= 500) touches.removeAt(0)
                     touches.add(VisualTouch((event.x / canvas.width).coerceIn(0f, 1f), (event.y / canvas.height).coerceIn(0f, 1f), visualPositionMs))
@@ -320,7 +361,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     internal data class ExportState(
         val exclusive: Boolean, val mode: Int, val layers: BooleanArray,
         val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?, val graphStyle: Int,
-        val sandImages: List<Bitmap>, val sandDuration: Long
+        val sandImages: List<SandImage>, val sandDuration: Long
     )
     internal fun exportState() = ExportState(exclusive, visualMode, layers.copyOf(), singleVisualLayer,
         dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration)
@@ -443,7 +484,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         lyricOverlay.dark = dark
         lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
         val sand = exclusive && visualMode == 39
-        sandButton.visibility = if (sand && !sandLive && !canvas.exporting) View.VISIBLE else View.GONE
+        sandButton.visibility = if (sand && !sandLive && !canvas.exporting &&
+            (canvas.sandImages.isEmpty() || sandControlsVisible)) View.VISIBLE else View.GONE
         sandButton.text = t(if (canvas.sandImages.isEmpty()) "visual.sand.choose" else "visual.sand.change")
         sandLiveLabel.visibility = if (sand && sandLive) View.VISIBLE else View.GONE
         sandLiveLabel.text = t("visual.sand.live")
@@ -497,35 +539,21 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         var creative = VisualCreative()
         var visualTouches: List<VisualTouch> = emptyList()
         var visualPositionMs = 0L
-        var sandImages: List<Bitmap> = emptyList()
+        var sandImages: List<SandImage> = emptyList()
         var sandDuration = 0L
         var sandLive = false
-        private var sandFrame: Bitmap? = null
-        private var sandFrameKey: Triple<Int, Int, Bitmap>? = null
+        private var sandFrame: SandImage? = null
+        private var sandFrameProgress = 0f
 
         fun updateSand() {
             val progress = if (sandLive) null else sandProgress(visualPositionMs, sandDuration, sandImages.size)
             if (progress == null) {
                 sandFrame = null
-                sandFrameKey = null
                 invalidate()
                 return
             }
-            val image = sandImages[progress.first]
-            val step = (progress.second * 1000).toInt()
-            val key = Triple(progress.first, step, image)
-            if (key == sandFrameKey) return
-            sandFrameKey = key
-            val pixels = IntArray(image.width * image.height)
-            image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
-            for (index in pixels.indices) {
-                var hash = index * 0x45d9f3b
-                hash = (hash xor (hash ushr 16)) * 0x45d9f3b
-                val threshold = (hash xor (hash ushr 16)).ushr(1) % 1000 / 1000f
-                val alpha = ((progress.second - threshold * .94f) / .06f).coerceIn(0f, 1f)
-                pixels[index] = (pixels[index] and 0x00ffffff) or (((pixels[index] ushr 24) * alpha).toInt() shl 24)
-            }
-            sandFrame = Bitmap.createBitmap(pixels, image.width, image.height, Bitmap.Config.ARGB_8888)
+            sandFrame = sandImages[progress.first]
+            sandFrameProgress = progress.second
             invalidate()
         }
         var creativeBackground: Bitmap? = null
@@ -786,7 +814,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                 val surface = (exportPalette ?: ThemeUi.palette(dark)).surface
                 c.drawColor(surface)
                 if (mode == 39) {
-                    if (!sandLive) sandFrame?.let { image ->
+                    if (!sandLive) sandFrame?.let { sand ->
+                        c.drawColor(sand.background)
+                        val image = sand.bitmap
                         val scale = min(width.toFloat() / image.width, height.toFloat() / image.height)
                         val imageWidth = image.width * scale
                         val imageHeight = image.height * scale
@@ -794,8 +824,30 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                             (width + imageWidth) / 2f, (height + imageHeight) / 2f)
                         paint.alpha = 255
                         paint.shader = null
-                        paint.isFilterBitmap = false
-                        c.drawBitmap(image, null, effectBounds, paint)
+                        paint.isFilterBitmap = true
+                        val rowHeight = imageHeight / 8f
+                        for (row in 0 until 8) {
+                            val fraction = sandRowProgress(sandFrameProgress, row)
+                            if (fraction <= 0f) continue
+                            val visibleWidth = imageWidth * fraction
+                            val feather = if (fraction < 1f) min(imageWidth * .06f, visibleWidth) else 0f
+                            fun drawPart(start: Float, end: Float, alpha: Int) {
+                                if (end <= start) return
+                                val save = c.save()
+                                val left = if (row % 2 == 0) effectBounds.left + start else effectBounds.right - end
+                                val right = if (row % 2 == 0) effectBounds.left + end else effectBounds.right - start
+                                c.clipRect(left, effectBounds.top + row * rowHeight, right, effectBounds.top + (row + 1) * rowHeight)
+                                paint.alpha = alpha
+                                c.drawBitmap(image, null, effectBounds, paint)
+                                c.restoreToCount(save)
+                            }
+                            drawPart(0f, visibleWidth - feather, 255)
+                            for (strip in 0 until 8) {
+                                drawPart(visibleWidth - feather + feather * strip / 8f,
+                                    visibleWidth - feather + feather * (strip + 1) / 8f, 255 * (8 - strip) / 9)
+                            }
+                        }
+                        paint.alpha = 255
                     }
                     return
                 }
