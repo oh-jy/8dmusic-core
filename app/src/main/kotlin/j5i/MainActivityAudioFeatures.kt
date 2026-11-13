@@ -27,7 +27,7 @@ internal fun MainActivity.showExportProgress() {
     dialog.show()
 }
 
-internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: Int, startSeconds: Double, durationSeconds: Double, gif: Boolean = false, preview: Boolean = false, smoothGifLoop: Boolean = false, onComplete: () -> Unit = {}) {
+internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: Int, startSeconds: Double, durationSeconds: Double, gif: Boolean = false, preview: Boolean = false, smoothGifLoop: Boolean = false, previewTailSeconds: Int = 0, onComplete: () -> Unit = {}) {
     if (exporting) { showExportProgress(); return }
     val player = service?.player ?: return
     val state = visualizerView.exportState()
@@ -38,38 +38,53 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
     val video = File.createTempFile("8d-export-", if (gif) ".gif" else ".mp4", cacheDir)
     exporting = true
     exportStartedAt = SystemClock.elapsedRealtime()
-    updateExportProgress("准备音频，等待解码完成")
+    var phase = "准备音频，等待解码完成"
+    fun displayProgress() {
+        val elapsed = (SystemClock.elapsedRealtime() - exportStartedAt) / 1000
+        updateExportProgress("$phase · 已用时 ${elapsed} 秒")
+    }
+    val heartbeat = object : Runnable {
+        override fun run() {
+            if (!exporting) return
+            displayProgress()
+            main.postDelayed(this, 1000)
+        }
+    }
+    displayProgress()
+    main.postDelayed(heartbeat, 1000)
     showExportProgress()
     player.export(wav.outputStream(), onProgress = { value -> main.post {
-        updateExportProgress(if (value == 10) "正在预处理音频" else "正在渲染空间音频，请稍候")
+        if (exporting) {
+            phase = if (value == 10) "正在预处理音频" else "正在渲染空间音频"
+            displayProgress()
+        }
     } }, onDone = { ok, message ->
         if (!ok) {
             wav.delete(); video.delete(); if (uri != null) discardPending(uri)
             exportProgressDialog?.dismiss()
-            exporting = false; playbackStatus = message; refreshPlayback(); toast(message)
+            exporting = false; main.removeCallbacks(heartbeat); playbackStatus = message; refreshPlayback(); toast(message)
         } else Thread {
-            exportStartedAt = SystemClock.elapsedRealtime()
             var error: String? = null
             try {
                 var previousProgress = -1
                 val report: (Int) -> Unit = { value ->
-                    if (value / 5 != previousProgress) {
-                        previousProgress = value / 5
+                    if (value != previousProgress) {
+                        previousProgress = value
                         main.post {
-                            val elapsed = (SystemClock.elapsedRealtime() - exportStartedAt) / 1000
-                            val remaining = if (value >= 5) (elapsed * (100 - value) / value).coerceAtLeast(0) else null
-                            val eta = remaining?.let { " · 预计剩余 ${it} 秒" } ?: ""
-                            updateExportProgress("编码${if (gif) "GIF" else "视频"} $value% · 已用时 ${elapsed} 秒$eta")
+                            if (exporting) {
+                                phase = "编码${if (gif) "GIF" else "视频"} $value%"
+                                displayProgress()
+                            }
                         }
                     }
                 }
                 if (gif) GifExport.render(applicationContext, wav, video, state, lyrics, landscape, startSeconds,
                     if (durationSeconds == 0.0) 5.0 else durationSeconds, speed, reversed, smoothGifLoop, report)
                 else VideoExport.render(applicationContext, wav, video,
-                    if (preview) state.copy(creative = state.creative.copy(outroText = "")) else state,
-                    lyrics, landscape, resolution, speed, reversed, startSeconds, durationSeconds, report)
+                    if (preview && previewTailSeconds == 0) state.copy(creative = state.creative.copy(outroText = "")) else state,
+                    lyrics, landscape, resolution, speed, reversed, startSeconds, durationSeconds, previewTailSeconds, report)
                 if (!preview) {
-                    main.post { updateExportProgress("正在保存文件") }
+                    main.post { if (exporting) { phase = "正在保存文件"; displayProgress() } }
                     val stream = contentResolver.openOutputStream(uri ?: error("缺少导出位置")) ?: error("无法创建导出文件")
                     stream.use { output -> video.inputStream().use { it.copyTo(output) } }
                 }
@@ -85,7 +100,7 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
                 } catch (exception: Exception) {
                     if (uri != null) discardPending(uri); video.delete(); playbackStatus = "MP4 保存失败: ${exception.message}"
                 }
-                exporting = false; exportProgressDialog?.dismiss(); refreshPlayback(); toast(playbackStatus)
+                exporting = false; main.removeCallbacks(heartbeat); exportProgressDialog?.dismiss(); refreshPlayback(); toast(playbackStatus)
                 if (saved) {
                     if (preview) showVideoPreview(video)
                     else if (uri != null) showExportedVideoActions(uri, if (gif) "image/gif" else "video/mp4")
@@ -99,11 +114,23 @@ internal fun MainActivity.showVideoPreview(file: File) {
     lateinit var player: android.widget.VideoView
     val dialog = ThemeUi.showSheet(this, palette, "导出预览") {
         player = android.widget.VideoView(this@showVideoPreview)
-        addView(player, android.widget.LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoPreview, 300f)))
+        addView(android.widget.FrameLayout(this@showVideoPreview).apply {
+            addView(player, android.widget.FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER))
+        }, android.widget.LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoPreview, 300f)))
     }
     dialog.setOnDismissListener { player.stopPlayback(); file.delete() }
     player.setVideoPath(file.absolutePath)
-    player.setOnPreparedListener { it.isLooping = true; player.start() }
+    player.setOnPreparedListener { media ->
+        val frame = player.parent as android.widget.FrameLayout
+        frame.post {
+            if (media.videoWidth > 0 && media.videoHeight > 0 && frame.width > 0 && frame.height > 0) {
+                val scale = minOf(frame.width.toFloat() / media.videoWidth, frame.height.toFloat() / media.videoHeight)
+                player.layoutParams = android.widget.FrameLayout.LayoutParams(
+                    (media.videoWidth * scale).toInt(), (media.videoHeight * scale).toInt(), android.view.Gravity.CENTER)
+            }
+        }
+        media.isLooping = true; player.start()
+    }
     player.setOnErrorListener { _, _, _ -> toast("无法播放预览"); dialog.dismiss(); true }
     dialog.show()
 }

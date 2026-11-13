@@ -34,12 +34,12 @@ internal object GifExport {
             val pixels = IntArray(width * height)
             val firstFramePixels = IntArray(width * height)
             val outro = state.creative.outroText.trim().takeIf { it.isNotEmpty() }?.let {
-                ParticleTextOutro(width, height, it, state.creative.outroMotif)
+                ParticleTextOutro(width, height, it, state.creative.outroMotifs, state.creative.outroDuration.toFloat())
             }
             val sceneCount = ((frames * 10 + rate - 1) / rate).toInt()
             val outroCount = if (outro == null) 0 else state.creative.outroDuration * 10
             val count = sceneCount + outroCount
-            var outroBase: Bitmap? = null
+            var outroCaptured = false
             try {
                 output.outputStream().buffered().use { stream ->
                     val encoder = GifEncoder(stream, width, height, 0)
@@ -54,8 +54,9 @@ internal object GifExport {
                             val lyricTime = if (reverse) (totalFrames * 1000.0 / rate * speed).toLong() - position else position
                             view.drawExportFrame(canvas, bytes, bytes.size, frame * 100_000L, lyricTime.coerceAtLeast(0))
                         } else if (outro != null) {
-                            if (outroBase == null) outroBase = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                            canvas.drawBitmap(outroBase!!, 0f, 0f, null)
+                            if (!outroCaptured) { outro.captureOrigins(bitmap); outroCaptured = true }
+                            view.drawExportFrame(canvas, ByteArray(0), 0, frame * 100_000L,
+                                ((first + frames) * 1000.0 / rate * speed).toLong())
                             outro.draw(canvas, (frame - sceneCount) / 10f)
                         }
                         bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
@@ -77,7 +78,7 @@ internal object GifExport {
                     }
                     encoder.finishEncoding()
                 }
-            } finally { outroBase?.recycle(); bitmap.recycle() }
+            } finally { bitmap.recycle() }
         }
     }
 }

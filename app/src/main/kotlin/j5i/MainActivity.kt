@@ -538,6 +538,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         main.removeCallbacks(ticker)
         main.post(ticker)
         scheduleLyricsPrefetch()
+        main.postDelayed({ if (!isFinishing && !isDestroyed && pageActive) checkAppUpdateAutomatically() }, 4000)
     }
 
     override fun onStop() {

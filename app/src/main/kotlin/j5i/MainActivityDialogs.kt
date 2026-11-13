@@ -58,6 +58,13 @@ internal fun MainActivity.showSettingsSheet() {
             addView(settingRow("A", t("language"), languageLabel()) {
                 dialog.dismiss(); showLanguagePicker()
             })
+            addView(settingRow("↑", "更新渠道", if (updateChannel() == "beta") "测试版" else "稳定版") {
+                dialog.dismiss()
+                pickOption("更新渠道", listOf("稳定版", "测试版"), if (updateChannel() == "beta") 1 else 0) { index ->
+                    preferences.edit().putString("updateChannel", if (index == 1) "beta" else "stable").remove("updateLastCheck").apply()
+                    checkAppUpdate()
+                }
+            })
         }
         dialog.show()
     }
@@ -323,6 +330,10 @@ internal fun MainActivity.showInfoSheet() {
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 4f))
             })
+            addView(ThemeUi.button(this@showInfoSheet, palette, "检查更新") {
+                infoDialog?.dismiss()
+                checkAppUpdate()
+            })
             addView(ThemeUi.row(this@showInfoSheet).apply {
                 addView(ThemeUi.text(this@showInfoSheet, t("guide.restart"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                     gravity = Gravity.CENTER_VERTICAL
@@ -423,14 +434,15 @@ internal fun MainActivity.showExportSheet() {
         if (isLive) { toast("电台直播没有完整时间轴，请先录音再导出"); return }
         if (service?.player?.duration ?: 0.0 <= 0.0) { toast("请先加载音频"); return }
         var format = 0
-        var landscape = false
+        var landscape = true
         var resolution = 720
+        var previewSeconds = 5
         val sheet = ThemeUi.showSheet(this, palette, "导出", subtitle = "选择格式与保存位置") {
             val formatRow = ThemeUi.row(this@showExportSheet)
-            val wav = RadioButton(this@showExportSheet).apply { text = "WAV\n无损音质"; textSize = 12f; gravity = Gravity.CENTER }
-            val mp3Btn = RadioButton(this@showExportSheet).apply { text = "MP3\n192 kbps · 体积小"; textSize = 12f; gravity = Gravity.CENTER }
-            val mp4Btn = RadioButton(this@showExportSheet).apply { text = "MP4\n音乐可视化"; textSize = 12f; gravity = Gravity.CENTER }
-            val gifBtn = RadioButton(this@showExportSheet).apply { text = "GIF\n无声动图"; textSize = 12f; gravity = Gravity.CENTER }
+            val wav = RadioButton(this@showExportSheet).apply { text = "WAV\n无损音质"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val mp3Btn = RadioButton(this@showExportSheet).apply { text = "MP3\n192kbps"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val mp4Btn = RadioButton(this@showExportSheet).apply { text = "MP4\n可视化"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val gifBtn = RadioButton(this@showExportSheet).apply { text = "GIF\n无声动图"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
             val orientationRow = ThemeUi.row(this@showExportSheet)
             val portrait = RadioButton(this@showExportSheet).apply { text = "竖屏"; textSize = 12f }
             val horizontal = RadioButton(this@showExportSheet).apply { text = "横屏"; textSize = 12f }
@@ -468,16 +480,38 @@ internal fun MainActivity.showExportSheet() {
                 }
                 return start to length
             }
-            val previewButton = ThemeUi.button(this@showExportSheet, palette, "预览前 2 秒", ThemeUi.ROLE_CONTROL) {
+            val previewDurationButton = ThemeUi.button(this@showExportSheet, palette, "时长 ${previewSeconds}秒", ThemeUi.ROLE_CONTROL) {
+                val options = listOf(2, 5, 10)
+                pickOption("预览时长", options.map { "$it 秒" }, options.indexOf(previewSeconds)) { index ->
+                    previewSeconds = options[index]
+                    (it as android.widget.Button).text = "时长 ${previewSeconds}秒"
+                }
+            }
+            val previewButton = ThemeUi.button(this@showExportSheet, palette, "预览开头", ThemeUi.ROLE_CONTROL) {
                 val selectedClip = clip() ?: return@button
+                val length = if (format == 3 && selectedClip.second == 0.0) 5.0 else selectedClip.second
                 exportMp4(null, landscape, resolution, selectedClip.first,
-                    if (selectedClip.second > 0) minOf(2.0, selectedClip.second) else 2.0, preview = true)
+                    if (length > 0) minOf(previewSeconds.toDouble(), length) else previewSeconds.toDouble(), preview = true)
+            }
+            val previewEndButton = ThemeUi.button(this@showExportSheet, palette, "预览结尾", ThemeUi.ROLE_CONTROL) {
+                val selectedClip = clip() ?: return@button
+                val length = if (format == 3 && selectedClip.second == 0.0) 5.0 else selectedClip.second
+                exportMp4(null, landscape, resolution, selectedClip.first, length, preview = true,
+                    previewTailSeconds = previewSeconds)
             }
             val durationRow = ThemeUi.row(this@showExportSheet)
-            listOf("15 秒" to "15", "30 秒" to "30", "整曲" to "").forEach { (label, seconds) ->
+            val gap = ThemeUi.dp(this@showExportSheet, 4f)
+            listOf("15 秒" to "15", "30 秒" to "30", "整曲" to "").forEachIndexed { index, (label, seconds) ->
                 durationRow.addView(ThemeUi.button(this@showExportSheet, palette, label, ThemeUi.ROLE_CONTROL) {
                     clipDuration.setText(seconds)
-                }, LinearLayout.LayoutParams(0, -2, 1f))
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
+            }
+            val previewRow = ThemeUi.row(this@showExportSheet).apply {
+                listOf(previewButton, previewEndButton, previewDurationButton).forEachIndexed { index, button ->
+                    button.setPadding(gap, 0, gap, 0)
+                    button.isSingleLine = true
+                    addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
+                }
             }
             val hd = RadioButton(this@showExportSheet).apply { text = "720p"; textSize = 12f }
             val fullHd = RadioButton(this@showExportSheet).apply { text = "1080p"; textSize = 12f }
@@ -498,7 +532,7 @@ internal fun MainActivity.showExportSheet() {
                 smoothGifLoop.visibility = if (value == 3) View.VISIBLE else View.GONE
                 creativeButton.visibility = if (value >= 2) View.VISIBLE else View.GONE
                 copyrightHint.visibility = if (value >= 2) View.VISIBLE else View.GONE
-                previewButton.visibility = if (value >= 2) View.VISIBLE else View.GONE
+                previewRow.visibility = if (value >= 2) View.VISIBLE else View.GONE
                 durationRow.visibility = if (value == 2) View.VISIBLE else View.GONE
                 clipDuration.hint = if (value == 3) "时长 1–10 秒（默认 5）" else "时长秒数（留空为整曲）"
                 listOf(wav, mp3Btn, mp4Btn, gifBtn).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
@@ -511,11 +545,14 @@ internal fun MainActivity.showExportSheet() {
             horizontal.setOnClickListener { setOrientation(true) }
             hd.setOnClickListener { setResolution(720) }
             fullHd.setOnClickListener { setResolution(1080) }
-            setOrientation(false); setResolution(720); setFormat(0)
-            formatRow.addView(wav.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
-            formatRow.addView(mp3Btn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
-            formatRow.addView(mp4Btn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
-            formatRow.addView(gifBtn.apply { layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f) })
+            setOrientation(true); setResolution(720); setFormat(0)
+            listOf(wav, mp3Btn, mp4Btn, gifBtn).forEachIndexed { index, button ->
+                button.maxLines = 2
+                button.setAutoSizeTextTypeUniformWithConfiguration(8, 11, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                formatRow.addView(button, LinearLayout.LayoutParams(0, ThemeUi.dp(this@showExportSheet, 54f), 1f).apply {
+                    if (index > 0) marginStart = gap
+                })
+            }
             addView(formatRow)
             orientationRow.addView(portrait, LinearLayout.LayoutParams(0, -2, 1f))
             orientationRow.addView(horizontal, LinearLayout.LayoutParams(0, -2, 1f))
@@ -524,12 +561,12 @@ internal fun MainActivity.showExportSheet() {
             resolutionRow.addView(fullHd, LinearLayout.LayoutParams(0, -2, 1f))
             addView(resolutionRow)
             clipRow.addView(clipStart, LinearLayout.LayoutParams(0, -2, 1f))
-            clipRow.addView(clipDuration, LinearLayout.LayoutParams(0, -2, 1f))
+            clipRow.addView(clipDuration, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gap })
             addView(clipRow)
             addView(smoothGifLoop)
             addView(durationRow)
-            addView(creativeButton)
-            addView(previewButton)
+            addView(creativeButton, LinearLayout.LayoutParams(-1, -2).apply { topMargin = gap })
+            addView(previewRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = gap })
             addView(copyrightHint)
             fun destination(title: String, description: String, actionLabel: String, action: () -> Unit) = ThemeUi.row(this@showExportSheet).apply {
                 background = ThemeUi.bgDrawable(this@showExportSheet, palette.surfaceAlt, 8f)
