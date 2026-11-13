@@ -19,12 +19,14 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 private const val UPDATE_URL = "https://api.github.com/repos/oh-jy/8dmusic-core/releases/latest"
 private const val BETA_UPDATE_URL = "https://api.github.com/repos/oh-jy/8dmusic-core/releases/tags/beta-latest"
 private const val MAX_APK_BYTES = 300L * 1024 * 1024
-private val updateClient = OkHttpClient()
+private val updateClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS)
+    .readTimeout(20, TimeUnit.SECONDS).callTimeout(5, TimeUnit.MINUTES).build()
 private val updateBusy = AtomicBoolean(false)
 
 private fun clientForWifi(wifi: Network): OkHttpClient = updateClient.newBuilder()
@@ -34,6 +36,14 @@ private fun clientForWifi(wifi: Network): OkHttpClient = updateClient.newBuilder
     }).build()
 
 internal data class AppRelease(val version: String, val notes: String, val apkUrl: String?, val sha256: String?)
+
+internal fun updateDownloadSources(apkUrl: String): List<String> {
+    val uri = java.net.URI(apkUrl)
+    require(uri.scheme == "https" && uri.host == "github.com" &&
+        uri.path.startsWith("/oh-jy/8dmusic-core/releases/download/") && uri.userInfo == null && uri.port == -1 &&
+        uri.query == null && uri.fragment == null) { "更新下载地址无效" }
+    return listOf(apkUrl, "https://ghfast.top/$apkUrl", "https://gh-proxy.com/$apkUrl")
+}
 
 internal fun parseAppRelease(json: String, withAsr: Boolean): AppRelease {
     val release = JSONObject(json)
@@ -48,9 +58,7 @@ internal fun parseAppRelease(json: String, withAsr: Boolean): AppRelease {
         val asset = assets.getJSONObject(index)
         if (asset.optString("name") != assetName) continue
         val url = asset.getString("browser_download_url")
-        val uri = java.net.URI(url)
-        require(uri.scheme == "https" && uri.host == "github.com" &&
-            uri.path.startsWith("/oh-jy/8dmusic-core/releases/download/")) { "更新下载地址无效" }
+        updateDownloadSources(url)
         val digest = asset.optString("digest").removePrefix("sha256:")
         require(digest.matches(Regex("[a-fA-F0-9]{64}"))) { "更新包缺少 SHA-256 校验值" }
         return AppRelease(version, release.optString("body").ifBlank { "暂无更新说明" }, url, digest.lowercase())
@@ -218,7 +226,14 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
         val result = runCatching {
             if (validUpdateCache(file, requireNotNull(release.sha256))) return@runCatching
             val client = if (wifi == null) updateClient else clientForWifi(wifi)
-            client.newCall(Request.Builder().url(requireNotNull(release.apkUrl)).build()).execute().use { response ->
+            val sources = updateDownloadSources(requireNotNull(release.apkUrl))
+            var lastError: Exception? = null
+            var completed = false
+            for ((index, source) in sources.withIndex()) {
+                try {
+                    check(wifi == null || activeWifi() == wifi) { "Wi-Fi 已断开，下载已停止" }
+                    if (index > 0) Thread.sleep(500L * index)
+                    client.newCall(Request.Builder().url(source).build()).execute().use { response ->
                 check(response.isSuccessful) { "下载失败 (${response.code})" }
                 val body = response.body ?: error("下载内容为空")
                 val length = body.contentLength()
@@ -251,7 +266,20 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                 check(actual == release.sha256) { "更新包校验失败" }
                 if (file.exists()) check(file.delete()) { "无法替换无效缓存" }
                 check(partial.renameTo(file)) { "无法保存更新包" }
+                    }
+                    completed = true
+                    break
+                } catch (error: Exception) {
+                    partial.delete()
+                    if (error is InterruptedException) {
+                        Thread.currentThread().interrupt()
+                        throw error
+                    }
+                    if (wifi != null && activeWifi() != wifi) throw error
+                    lastError = error
+                }
             }
+            if (!completed) throw lastError ?: IllegalStateException("所有下载源均不可用")
         }
         runOnUiThread {
             updateBusy.set(false)

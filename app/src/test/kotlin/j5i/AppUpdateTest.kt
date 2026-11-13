@@ -20,6 +20,13 @@ class AppUpdateTest {
         assertFalse(isNewerRelease("2.17.9", "2.18.0"))
     }
 
+    @Test fun downloadFallbacksOnlyWrapTrustedGithubRelease() {
+        val url = "https://github.com/oh-jy/8dmusic-core/releases/download/v2.19.0/app-release-no-asr.apk"
+        assertEquals(listOf(url, "https://ghfast.top/$url", "https://gh-proxy.com/$url"), updateDownloadSources(url))
+        assertFailsWith<IllegalArgumentException> { updateDownloadSources("https://github.com.evil.test/oh-jy/8dmusic-core/releases/download/x/a.apk") }
+        assertFailsWith<IllegalArgumentException> { updateDownloadSources("https://github.com/oh-jy/8dmusic-core/releases/download/x/a.apk?token=x") }
+    }
+
     @Test fun matchesVariantAndRequiresTrustedAsset() {
         val result = parseAppRelease(release(), false)
         assertEquals("2.19.0", result.version)
