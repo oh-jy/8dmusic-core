@@ -479,7 +479,7 @@ internal fun MainActivity.refreshPlayback() {
         if (isViewReady(this@refreshPlayback::exportButton)) {
             exportButton.setImageResource(if (!isLive) j5i.spatial8d.R.drawable.ic_export else if (recordingKind == "playback") j5i.spatial8d.R.drawable.ic_record_stop else j5i.spatial8d.R.drawable.ic_record)
             exportButton.imageTintList = ColorStateList.valueOf(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.controlText)
-            exportButton.contentDescription = if (!isLive) "导出当前音频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
+            exportButton.contentDescription = if (!isLive) "导出音频或视频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
         }
         if (isViewReady(this@refreshPlayback::favoriteButton)) {
             favoriteButton.background = null

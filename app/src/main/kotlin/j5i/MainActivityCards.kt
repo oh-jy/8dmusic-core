@@ -532,23 +532,57 @@ internal fun MainActivity.showVisualEffectPicker() {
     dialog.show()
 }
 
-internal fun MainActivity.showVisualCreative() {
+internal fun MainActivity.showVisualCreative(scrollY: Int = 0) {
     var current = visualizerView.creative
     val creativePrefs = getSharedPreferences("visual_creative", android.content.Context.MODE_PRIVATE)
     var lockHue = creativePrefs.getBoolean("lock_hue", false)
     var lockOverlay = creativePrefs.getBoolean("lock_overlay", false)
     lateinit var sheet: android.app.Dialog
+    lateinit var creativeBody: LinearLayout
     sheet = ThemeUi.showSheet(this, palette, "创作设置") {
+        creativeBody = this
+        val gap = ThemeUi.dp(this@showVisualCreative, 6f)
+        fun reopen() {
+            val position = (creativeBody.parent as? android.widget.ScrollView)?.scrollY ?: 0
+            sheet.dismiss()
+            showVisualCreative(position)
+        }
+        fun section(label: String) {
+            addView(ThemeUi.text(this@showVisualCreative, label, 14f, palette, bold = true, role = ThemeUi.ROLE_TEXT).apply {
+                setPadding(0, gap * 2, 0, gap)
+            })
+        }
+        fun addActions(vararg buttons: android.widget.Button) {
+            addView(ThemeUi.row(this@showVisualCreative).apply {
+                buttons.forEachIndexed { index, button ->
+                    button.setPadding(gap, 0, gap, 0)
+                    addView(button, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
+                }
+            }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = gap })
+        }
+        addView(ThemeUi.button(this@showVisualCreative, palette, "恢复默认创作配置", ThemeUi.ROLE_CONTROL) {
+            current = VisualCreative()
+            visualizerView.setCreative(current)
+            visualizerView.setCreativeBackground(null)
+            lockHue = false
+            lockOverlay = false
+            creativePrefs.edit().remove("lock_hue").remove("lock_overlay").apply()
+            toast("已恢复默认创作配置")
+            reopen()
+        })
+        section("画面与色彩")
         val colors = ThemeUi.row(this@showVisualCreative)
-        listOf("原色" to 0, "冷色" to 180, "暖色" to 45, "梦幻" to 280).forEach { (label, hue) ->
+        lateinit var hueSlider: android.widget.SeekBar
+        listOf("原色" to 0, "冷色" to 180, "暖色" to 45, "梦幻" to 280).forEachIndexed { index, (label, hue) ->
             colors.addView(ThemeUi.button(this@showVisualCreative, palette, label, ThemeUi.ROLE_CONTROL) {
                 current = current.copy(hue = hue); visualizerView.setCreative(current)
-                sheet.dismiss(); showVisualCreative()
-            }, LinearLayout.LayoutParams(0, -2, 1f))
+                hueSlider.progress = hue
+            }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
         }
         addView(colors)
         addView(ThemeUi.text(this@showVisualCreative, "色彩", 13f, palette))
         addView(android.widget.SeekBar(this@showVisualCreative).apply {
+            hueSlider = this
             max = 359
             progress = current.hue
             progressTintList = android.content.res.ColorStateList.valueOf(palette.accent)
@@ -584,6 +618,14 @@ internal fun MainActivity.showVisualCreative() {
         val intensityLabel = when (activeMode) { 17 -> "山体起伏"; 8, 34 -> "星光强度"; 6, 22 -> "水波强度"; else -> "音乐响应强度" }
         slider(densityLabel, 25, 200, current.density) { current = current.copy(density = it) }
         slider(intensityLabel, 25, 200, current.intensity) { current = current.copy(intensity = it) }
+        section("背景图片")
+        val chooseBackground = ThemeUi.button(this@showVisualCreative, palette, "选择图片", ThemeUi.ROLE_CONTROL) {
+            sheet.dismiss(); openVisualImage.launch(arrayOf("image/*"))
+        }
+        val removeBackground = ThemeUi.button(this@showVisualCreative, palette, "移除图片", ThemeUi.ROLE_CONTROL) {
+            visualizerView.setCreativeBackground(null)
+        }
+        addActions(chooseBackground, removeBackground)
         slider("背景图片不透明度", 0, 100, current.backgroundAlpha) { current = current.copy(backgroundAlpha = it) }
         slider("背景图片柔焦", 0, 24, current.backgroundBlur) { current = current.copy(backgroundBlur = it) }
         addView(android.widget.CheckBox(this@showVisualCreative).apply {
@@ -592,16 +634,17 @@ internal fun MainActivity.showVisualCreative() {
             isChecked = current.backgroundMask
             setOnCheckedChangeListener { _, checked -> current = current.copy(backgroundMask = checked); visualizerView.setCreative(current) }
         })
-        addView(ThemeUi.text(this@showVisualCreative, "叠加效果", 13f, palette))
+        section("叠加效果")
         val options = listOf("无" to 0, "落叶" to 18, "雪花" to 19, "音符" to 30)
         val overlayRow = ThemeUi.row(this@showVisualCreative)
-        options.forEach { (label, id) ->
+        options.forEachIndexed { index, (label, id) ->
             overlayRow.addView(ThemeUi.button(this@showVisualCreative, palette, label, ThemeUi.ROLE_CONTROL) {
                 current = current.copy(overlay = id); visualizerView.setCreative(current)
-                sheet.dismiss(); showVisualCreative()
-            }.apply { alpha = if (current.overlay == id) 1f else .6f }, LinearLayout.LayoutParams(0, -2, 1f))
+                for (child in 0 until overlayRow.childCount) overlayRow.getChildAt(child).alpha = if (child == index) 1f else .6f
+            }.apply { alpha = if (current.overlay == id) 1f else .6f }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
         }
         addView(overlayRow)
+        section("导出角标")
         addView(android.widget.CheckBox(this@showVisualCreative).apply {
             text = "导出时显示 8D Music 角标"
             setTextColor(palette.text)
@@ -613,30 +656,57 @@ internal fun MainActivity.showVisualCreative() {
         addView(ThemeUi.button(this@showVisualCreative, palette, "角标位置：${positions[current.watermarkPosition]}", ThemeUi.ROLE_CONTROL) {
             pickOption("角标位置", positions, current.watermarkPosition) { index ->
                 current = current.copy(watermarkPosition = index); visualizerView.setCreative(current)
-                sheet.dismiss(); showVisualCreative()
+                (it as android.widget.Button).text = "角标位置：${positions[index]}"
             }
         })
-        val watermarkText = ThemeUi.input(this@showVisualCreative, palette, "宣传短句（最多 32 字）").apply { setText(current.watermarkText) }
+        val watermarkText = ThemeUi.input(this@showVisualCreative, palette, "角标文字（最多 32 字）").apply {
+            setText(current.watermarkText)
+            filters = arrayOf(android.text.InputFilter.LengthFilter(32))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    current = current.copy(watermarkText = s?.toString()?.trim().orEmpty().ifEmpty { "8D Music" })
+                    visualizerView.setCreative(current)
+                }
+                override fun afterTextChanged(s: android.text.Editable?) = Unit
+            })
+        }
         addView(watermarkText)
-        addView(ThemeUi.button(this@showVisualCreative, palette, "应用角标文字", ThemeUi.ROLE_CONTROL) {
-            current = current.copy(watermarkText = watermarkText.text.toString().trim().take(32).ifEmpty { "8D Music" })
-            visualizerView.setCreative(current); sheet.dismiss(); showVisualCreative()
-        })
-        val outroText = ThemeUi.input(this@showVisualCreative, palette, "片尾粒子文字（最多 24 字）").apply {
+        section("片尾文字")
+        addView(ThemeUi.text(this@showVisualCreative, "填写后将在视频或动图结尾由粒子汇聚成文字；留空则不添加片尾。", 12f, palette, role = ThemeUi.ROLE_SUB))
+        val outroText = ThemeUi.input(this@showVisualCreative, palette, "输入片尾文字（最多 24 字）").apply {
             setText(current.outroText)
             filters = arrayOf(android.text.InputFilter.LengthFilter(24))
+            addTextChangedListener(object : android.text.TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    current = current.copy(outroText = s?.toString().orEmpty())
+                    visualizerView.setCreative(current)
+                }
+                override fun afterTextChanged(s: android.text.Editable?) = Unit
+            })
         }
         addView(outroText)
-        val motifs = listOf("雪花" to 1, "水滴" to 2, "混合雪花·水滴·星星" to 3)
-        addView(ThemeUi.button(this@showVisualCreative, palette,
-            "片尾粒子：${motifs.first { it.second == current.outroMotif }.first}", ThemeUi.ROLE_CONTROL) {
-            current = current.copy(outroText = outroText.text.toString().trim().take(24))
-            visualizerView.setCreative(current)
-            pickOption("片尾粒子", motifs.map { it.first }, motifs.indexOfFirst { it.second == current.outroMotif }) { index ->
-                current = current.copy(outroMotif = motifs[index].second)
-                visualizerView.setCreative(current)
-                sheet.dismiss(); showVisualCreative()
-            }
+        addView(ThemeUi.text(this@showVisualCreative, "片尾粒子（可多选）", 13f, palette))
+        val motifs = listOf("星星" to 4, "音符" to 8, "树叶" to 16, "水滴" to 2, "雪花" to 1)
+        addView(ThemeUi.row(this@showVisualCreative).apply {
+                motifs.forEachIndexed { index, (label, flag) ->
+                    addView(android.widget.CheckBox(this@showVisualCreative).apply {
+                        text = label; textSize = 10f; setTextColor(palette.text); setPadding(0, 0, 0, 0)
+                        isSingleLine = true
+                        setAutoSizeTextTypeUniformWithConfiguration(8, 10, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                        buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+                        isChecked = current.outroMotifs and flag != 0
+                        setOnCheckedChangeListener { button, checked ->
+                            val selected = if (checked) current.outroMotifs or flag else current.outroMotifs and flag.inv()
+                            if (selected == 0) { button.isChecked = true; toast("请至少选择一种粒子") }
+                            else {
+                                current = current.copy(outroMotifs = selected, outroText = outroText.text.toString().trim().take(24))
+                                visualizerView.setCreative(current)
+                            }
+                        }
+                    }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = ThemeUi.dp(context, 2f) })
+                }
         })
         addView(ThemeUi.button(this@showVisualCreative, palette, "片尾时长：${current.outroDuration} 秒", ThemeUi.ROLE_CONTROL) {
             current = current.copy(outroText = outroText.text.toString().trim().take(24))
@@ -645,30 +715,10 @@ internal fun MainActivity.showVisualCreative() {
             pickOption("片尾时长", durations.map { "$it 秒" }, durations.indexOf(current.outroDuration)) { index ->
                 current = current.copy(outroDuration = durations[index])
                 visualizerView.setCreative(current)
-                sheet.dismiss(); showVisualCreative()
+                (it as android.widget.Button).text = "片尾时长：${durations[index]} 秒"
             }
         })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "应用片尾文字", ThemeUi.ROLE_CONTROL) {
-            current = current.copy(outroText = outroText.text.toString().trim().take(24))
-            visualizerView.setCreative(current)
-            sheet.dismiss(); showVisualCreative()
-        })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "选择背景图片", ThemeUi.ROLE_CONTROL) {
-            sheet.dismiss(); openVisualImage.launch(arrayOf("image/*"))
-        })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "移除背景图片", ThemeUi.ROLE_CONTROL) {
-            visualizerView.setCreativeBackground(null)
-        })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "恢复默认创作配置", ThemeUi.ROLE_CONTROL) {
-            current = VisualCreative()
-            visualizerView.setCreative(current)
-            visualizerView.setCreativeBackground(null)
-            lockHue = false
-            lockOverlay = false
-            creativePrefs.edit().remove("lock_hue").remove("lock_overlay").apply()
-            sheet.dismiss()
-            showVisualCreative()
-        })
+        section("随机与配方")
         addView(android.widget.CheckBox(this@showVisualCreative).apply {
             text = "随机时锁定配色"; setTextColor(palette.text)
             buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent); isChecked = lockHue
@@ -679,16 +729,19 @@ internal fun MainActivity.showVisualCreative() {
             buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent); isChecked = lockOverlay
             setOnCheckedChangeListener { _, checked -> lockOverlay = checked; creativePrefs.edit().putBoolean("lock_overlay", checked).apply() }
         })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "随机灵感", ThemeUi.ROLE_CONTROL) {
+        val randomize = ThemeUi.button(this@showVisualCreative, palette, "随机灵感", ThemeUi.ROLE_CONTROL) {
             current = current.copy(hue = if (lockHue) current.hue else kotlin.random.Random.nextInt(360),
                 overlay = if (lockOverlay) current.overlay else options.random().second)
-            visualizerView.setCreative(current); sheet.dismiss(); showVisualCreative()
-        })
-        addView(ThemeUi.button(this@showVisualCreative, palette, "分享配方", ThemeUi.ROLE_CONTROL) {
+            visualizerView.setCreative(current)
+            hueSlider.progress = current.hue
+            for (index in 0 until overlayRow.childCount) overlayRow.getChildAt(index).alpha = if (options[index].second == current.overlay) 1f else .6f
+        }
+        val shareRecipe = ThemeUi.button(this@showVisualCreative, palette, "分享配方", ThemeUi.ROLE_CONTROL) {
             val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
                 .putExtra(android.content.Intent.EXTRA_TEXT, current.copy(mode = visualizerView.visualState.let { if (it.first) it.second else 0 }).encode())
             startActivity(android.content.Intent.createChooser(send, "分享创作配方"))
-        })
+        }
+        addActions(randomize, shareRecipe)
         val recipe = ThemeUi.input(this@showVisualCreative, palette, "粘贴创作配方")
         addView(recipe)
         addView(ThemeUi.button(this@showVisualCreative, palette, "导入配方", ThemeUi.ROLE_CONTROL) {
@@ -697,12 +750,19 @@ internal fun MainActivity.showVisualCreative() {
                     current = it.copy(mode = null)
                     visualizerView.setCreative(current)
                     it.mode?.let { mode -> visualizerView.restoreVisualState((mode != 0) to mode) }
-                    sheet.dismiss(); showVisualCreative()
+                    reopen()
                 }
                 .onFailure { toast("配方无效") }
         })
+        for (index in 1 until childCount) {
+            val child = getChildAt(index)
+            if (child is android.widget.Button) {
+                (child.layoutParams as? LinearLayout.LayoutParams)?.let { it.topMargin = gap; child.layoutParams = it }
+            }
+        }
     }
     sheet.show()
+    if (scrollY > 0) creativeBody.post { (creativeBody.parent as? android.widget.ScrollView)?.scrollTo(0, scrollY) }
 }
 
 internal fun MainActivity.showVisualLayerPicker() {

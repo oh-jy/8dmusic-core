@@ -5,6 +5,7 @@ import kotlin.math.sin
 
 internal val exclusiveVisualModes = listOf(
     "visual.spectral" to 1, "visual.pcm" to 4, "visual.particles" to 2, "visual.travel" to 3, "visual.dream" to 34,
+    "visual.morphmesh" to 35, "visual.ringtunnel" to 36, "visual.field" to 37,
     "visual.rain" to 13, "visual.starburst" to 14, "visual.filaments" to 15,
     "visual.orbits" to 16, "visual.seasons" to 17,
     "visual.3d" to 5, "visual.water" to 6, "visual.strings" to 7,
@@ -21,8 +22,8 @@ internal val exclusiveVisualModes = listOf(
 internal val visualModeGroups = listOf(
     "visual.group.analysis" to setOf(1, 4, 5, 7, 11),
     "visual.group.nature" to setOf(6, 13, 17, 18, 19, 20, 21, 23, 25),
-    "visual.group.cosmic" to setOf(2, 3, 8, 10, 14, 16, 26, 27, 29, 34),
-    "visual.group.abstract" to setOf(12, 15, 22, 28, 30, 31, 32, 33)
+    "visual.group.cosmic" to setOf(2, 3, 8, 10, 14, 16, 26, 27, 29, 34, 36, 37),
+    "visual.group.abstract" to setOf(12, 15, 22, 28, 30, 31, 32, 33, 35)
 )
 
 internal fun nextVisualMode(current: Int, forward: Boolean): Int {
@@ -42,6 +43,16 @@ internal fun nextVisualizerState(exclusive: Boolean, mode: Int, forward: Boolean
 
 internal fun videoFrameCount(durationUs: Long): Long = (durationUs * 30 + 999_999) / 1_000_000
 internal fun videoFrameTimeUs(frame: Long): Long = frame * 1_000_000 / 30
+internal fun outroFormationProgress(elapsed: Float, duration: Float): Float {
+    val progress = (elapsed / (duration * .85f).coerceAtLeast(.1f)).coerceIn(0f, 1f)
+    return progress * progress * (3f - 2f * progress)
+}
+
+internal fun videoPreviewTail(first: Long, frames: Long, sampleRate: Int, seconds: Int): Pair<Long, Long> {
+    require(first >= 0 && frames > 0 && sampleRate > 0 && seconds > 0)
+    val length = minOf(frames, seconds.toLong() * sampleRate)
+    return first + frames - length to length
+}
 
 internal fun videoClipFrames(totalFrames: Long, sampleRate: Int, startSeconds: Double, durationSeconds: Double): Pair<Long, Long> {
     require(totalFrames > 0 && sampleRate > 0 && startSeconds.isFinite() && durationSeconds.isFinite())

@@ -7,9 +7,29 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun flowerProjectionHasDepthAndPerspective() {
+        val near = projectFlowerPoint(.4, .2, .5, .8, 100f)
+        val far = projectFlowerPoint(.4, .2, -.5, .8, 100f)
+        assertTrue(near.depth > far.depth)
+        assertTrue(near.x > far.x)
+        assertTrue(near.y != far.y)
+    }
+    @Test fun flowersMoveAndBloomIndependentlyWithoutJumps() {
+        val flowers = (0..4).map { flowerMotion(it, 10.0) }
+        assertTrue(flowers.map { it.opening }.toSet().size > 3)
+        assertTrue(flowers.map { it.x to it.y }.toSet().size == 5)
+        assertTrue((0..4).all { flowerMotion(it, 10.0) != flowerMotion(it, 40.0) })
+        for (index in 0..4) for (step in 0..1000) {
+            val before = flowerMotion(index, step * .1)
+            val after = flowerMotion(index, step * .1 + .001)
+            assertTrue(abs(before.x - after.x) < .002)
+            assertTrue(abs(before.y - after.y) < .002)
+            assertTrue(abs(before.opening - after.opening) < .002)
+        }
+    }
     @Test fun rainAndFollowingEffectsComeImmediatelyAfterTravel() {
-        assertEquals(listOf(3, 34, 13, 14, 15, 16, 17, 5),
-            exclusiveVisualModes.map { it.second }.drop(3).take(8))
+        assertEquals(listOf(3, 34, 35, 36, 37, 13, 14, 15, 16, 17, 5),
+            exclusiveVisualModes.map { it.second }.drop(3).take(11))
     }
     @Test fun dreamScenesChangeSmoothlyOverTime() {
         assertEquals(0f, dreamBlend(0.0))
@@ -69,6 +89,17 @@ class VisualEffectsTest {
         assertEquals(96_000L to 384_000L, videoClipFrames(480_000, 48_000, 2.0, 0.0))
         assertFailsWith<IllegalArgumentException> { videoClipFrames(480_000, 48_000, 10.0, 1.0) }
     }
+    @Test fun previewTailStaysWithinSelectedClip() {
+        assertEquals(336_000L to 96_000L, videoPreviewTail(96_000, 336_000, 48_000, 2))
+        assertEquals(96_000L to 48_000L, videoPreviewTail(96_000, 48_000, 48_000, 5))
+        assertFailsWith<IllegalArgumentException> { videoPreviewTail(0, 48_000, 48_000, 0) }
+    }
+    @Test fun outroFormationUsesConfiguredDuration() {
+        assertEquals(0f, outroFormationProgress(0f, 5f))
+        assertTrue(outroFormationProgress(1f, 5f) < .25f)
+        assertTrue(outroFormationProgress(2.5f, 5f) < 1f)
+        assertEquals(1f, outroFormationProgress(5f, 5f))
+    }
     @Test fun creativeRecipesRoundTripAndRejectInvalidValues() {
         val original = VisualCreative(hue = 125, overlay = 19, watermark = true, mode = 3,
             intensity = 145, backgroundMask = true, watermarkText = "听见星河")
@@ -76,6 +107,11 @@ class VisualEffectsTest {
         assertEquals(100, VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0}").intensity)
         assertEquals("", VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0}").outroText)
         assertEquals(0, VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0}").backgroundBlur)
+        assertEquals(1, VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0,\"outroMotif\":1}").outroMotifs)
+        assertEquals(2, VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0,\"outroMotif\":2}").outroMotifs)
+        assertEquals(7, VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0,\"outroMotif\":3}").outroMotifs)
+        assertEquals(28, VisualCreative.decode(VisualCreative(outroMotifs = 28).encode()).outroMotifs)
+        assertFailsWith<IllegalArgumentException> { VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0,\"outroMotifs\":0}") }
         assertFailsWith<IllegalArgumentException> { VisualCreative.decode("{\"version\":1,\"hue\":999,\"overlay\":0}") }
         assertFailsWith<IllegalArgumentException> { VisualCreative.decode("{\"version\":1,\"hue\":0,\"overlay\":0,\"mode\":999}") }
     }
@@ -118,7 +154,7 @@ class VisualEffectsTest {
 
     @Test fun drivingCyclesThroughEveryEffectInBothDirections() {
         val modes = exclusiveVisualModes.map { it.second }
-        assertEquals((1..34).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
+        assertEquals((1..37).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
         assertEquals(modes.toSet(), visualModeGroups.flatMap { it.second }.toSet())
         assertEquals(modes.size, visualModeGroups.sumOf { it.second.size })
         var current = 3

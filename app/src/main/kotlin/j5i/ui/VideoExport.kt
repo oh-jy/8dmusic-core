@@ -19,7 +19,7 @@ import com.j5i.spatial8d.VideoPixels
 internal object VideoExport {
     fun render(context: Context, wav: File, output: File, state: VisualizerView.ExportState,
         lyrics: LyricsResult?, landscape: Boolean, resolution: Int, speed: Double, reverse: Boolean,
-        startSeconds: Double, durationSeconds: Double,
+        startSeconds: Double, durationSeconds: Double, previewTailSeconds: Int = 0,
         progress: (Int) -> Unit) {
         if (Looper.myLooper() == null) Looper.prepare()
         RandomAccessFile(wav, "r").use { input ->
@@ -28,7 +28,9 @@ internal object VideoExport {
             val rate = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN).getInt(24)
             require(rate > 0 && input.length() > 44 && header.copyOfRange(0, 4).contentEquals("RIFF".toByteArray()))
             val totalFrames = (input.length() - 44) / 4
-            val (firstFrame, frames) = videoClipFrames(totalFrames, rate, startSeconds, durationSeconds)
+            val (clipStart, clipFrames) = videoClipFrames(totalFrames, rate, startSeconds, durationSeconds)
+            val (firstFrame, frames) = if (previewTailSeconds > 0) videoPreviewTail(clipStart, clipFrames, rate, previewTailSeconds)
+                else clipStart to clipFrames
             val durationUs = frames * 1_000_000L / rate
             require(resolution == 720 || resolution == 1080)
             val longSide = if (resolution == 1080) 1920 else 1280
@@ -38,11 +40,10 @@ internal object VideoExport {
             view.prepareExport(state, lyrics, width, height, rate)
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
-            val pixels = IntArray(width * height)
             val video = File.createTempFile("8d-video-", ".mp4", context.cacheDir)
             val audio = File.createTempFile("8d-audio-", ".mp4", context.cacheDir)
             val started = android.os.SystemClock.elapsedRealtime()
-            var outroBase: Bitmap? = null
+            var outroCaptured = false
             try {
                 fun videoFormat(color: Int) = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
@@ -52,25 +53,25 @@ internal object VideoExport {
                 }
                 val sceneCount = videoFrameCount(durationUs).toInt()
                 val outro = state.creative.outroText.trim().takeIf { it.isNotEmpty() }?.let {
-                    ParticleTextOutro(width, height, it, state.creative.outroMotif)
+                    ParticleTextOutro(width, height, it, state.creative.outroMotifs, state.creative.outroDuration.toFloat())
                 }
                 val outroFrames = if (outro == null) 0 else videoFrameCount(state.creative.outroDuration * 1_000_000L).toInt()
                 val count = sceneCount + outroFrames
+                val pcm = ByteArray(4096)
                 fun drawFrame(frame: Int): Long {
                     val timeUs = videoFrameTimeUs(frame.toLong())
                     val sceneTimeUs = timeUs.coerceAtMost((durationUs - 1).coerceAtLeast(0))
                     val sampleFrame = sceneTimeUs * rate / 1_000_000
                     val sampleBytes = minOf(4096L, (frames - sampleFrame).coerceAtLeast(0) * 4).toInt()
                     if (frame < sceneCount) {
-                        val pcm = ByteArray(sampleBytes)
                         input.seek(44 + (firstFrame + sampleFrame) * 4)
-                        input.readFully(pcm)
+                        input.readFully(pcm, 0, sampleBytes)
                         val position = ((timeUs / 1000.0 + firstFrame * 1000.0 / rate) * speed).toLong()
                         val lyricTime = if (reverse) ((totalFrames * 1000.0 / rate * speed).toLong() - position).coerceAtLeast(0) else position
-                        view.drawExportFrame(canvas, pcm, pcm.size, timeUs, lyricTime)
+                        view.drawExportFrame(canvas, pcm, sampleBytes, timeUs, lyricTime)
                     } else if (outro != null) {
-                        if (outroBase == null) outroBase = bitmap.copy(Bitmap.Config.ARGB_8888, false)
-                        canvas.drawBitmap(outroBase!!, 0f, 0f, null)
+                        if (!outroCaptured) { outro.captureOrigins(bitmap); outroCaptured = true }
+                        view.drawExportFrame(canvas, pcm, 0, timeUs, ((firstFrame + frames) * 1000.0 / rate * speed).toLong())
                         outro.draw(canvas, (frame - sceneCount) / 30f)
                     }
                     progress(frame * 75 / count.coerceAtLeast(1))
@@ -82,10 +83,10 @@ internal object VideoExport {
                 } catch (exception: Exception) {
                     android.util.Log.w("8DExport", "surface encoder failed, retrying YUV", exception)
                     video.delete()
-                    outroBase?.recycle()
-                    outroBase = null
+                    outroCaptured = false
                     view = VisualizerView(context)
                     view.prepareExport(state, lyrics, width, height, rate)
+                    val pixels = IntArray(width * height)
                     encode(video, videoFormat(MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), count) { codec, index, frame ->
                     val timeUs = drawFrame(frame)
                     bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
@@ -125,7 +126,6 @@ internal object VideoExport {
                 android.util.Log.i("8DExport", "video and audio complete elapsedMs=${android.os.SystemClock.elapsedRealtime() - started}")
                 progress(100)
             } finally {
-                outroBase?.recycle()
                 bitmap.recycle()
                 video.delete()
                 audio.delete()

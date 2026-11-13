@@ -411,6 +411,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private val particlePaths = Array(4) { Path() }
         private val travelPaths = Array(4) { Path() }
         private val dreamPaths = Array(6) { Path() }
+        private val proceduralVisuals = ProceduralVisuals()
         private val dreamStreaks = Path()
         private val dreamRandom = java.util.Random(970813L)
         private val dreamAngle = FloatArray(1200) { dreamRandom.nextFloat() * 2f * PI.toFloat() }
@@ -686,6 +687,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> drawParticles(c)
                     3 -> drawTravel(c)
                     34 -> drawDream(c)
+                    in 35..37 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
+                        delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f)
                     5 -> drawSpectrumTerrain(c)
                     6 -> drawWater(c)
                     7 -> drawStrings(c)
@@ -745,6 +748,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> "visual.particles"
                     3 -> "visual.travel"
                     34 -> "visual.dream"
+                    in 35..37 -> exclusiveVisualModes.first { it.second == mode }.first
                     5 -> "visual.3d.title"
                     6 -> "visual.water.title"
                     7 -> "visual.strings.title"
