@@ -3,9 +3,14 @@ package j5i.spatial8d.ui
 import kotlin.math.PI
 import kotlin.math.sin
 
+internal val graphStyleKeys = listOf("graph.style.original", "graph.style.wave", "graph.style.mirror",
+    "graph.style.lines", "graph.style.dots", "graph.style.bars", "graph.style.segments",
+    "graph.style.spectrumdots", "graph.style.mirrorspectrum", "graph.style.ribbon",
+    "graph.style.multiline", "graph.style.particles", "graph.style.envelope")
+
 internal val exclusiveVisualModes = listOf(
     "visual.spectral" to 1, "visual.pcm" to 4, "visual.particles" to 2, "visual.travel" to 3, "visual.dream" to 34,
-    "visual.morphmesh" to 35, "visual.ringtunnel" to 36, "visual.field" to 37,
+    "visual.stardustforms" to 38, "visual.morphmesh" to 35, "visual.ringtunnel" to 36, "visual.field" to 37,
     "visual.rain" to 13, "visual.starburst" to 14, "visual.filaments" to 15,
     "visual.orbits" to 16, "visual.seasons" to 17,
     "visual.3d" to 5, "visual.water" to 6, "visual.strings" to 7,
@@ -22,7 +27,7 @@ internal val exclusiveVisualModes = listOf(
 internal val visualModeGroups = listOf(
     "visual.group.analysis" to setOf(1, 4, 5, 7, 11),
     "visual.group.nature" to setOf(6, 13, 17, 18, 19, 20, 21, 23, 25),
-    "visual.group.cosmic" to setOf(2, 3, 8, 10, 14, 16, 26, 27, 29, 34, 36, 37),
+    "visual.group.cosmic" to setOf(2, 3, 8, 10, 14, 16, 26, 27, 29, 34, 36, 37, 38),
     "visual.group.abstract" to setOf(12, 15, 22, 28, 30, 31, 32, 33, 35)
 )
 

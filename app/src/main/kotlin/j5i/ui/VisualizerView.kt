@@ -23,6 +23,9 @@ import android.view.MotionEvent
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.FrameLayout
+import android.widget.Spinner
+import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.graphics.drawable.ColorDrawable
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -167,6 +170,20 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         return true
     }
     private val graphView = WaveformView(context)
+    private val graphStyle = Spinner(context).apply {
+        adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, graphStyleKeys.map { t(it) }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        setSelection(creativePreferences.getInt("graph_style", 0).coerceIn(graphStyleKeys.indices))
+        graphView.style = selectedItemPosition
+        onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                graphView.style = position
+                creativePreferences.edit().putInt("graph_style", position).apply()
+            }
+        }
+    }
     private val lyricOverlay = LyricOverlay(context, pcmClock)
     private var exclusive = false
     private var visualMode = 0
@@ -213,6 +230,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         graphView.setOnTouchListener { _, event -> handleCanvasTouch(event) }
         stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
         stage.addView(lyricOverlay, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(graphStyle, FrameLayout.LayoutParams(dp(126f), dp(40f), Gravity.TOP or Gravity.START))
         stage.addView(effectButton, FrameLayout.LayoutParams(-2, dp(44f), Gravity.TOP or Gravity.END).apply {
             rightMargin = dp(4f); topMargin = dp(2f)
         })
@@ -246,10 +264,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
     internal data class ExportState(
         val exclusive: Boolean, val mode: Int, val layers: BooleanArray,
-        val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?
+        val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?, val graphStyle: Int
     )
     internal fun exportState() = ExportState(exclusive, visualMode, layers.copyOf(), singleVisualLayer,
-        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground)
+        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style)
 
     internal fun prepareExport(state: ExportState, lyrics: LyricsResult?, width: Int, height: Int, sampleRate: Int) {
         dark = state.dark
@@ -264,6 +282,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.exporting = true
         canvas.immersive = true
         canvas.sampleRate = sampleRate
+        graphView.style = state.graphStyle
+        graphStyle.visibility = View.GONE
         effectButton.visibility = View.GONE
         setLyrics(lyrics)
         measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
@@ -273,7 +293,10 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     internal fun drawExportFrame(target: Canvas, data: ByteArray, bytes: Int, timeUs: Long, lyricPositionMs: Long) {
         pcmClock.acceptOffline(data, bytes, timeUs)
         canvas.acceptOffline(data, bytes)
-        if (graphView.visibility == View.VISIBLE) graphView.accept(data, bytes)
+        if (graphView.visibility == View.VISIBLE) {
+            graphView.accept(data, bytes)
+            graphView.setSpectrum(canvas.spectrumSnapshot())
+        }
         lyricOverlay.setPosition(lyricPositionMs)
         canvas.visualPositionMs = lyricPositionMs
         target.drawColor((canvas.exportPalette ?: ThemeUi.palette(dark)).surface)
@@ -295,6 +318,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
             if (latest != null && isAttachedToWindow) {
                 canvas.accept(latest, latest.size)
                 graphView.accept(latest, latest.size)
+                if (graphView.visibility == View.VISIBLE) graphView.setSpectrum(canvas.spectrumSnapshot())
                 consumedPcm++
             }
             diagnoseRender()
@@ -347,6 +371,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.singleLayer = singleVisualLayer
         graphView.dark = dark
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
+        graphStyle.visibility = if (graphView.visibility == View.VISIBLE && !canvas.exporting) View.VISIBLE else View.GONE
         canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
         lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
@@ -376,6 +401,12 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
     private fun restyle() {
         val palette = ThemeUi.palette(dark)
+        val selectedGraphStyle = graphView.style
+        graphStyle.adapter = ArrayAdapter(context, android.R.layout.simple_spinner_item, graphStyleKeys.map { t(it) }).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        ThemeUi.configureSpinner(graphStyle, palette)
+        graphStyle.setSelection(selectedGraphStyle)
         effectButton.setTextColor(palette.text)
         ThemeUi.bg(effectButton, palette.surface, 8f)
     }
@@ -405,6 +436,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private var correlation = .0
         private var phase = 0f
         private val spectrum = DoubleArray(256)
+        fun spectrumSnapshot(): DoubleArray = synchronized(analysisLock) { spectrum.copyOf() }
         private val spectrogramRows = ArrayDeque<IntArray>()
         private var spectrogramGeneration = pcmClock.generation
         private var lastSpectrogramAt = 0L
@@ -687,7 +719,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> drawParticles(c)
                     3 -> drawTravel(c)
                     34 -> drawDream(c)
-                    in 35..37 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
+                    in 35..38 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
                         delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f)
                     5 -> drawSpectrumTerrain(c)
                     6 -> drawWater(c)
@@ -748,7 +780,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> "visual.particles"
                     3 -> "visual.travel"
                     34 -> "visual.dream"
-                    in 35..37 -> exclusiveVisualModes.first { it.second == mode }.first
+                    in 35..38 -> exclusiveVisualModes.first { it.second == mode }.first
                     5 -> "visual.3d.title"
                     6 -> "visual.water.title"
                     7 -> "visual.strings.title"

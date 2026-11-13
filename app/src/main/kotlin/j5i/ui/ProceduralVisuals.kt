@@ -1,6 +1,7 @@
 package j5i.spatial8d.ui
 
 import android.graphics.Canvas
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
@@ -10,7 +11,7 @@ import kotlin.math.floor
 import kotlin.math.min
 import kotlin.math.sin
 
-internal data class FlowerMotion(val x: Double, val y: Double, val size: Double, val opening: Double, val phase: Double)
+internal data class FlowerMotion(val x: Double, val y: Double, val size: Double, val opening: Double, val phase: Double, val rotation: Double)
 internal data class FlowerPoint(val x: Float, val y: Float, val depth: Double)
 private data class FlowerPetal(val base: FlowerPoint, val left: FlowerPoint, val tip: FlowerPoint,
     val right: FlowerPoint, val hue: Float, val depth: Double, val layer: Int)
@@ -45,22 +46,48 @@ internal fun flowerMotion(index: Int, time: Double): FlowerMotion {
         phase < .72 -> 1.0
         else -> 1.0 - flowerEase((phase - .72) / .28)
     }
-    return FlowerMotion((between(3) - .5) * .85, (between(4) - .5) * .75,
-        .36 + between(5) * .47, opening, flowerRandom(index, 0, 6) * 2 * PI)
+    return FlowerMotion((between(3) - .5) * 1.6, (between(4) - .5) * 1.6,
+        .22 + between(5) * .10, opening, flowerRandom(index, 0, 6) * 2 * PI,
+        (between(7) - .5) * 2 * PI)
 }
 
 internal fun flowerPosition(index: Int, time: Double): Pair<Double, Double> {
     val motion = flowerMotion(index, time)
-    val rotation = (time * 8.5 + sin(time * .23) * 15.0) * PI / 180.0
-    val angle = index * 2.0 * PI / 5.0 + rotation + motion.x * .35
-    val radius = .72 + motion.y * .25 + sin(time * .10 + motion.phase) * .06
-    return cos(angle) * radius to sin(angle) * radius
+    return motion.x to motion.y
+}
+
+private val stardustOrder = intArrayOf(0, 7, 3, 10, 5, 1, 9, 4, 11, 6, 2, 8)
+
+internal fun stardustShape(epoch: Int): Int {
+    val block = Math.floorDiv(epoch, stardustOrder.size)
+    val order = stardustOrder.copyOf()
+    val random = java.util.Random(block.toLong())
+    for (index in order.lastIndex - 1 downTo 2) {
+        val other = 1 + random.nextInt(index)
+        val value = order[index]
+        order[index] = order[other]
+        order[other] = value
+    }
+    return Math.floorMod(order[Math.floorMod(epoch, order.size)] + block * 3, order.size)
 }
 
 internal class ProceduralVisuals {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
     private val path = Path()
     private val hsv = floatArrayOf(0f, .7f, 1f)
+    private val stardustShapes by lazy {
+        listOf("🌸", "💎", "🐅", "🐉", "🦅", "🚀", "✈️", "🦋", "🐋", "🌙", "🌻", "🪐").map { symbol ->
+            val bitmap = Bitmap.createBitmap(128, 128, Bitmap.Config.ARGB_8888)
+            val glyphPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 105f; textAlign = Paint.Align.CENTER; color = Color.WHITE }
+            Canvas(bitmap).drawText(symbol, 64f, 105f, glyphPaint)
+            val pixels = IntArray(128 * 128)
+            bitmap.getPixels(pixels, 0, 128, 0, 0, 128, 128)
+            bitmap.recycle()
+            pixels.indices.filter { Color.alpha(pixels[it]) > 80 }.map { index ->
+                ((index % 128 - 64) / 64f) to ((index / 128 - 64) / 64f)
+            }.ifEmpty { listOf(0f to 0f) }
+        }
+    }
 
     fun draw(canvas: Canvas, width: Float, height: Float, mode: Int, time: Double,
         spectrum: DoubleArray, pulse: Float, density: Float, dark: Boolean, particleDensity: Float, intensity: Float) {
@@ -81,8 +108,35 @@ internal class ProceduralVisuals {
         canvas.translate(width / 2f, height / 2f)
         paint.strokeWidth = density * .8f
         when (mode) {
+            38 -> {
+                val shapes = stardustShapes
+                val clock = time.coerceAtLeast(0.0) / 12.0
+                val epoch = floor(clock).toInt()
+                val blend = flowerEase(((clock - floor(clock)) - .68) / .32).toFloat()
+                val current = shapes[stardustShape(epoch)]
+                val next = shapes[stardustShape(epoch + 1)]
+                val scale = unit * (.33f + energy * .05f + pulse * .015f)
+                paint.style = Paint.Style.FILL
+                for (index in 0 until (1600 * particleDensity).toInt().coerceIn(600, 2400)) {
+                    val seed = flowerRandom(index, 0, 23)
+                    val from = current[(seed * current.size).toInt().coerceAtMost(current.lastIndex)]
+                    val to = next[(seed * next.size).toInt().coerceAtMost(next.lastIndex)]
+                    val x = from.first + (to.first - from.first) * blend
+                    val y = from.second + (to.second - from.second) * blend
+                    val shimmer = .5 + .5 * sin(time * (1.4 + seed) + index * 2.4)
+                    val drift = (1f + energy * .12f + .025f * sin(time * .8 + seed * 8).toFloat()) * scale
+                    color(195f + (seed * 100).toFloat(), (70 + shimmer * 155).toInt())
+                    canvas.drawCircle(x * drift, y * drift, density * (.35f + shimmer.toFloat() * .55f), paint)
+                }
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = density * .55f
+                for (ring in 0 until 5) {
+                    val radius = scale * (.78f + ring * .13f + energy * .12f)
+                    color(205f + ring * 14f, 28 - ring * 4)
+                    canvas.drawOval(-radius, -radius * .28f, radius, radius * .28f, paint)
+                }
+            }
             35 -> {
-                val globalSpin = (time * 8.5 + sin(time * .23) * 15.0).toFloat()
                 for (index in 0 until 28) {
                     val drift = time * (.008 + flowerRandom(index, 0, 8) * .008)
                     val rawX = flowerRandom(index, 0, 9) + drift
@@ -108,29 +162,29 @@ internal class ProceduralVisuals {
                     val position = flowerPosition(flowerIndex, time)
                     val centerX = (position.first * width * .46).toFloat()
                     val centerY = (position.second * height * .46).toFloat()
-                    val flowerSize = (unit * flower.size * (1.12f + energy * .10f + pulse * .02f)).toFloat()
-                    val rotation = time * (.09 + flowerIndex * .018) + flower.phase + globalSpin * PI / 180.0
-                    val tilt = .78 + .22 * sin(time * .15 + flower.phase)
-                    val petals = ArrayList<FlowerPetal>(110)
+                    val flowerSize = (unit * flower.size * (1f + energy * .08f + pulse * .02f)).toFloat()
+                    val rotation = flower.phase + flower.rotation
+                    val tilt = .35 + flower.opening * .75 + .06 * sin(time * .15 + flower.phase)
+                    val petals = ArrayList<FlowerPetal>(24)
                     canvas.save()
                     canvas.translate(centerX, centerY)
                     paint.style = Paint.Style.FILL
                     color(42f + flowerIndex * 18f + (time * 6).toFloat(), 85 + (energy * 40).toInt())
                     canvas.drawCircle(0f, 0f, flowerSize * (.045f + energy * .008f), paint)
                     paint.style = Paint.Style.STROKE
-                    for (layer in 6 downTo 0) {
-                        val opening = flowerEase((flower.opening - layer * .035) / (1.0 - layer * .035))
-                        val count = 12 + ((layer + flowerIndex) % 4) * 2
-                        val length = (.65 + layer * .038) * (1 - layer * .025)
+                    for (layer in 2 downTo 0) {
+                        val opening = flowerEase((flower.opening - layer * .045) / (1.0 - layer * .045))
+                        val count = 7 + layer
+                        val length = .70 + layer * .10
                         for (petal in 0 until count) {
                             val angle = 2 * PI * petal / count + rotation + layer * .13
                             val petalWave = sin(time * (.52 + layer * .025) + petal * 1.71 + flower.phase)
-                            val baseRadius = .045 + layer * .017
-                            val radial = baseRadius + length * (.13 + opening * .98)
-                            val tipHeight = length * (.96 - opening * .78) + petalWave * .025
-                            val middleRadius = baseRadius + length * (.09 + opening * .52)
-                            val middleHeight = length * (.56 - opening * .25)
-                            val petalWidth = length * (.14 + opening * .26)
+                            val baseRadius = .025 + layer * .015
+                            val radial = baseRadius + length * (.035 + opening * .95)
+                            val tipHeight = length * (.98 - opening * .78) + petalWave * .015 * opening
+                            val middleRadius = baseRadius + length * (.19 + opening * .36)
+                            val middleHeight = length * (.55 - opening * .30)
+                            val petalWidth = length * (.10 + opening * .16)
                             fun point(radius: Double, height: Double, sideways: Double): FlowerPoint = projectFlowerPoint(
                                 cos(angle) * radius - sin(angle) * sideways, height,
                                 sin(angle) * radius + cos(angle) * sideways, tilt, flowerSize)
@@ -149,13 +203,13 @@ internal class ProceduralVisuals {
                         path.quadTo(petal.left.x, petal.left.y, petal.tip.x, petal.tip.y)
                         path.quadTo(petal.right.x, petal.right.y, petal.base.x, petal.base.y)
                         paint.style = Paint.Style.FILL
-                        color(petal.hue, (35 + petal.layer * 5 + (petal.depth + .6) * 30).toInt())
+                        color(petal.hue, (85 + petal.layer * 8 + (petal.depth + .6) * 25).toInt())
                         canvas.drawPath(path, paint)
                         paint.style = Paint.Style.STROKE
                         paint.strokeWidth = density * .75f
                         color(petal.hue + 18f, (100 + (petal.depth + .6) * 55 + energy * 40).toInt())
                         canvas.drawPath(path, paint)
-                        if (petal.layer < 4) {
+                        if (petal.layer == 0) {
                             path.rewind()
                             path.moveTo(petal.base.x, petal.base.y)
                             path.lineTo(petal.tip.x, petal.tip.y)

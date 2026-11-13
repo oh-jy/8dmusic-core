@@ -7,6 +7,11 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun graphStylesAreDistinctAndKeepOriginalFirst() {
+        assertEquals(13, graphStyleKeys.size)
+        assertEquals(graphStyleKeys.size, graphStyleKeys.toSet().size)
+        assertEquals("graph.style.original", graphStyleKeys.first())
+    }
     @Test fun flowerProjectionHasDepthAndPerspective() {
         val near = projectFlowerPoint(.4, .2, .5, .8, 100f)
         val far = projectFlowerPoint(.4, .2, -.5, .8, 100f)
@@ -25,22 +30,28 @@ class VisualEffectsTest {
             assertTrue(abs(before.x - after.x) < .002)
             assertTrue(abs(before.y - after.y) < .002)
             assertTrue(abs(before.opening - after.opening) < .002)
+            assertTrue(abs(before.rotation - after.rotation) < .002)
         }
     }
-    @Test fun flowersRemainDistributedWhileMoving() {
-        for (step in 0..100) {
-            val positions = (0..4).map { flowerPosition(it, step.toDouble()) }
-            for (first in 0..4) for (second in first + 1..4) {
-                val dx = positions[first].first - positions[second].first
-                val dy = positions[first].second - positions[second].second
-                assertTrue(dx * dx + dy * dy > .15)
-            }
+    @Test fun flowersTravelAndTurnIndependently() {
+        for (index in 0..4) {
+            val positions = (0..120).map { flowerPosition(index, it.toDouble()) }
+            val rotations = (0..120).map { flowerMotion(index, it.toDouble()).rotation }
+            assertTrue(positions.map { it.first }.toSet().size > 100)
+            assertTrue(positions.map { it.second }.toSet().size > 100)
+            assertTrue(rotations.toSet().size > 100)
+            assertTrue(rotations.zipWithNext().any { (first, second) -> second > first })
+            assertTrue(rotations.zipWithNext().any { (first, second) -> second < first })
         }
-        assertTrue(flowerPosition(0, 0.0) != flowerPosition(0, 10.0))
+    }
+    @Test fun stardustShapesChangeWithoutImmediateRepeats() {
+        val count = 12
+        assertEquals(count, (0 until count).map(::stardustShape).toSet().size)
+        assertTrue((0..100).all { stardustShape(it) != stardustShape(it + 1) })
     }
     @Test fun rainAndFollowingEffectsComeImmediatelyAfterTravel() {
-        assertEquals(listOf(3, 34, 35, 36, 37, 13, 14, 15, 16, 17, 5),
-            exclusiveVisualModes.map { it.second }.drop(3).take(11))
+        assertEquals(listOf(3, 34, 38, 35, 36, 37, 13, 14, 15, 16, 17, 5),
+            exclusiveVisualModes.map { it.second }.drop(3).take(12))
     }
     @Test fun dreamScenesChangeSmoothlyOverTime() {
         assertEquals(0f, dreamBlend(0.0))
@@ -165,7 +176,7 @@ class VisualEffectsTest {
 
     @Test fun drivingCyclesThroughEveryEffectInBothDirections() {
         val modes = exclusiveVisualModes.map { it.second }
-        assertEquals((1..37).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
+        assertEquals((1..38).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
         assertEquals(modes.toSet(), visualModeGroups.flatMap { it.second }.toSet())
         assertEquals(modes.size, visualModeGroups.sumOf { it.second.size })
         var current = 3
