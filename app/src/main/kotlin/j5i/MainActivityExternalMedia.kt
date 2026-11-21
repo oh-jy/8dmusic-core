@@ -22,9 +22,24 @@ import android.widget.TextView
 import android.widget.VideoView
 import android.widget.PopupMenu
 import j5i.spatial8d.ui.ThemeUi
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 private fun videoTime(ms: Int): String { val s = (ms / 1000).coerceAtLeast(0); return "%02d:%02d".format(s / 60, s % 60) }
 private fun speedLabel(speed: Float): String = if (speed == speed.toInt().toFloat()) "${speed.toInt()}x" else "${speed}x"
+internal fun videoCacheKey(url: String): String = MessageDigest.getInstance("SHA-256")
+    .digest(url.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 255) }
+internal fun videoResumePosition(positionMs: Int, durationMs: Int): Int =
+    positionMs.takeIf { it > 5_000 && durationMs > it + 5_000 } ?: 0
+
+private fun videoCacheFile(context: Context, url: String): File =
+    File(File(context.filesDir, "video-cache"), "${videoCacheKey(url)}.mp4")
+private fun isCacheableVideo(uri: android.net.Uri, mime: String): Boolean =
+    (mime.equals("video/mp4", true) || uri.lastPathSegment?.substringBefore('?')?.endsWith(".mp4", true) == true) &&
+        uri.scheme in listOf("http", "https")
 
 private fun MainActivity.videoIcon(res: Int, description: String, action: () -> Unit) = ImageButton(this).apply {
     setImageResource(res); contentDescription = description; setColorFilter(palette.text); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { action() }
@@ -32,6 +47,7 @@ private fun MainActivity.videoIcon(res: Int, description: String, action: () -> 
 
 internal fun MainActivity.openExternalMedia(intent: Intent) {
     val uri = intent.data ?: return
+    val resumeKey = uri.toString()
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
     externalVideoDialog?.dismiss()
@@ -48,6 +64,11 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     val time = TextView(this).apply { setTextColor(Color.WHITE); gravity = Gravity.CENTER; text = "00:00 / 00:00" }
     val feedback = TextView(this).apply { setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER; visibility = View.GONE; setBackgroundColor(0xaa000000.toInt()); setPadding(24, 12, 24, 12) }
+    val loading = TextView(this).apply {
+        setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER
+        setBackgroundColor(0xaa000000.toInt()); setPadding(28, 16, 28, 16)
+        text = "正在准备视频…"
+    }
     val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     var muted = false
     var speed = 1.0f; var prepared: android.media.MediaPlayer? = null; var dragging = false; var hidden = false
@@ -191,6 +212,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     overlay.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = ThemeUi.dp(this@openExternalMedia, 24f) })
     overlay.addView(centerButtons, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.addView(feedback, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+    overlay.addView(loading, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.setOnApplyWindowInsetsListener { _, insets ->
         val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout else null
         val margin = ThemeUi.dp(this, 16f)
@@ -272,7 +294,12 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
         override fun onStartTrackingTouch(bar: SeekBar) { dragging = true; showControls() }
-        override fun onStopTrackingTouch(bar: SeekBar) { player.seekTo(bar.progress); dragging = false; showControls() }
+        override fun onStopTrackingTouch(bar: SeekBar) {
+            player.seekTo(bar.progress)
+            preferences.edit().putInt("video-position:$resumeKey", bar.progress).apply()
+            dragging = false
+            showControls()
+        }
         override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) { if (fromUser) time.text = "${videoTime(progress)} / ${videoTime(player.duration)}" }
     })
     dialog = android.app.Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
@@ -290,9 +317,26 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         }
     }
     externalVideoDialog = dialog
-    val update = object : Runnable { override fun run() { if (!dialog.isShowing) return; if (!dragging) { seek.max = player.duration.coerceAtLeast(0); seek.progress = player.currentPosition.coerceAtLeast(0); time.text = "${videoTime(player.currentPosition)} / ${videoTime(player.duration)}" }; centerPlay.setImageResource(if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play); main.postDelayed(this, 500) } }
+    val update = object : Runnable {
+        override fun run() {
+            if (!dialog.isShowing) return
+            if (!dragging) {
+                seek.max = player.duration.coerceAtLeast(0)
+                seek.progress = player.currentPosition.coerceAtLeast(0)
+                time.text = "${videoTime(player.currentPosition)} / ${videoTime(player.duration)}"
+            }
+            if (player.duration > 0 && player.currentPosition > 0) {
+                preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
+            }
+            centerPlay.setImageResource(if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
+            main.postDelayed(this, 500)
+        }
+    }
+    var cacheThread: Thread? = null
     dialog.setOnDismissListener {
-        main.removeCallbacks(update); main.removeCallbacks(hide); player.stopPlayback(); prepared = null
+        main.removeCallbacks(update); main.removeCallbacks(hide); cacheThread?.interrupt()
+        if (player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
+        player.stopPlayback(); prepared = null
         externalVideoPreviousOrientation?.let { requestedOrientation = it }; externalVideoPreviousOrientation = null
         if (externalVideo === player) externalVideo = null; if (externalVideoDialog === dialog) externalVideoDialog = null
     }
@@ -302,8 +346,62 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         requestedOrientation = if (it.videoWidth > it.videoHeight) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         if (android.os.Build.VERSION.SDK_INT >= 23) it.setPlaybackParams(it.playbackParams.setSpeed(speed))
+        val saved = preferences.getInt("video-position:$resumeKey", 0)
+        val resume = videoResumePosition(saved, it.duration)
+        if (resume > 0) it.seekTo(resume)
+        loading.visibility = View.GONE
         it.start(); overlay.post { applyScaleMode() }; showControls()
     }
+    player.setOnCompletionListener { preferences.edit().remove("video-position:$resumeKey").apply() }
     player.setOnErrorListener { _, _, _ -> toast("无法播放此视频"); dialog.dismiss(); true }
-    dialog.show(); player.setVideoURI(uri); main.post(update)
+    dialog.show(); main.post(update)
+    val cached = if (isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
+    fun startVideo(source: android.net.Uri) {
+        loading.visibility = View.GONE
+        player.setVideoURI(source)
+    }
+    if (cached != null) {
+        startVideo(android.net.Uri.fromFile(cached))
+    } else if (isCacheableVideo(uri, mime)) {
+        loading.visibility = View.VISIBLE
+        val target = videoCacheFile(this, uri.toString())
+        cacheThread = Thread {
+            val part = File(target.parentFile, "${target.name}.part")
+            try {
+                target.parentFile?.mkdirs()
+                val client = OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
+                client.newCall(Request.Builder().url(uri.toString()).build()).execute().use { response ->
+                    check(response.isSuccessful) { "video download ${response.code}" }
+                    val body = response.body ?: error("empty video body")
+                    val total = body.contentLength()
+                    var lastPercent = -1
+                    body.byteStream().use { input -> part.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var copied = 0L
+                        var read: Int
+                        while (input.read(buffer).also { read = it } != -1) {
+                            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                            output.write(buffer, 0, read); copied += read
+                            if (total > 0) {
+                                val percent = (copied * 100 / total).toInt().coerceIn(0, 100)
+                                if (percent != lastPercent) {
+                                    lastPercent = percent
+                                    main.post { if (dialog.isShowing) loading.text = "正在缓存视频… $percent%" }
+                                }
+                            }
+                        }
+                    } }
+                }
+                if (!part.renameTo(target)) error("video cache rename failed")
+                main.post { if (dialog.isShowing) startVideo(android.net.Uri.fromFile(target)) }
+            } catch (_: InterruptedException) {
+                part.delete()
+            } catch (_: Exception) {
+                part.delete()
+                main.post { if (dialog.isShowing) { loading.text = "在线播放中…"; startVideo(uri) } }
+            }
+        }.also { it.name = "video-cache-${videoCacheKey(uri.toString()).take(8)}"; it.start() }
+    } else {
+        startVideo(uri)
+    }
 }
