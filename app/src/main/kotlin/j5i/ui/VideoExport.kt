@@ -16,7 +16,19 @@ import java.nio.ByteOrder
 import j5i.spatial8d.audio.LyricsResult
 import com.j5i.spatial8d.VideoPixels
 
+internal fun videoTargetBitrate(resolution: Int): Int = when (resolution) {
+    1080 -> 4_000_000
+    720 -> 2_000_000
+    else -> throw IllegalArgumentException("Unsupported video resolution: $resolution")
+}
+
 internal object VideoExport {
+    private fun useVariableBitrate(codec: MediaCodec, format: MediaFormat) {
+        val capabilities = codec.codecInfo.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC).encoderCapabilities
+        if (capabilities.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)) {
+            format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR)
+        }
+    }
     fun render(context: Context, wav: File, output: File, state: VisualizerView.ExportState,
         lyrics: LyricsResult?, landscape: Boolean, resolution: Int, speed: Double, reverse: Boolean,
         startSeconds: Double, durationSeconds: Double, previewTailSeconds: Int = 0,
@@ -47,7 +59,7 @@ internal object VideoExport {
             try {
                 fun videoFormat(color: Int) = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
                     setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
-                    setInteger(MediaFormat.KEY_BIT_RATE, if (resolution == 1080) 12_000_000 else 6_000_000)
+                    setInteger(MediaFormat.KEY_BIT_RATE, videoTargetBitrate(resolution))
                     setInteger(MediaFormat.KEY_FRAME_RATE, 30)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
                 }
@@ -140,6 +152,7 @@ internal object VideoExport {
         var surface: android.view.Surface? = null
         var renderer: VideoSurface? = null
         try {
+            useVariableBitrate(codec, format)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             surface = codec.createInputSurface()
             codec.start()
@@ -187,6 +200,7 @@ internal object VideoExport {
         val codec = MediaCodec.createEncoderByType(format.getString(MediaFormat.KEY_MIME)!!)
         var muxer: MediaMuxer? = null
         try {
+            if (format.getString(MediaFormat.KEY_MIME) == MediaFormat.MIMETYPE_VIDEO_AVC) useVariableBitrate(codec, format)
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)

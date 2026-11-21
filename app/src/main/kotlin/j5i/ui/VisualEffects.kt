@@ -53,7 +53,8 @@ internal fun sandDensity(pixels: IntArray, width: Int, height: Int): FloatArray 
         val top = luminance[(y - 1).coerceAtLeast(0) * width + x]
         val bottom = luminance[(y + 1).coerceAtMost(height - 1) * width + x]
         val edge = kotlin.math.abs(right - left) + kotlin.math.abs(bottom - top)
-        ((1f - luminance[index]) * .72f + edge * .8f).coerceIn(0f, 1f)
+        val shadow = ((.88f - luminance[index]) / .70f).coerceIn(0f, 1f)
+        (shadow * shadow * (3f - 2f * shadow) + edge * 1.3f).coerceIn(0f, 1f)
     }
 }
 

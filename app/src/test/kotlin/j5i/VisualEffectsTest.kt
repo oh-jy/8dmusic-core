@@ -7,6 +7,17 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun sandShadowsKeepStrongContrast() {
+        val pixels = intArrayOf(0xffffffff.toInt(), 0xff808080.toInt(), 0xff000000.toInt())
+        val density = sandDensity(pixels, 3, 1)
+        assertTrue(density[2] > .9f)
+        assertTrue(density[2] > density[0])
+    }
+    @Test fun videoCompressionTargetsSupportedResolutions() {
+        assertEquals(4_000_000, videoTargetBitrate(1080))
+        assertEquals(2_000_000, videoTargetBitrate(720))
+        assertFailsWith<IllegalArgumentException> { videoTargetBitrate(480) }
+    }
     @Test fun sandExtractsDarkDetailsAndRevealsInContinuousStrokes() {
         val pixels = intArrayOf(-1, -1, -1, -1, 0xff000000.toInt(), -1, -1, -1, -1)
         val density = sandDensity(pixels, 3, 3)

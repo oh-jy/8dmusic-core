@@ -548,6 +548,17 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
             sheet.dismiss(); showOnlinePlaylistPicker(listOf(item))
         })
         if (item.uri.startsWith("online://plugin/") && item.uri.contains("source=platform.bilibili")) {
+            addView(ThemeUi.button(this@showOnlineTrackActions, palette, "播放视频") {
+                val id = Uri.parse(item.uri).getQueryParameter("id").orEmpty()
+                val bvid = id.substringBefore(':')
+                val cid = id.substringAfter(':', "").toLongOrNull()
+                if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) toast("哔哩哔哩视频标识无效")
+                else {
+                    val url = Uri.parse("https://player.bilibili.com/player.html").buildUpon().appendQueryParameter("bvid", bvid)
+                    if (cid != null && cid > 0) url.appendQueryParameter("cid", cid.toString())
+                    sheet.dismiss(); openWebVideo(url.build().toString())
+                }
+            })
             addView(ThemeUi.button(this@showOnlineTrackActions, palette, "在哔哩哔哩中打开") {
                 val id = android.net.Uri.parse(item.uri).getQueryParameter("id").orEmpty()
                 val bvid = id.substringBefore(':')

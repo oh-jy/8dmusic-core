@@ -52,11 +52,12 @@ internal fun MainActivity.addAndPlay(uri: Uri) {
         try {
             contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: Exception) {}
-        val name = contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+        val name = runCatching { contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
-        } ?: uri.lastPathSegment ?: "音频"
-        val item = MusicItem(System.nanoTime(), name, uri.toString())
+        } }.getOrNull() ?: uri.lastPathSegment ?: "音频"
+        val item = musicStore.cached().firstOrNull { it.uri == uri.toString() }
+            ?: MusicItem(System.nanoTime(), name, uri.toString())
         musicStore.remember(item)
         songs = (musicStore.cached() + listOf(item)).distinctBy { it.uri }.toMutableList()
         queue = musicStore.view(songs)

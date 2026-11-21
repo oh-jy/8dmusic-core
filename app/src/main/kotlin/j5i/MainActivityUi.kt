@@ -798,6 +798,16 @@ internal fun MainActivity.navbar(): LinearLayout {
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
         bar.addView(ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_view)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            imageTintList = ColorStateList.valueOf(palette.controlText)
+            background = ThemeUi.bgDrawable(this@navbar, palette.control, 15f)
+            setPadding(ThemeUi.dp(this@navbar, 6f), 0, ThemeUi.dp(this@navbar, 6f), 0)
+            contentDescription = "打开视频链接"
+            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
+            setOnClickListener { showVideoLinks() }
+        })
+        bar.addView(ImageButton(this).apply {
             setImageResource(j5i.spatial8d.R.drawable.ic_driving)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             imageTintList = ColorStateList.valueOf(palette.controlText)

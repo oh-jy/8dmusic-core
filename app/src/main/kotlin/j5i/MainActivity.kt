@@ -58,6 +58,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal lateinit var presetStore: PresetStore
     internal var service: PlaybackService? = null
     internal var bound = false
+    internal var pendingExternalIntent: Intent? = null
+    internal var externalVideoDialog: Dialog? = null
+    internal var externalVideo: android.widget.VideoView? = null
+    internal var externalVideoPreviousOrientation: Int? = null
     internal var songs = mutableListOf<MusicItem>()
     internal var queue = listOf<MusicItem>()
     internal var currentIndex = -1
@@ -273,7 +277,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             service?.radio?.onEnd = { main.post { playbackStatus = "电台已断开"; refreshPlayback() } }
             service?.radio?.onError = { main.post { playbackStatus = it; refreshPlayback() } }
             bound = true
-            adoptOrRestorePlayback()
+            if (pendingExternalIntent == null) adoptOrRestorePlayback()
+            else pendingExternalIntent?.let { pendingExternalIntent = null; openExternalMedia(it) }
             refreshAll()
         }
 
@@ -360,6 +365,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         transform = transform.copy(clarity = preferences.getInt("soundClarity", 50).coerceIn(0, 100))
         palette = ThemeUi.palette(dark)
         buildUi()
+        if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) pendingExternalIntent = intent
         visualization.pcmClock = visualizerView.pcmClock
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -396,6 +402,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     }
 
     override fun onDestroy() {
+        externalVideoDialog?.dismiss()
         lyricsFullscreenDialog?.dismiss()
         providerLoginDialog?.dismiss()
         providerLoginDialog = null
@@ -510,6 +517,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     override fun songs(): List<MusicItem> = songs
 
     override fun onPause() {
+        externalVideo?.pause()
         // 取消而不是只 return，避免后台保留无意义的 UI 任务。
         pageActive = false
         stopUpdateNetworkMonitor()
@@ -550,6 +558,13 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     override fun onStop() {
         savePlaybackState()
         super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.action != Intent.ACTION_VIEW) return
+        if (bound) openExternalMedia(intent) else pendingExternalIntent = intent
     }
 
     internal fun togglePlayback() {

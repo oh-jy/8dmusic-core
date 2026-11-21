@@ -80,8 +80,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                             var hash = index * 0x45d9f3b
                             hash = (hash xor (hash ushr 16)) * 0x45d9f3b
                             val grain = (hash xor (hash ushr 16)).ushr(1) % 1000 / 1000f
-                            val opacity = (density[index] * (.7f + grain * .6f) * 255).toInt().coerceIn(0, 245)
-                            pixels[index] = (opacity shl 24) or 0x003d250f
+                            val opacity = (density[index] * (.8f + grain * .4f) * 255).toInt().coerceIn(0, 255)
+                            pixels[index] = (opacity shl 24) or 0x00180f0b
                         }
                         val sand = Bitmap.createBitmap(pixels, image.width, image.height, Bitmap.Config.ARGB_8888)
                         image.recycle()
@@ -544,6 +544,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         var sandLive = false
         private var sandFrame: SandImage? = null
         private var sandFrameProgress = 0f
+        private val sandHand by lazy { BitmapFactory.decodeResource(resources, j5i.spatial8d.R.drawable.sand_hand) }
 
         fun updateSand() {
             val progress = if (sandLive) null else sandProgress(visualPositionMs, sandDuration, sandImages.size)
@@ -848,6 +849,29 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                             }
                         }
                         paint.alpha = 255
+                        if (sandFrameProgress > 0f && sandFrameProgress < 1f) {
+                            val row = (sandFrameProgress * 8f).toInt().coerceIn(0, 7)
+                            val fraction = sandRowProgress(sandFrameProgress, row)
+                            val tipX = if (row % 2 == 0) effectBounds.left + imageWidth * fraction
+                                else effectBounds.right - imageWidth * fraction
+                            val tipY = effectBounds.top + (row + .5f) * rowHeight
+                            val handWidth = min(width, height) * .24f
+                            val handHeight = handWidth * sandHand.height / sandHand.width
+                            val sway = sin(visualPositionMs / 260.0).toFloat() * handWidth * .035f
+                            paint.color = Color.rgb(45, 27, 17)
+                            for (grain in 0 until 24) {
+                                val hash = (grain * 73 + (visualPositionMs / 80).toInt() * 19).mod(101)
+                                val offsetX = (hash / 100f - .5f) * handWidth * .23f
+                                val offsetY = ((grain * 37).mod(100) / 100f) * rowHeight * .5f
+                                paint.alpha = 90 + grain % 4 * 35
+                                c.drawCircle(tipX + offsetX, tipY + offsetY, max(0.6f, handWidth * .006f), paint)
+                            }
+                            paint.alpha = 225
+                            val handBounds = RectF(tipX - handWidth * .43f + sway, tipY - handHeight * .06f,
+                                tipX + handWidth * .57f + sway, tipY + handHeight * .94f)
+                            c.drawBitmap(sandHand, null, handBounds, paint)
+                            paint.alpha = 255
+                        }
                     }
                     return
                 }
