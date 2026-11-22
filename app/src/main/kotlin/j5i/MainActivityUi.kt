@@ -758,6 +758,9 @@ internal fun MainActivity.time(seconds: Double): String {
 
 internal fun MainActivity.toast(message: String): Unit { Toast.makeText(this, message, Toast.LENGTH_SHORT).show() }
 
+internal fun videoEntryTapCount(previousCount: Int, previousAt: Long, now: Long): Int =
+    if (previousCount > 0 && now - previousAt in 0..1200) previousCount + 1 else 1
+
 internal fun MainActivity.navbar(): LinearLayout {
         val bar = ThemeUi.row(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -797,15 +800,25 @@ internal fun MainActivity.navbar(): LinearLayout {
             visibility = if (fmUnlocked) View.VISIBLE else View.GONE
             layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
         }
+        var videoTapCount = 0
+        var videoTapAt = 0L
         bar.addView(ImageButton(this).apply {
             setImageResource(android.R.drawable.ic_menu_view)
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             imageTintList = ColorStateList.valueOf(palette.controlText)
             background = ThemeUi.bgDrawable(this@navbar, palette.control, 15f)
             setPadding(ThemeUi.dp(this@navbar, 6f), 0, ThemeUi.dp(this@navbar, 6f), 0)
-            contentDescription = "打开视频链接"
+            contentDescription = "连续点击三次打开视频链接"
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
-            setOnClickListener { showVideoLinks() }
+            setOnClickListener {
+                val now = android.os.SystemClock.elapsedRealtime()
+                videoTapCount = videoEntryTapCount(videoTapCount, videoTapAt, now)
+                videoTapAt = now
+                if (videoTapCount == 3) {
+                    videoTapCount = 0
+                    showVideoLinks()
+                }
+            }
         })
         bar.addView(ImageButton(this).apply {
             setImageResource(j5i.spatial8d.R.drawable.ic_driving)

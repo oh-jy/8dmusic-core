@@ -8,9 +8,11 @@ import java.util.Date
 import java.util.Properties
 
 val buildHour = SimpleDateFormat("yyMMddHH").format(Date())
-val versionCounterFile = rootDir.resolve("docs/signing/version-code.properties")
+val versionCounterFile = rootDir.resolve("build/signing/version-code.properties")
+val previousVersionCounterFile = rootDir.resolve("docs/signing/version-code.properties")
 val versionCounter = Properties().apply {
-    versionCounterFile.takeIf { it.isFile }?.inputStream()?.use { load(it) }
+    (versionCounterFile.takeIf { it.isFile } ?: previousVersionCounterFile.takeIf { it.isFile })
+        ?.inputStream()?.use { load(it) }
 }
 val sameHour = versionCounter.getProperty("hour") == buildHour
 // The last sequence value is reused if more than nine releases are built in one hour.
@@ -39,8 +41,8 @@ android {
         minSdk = 24
         targetSdk = 34
         // yyMMddHH + 当小时发布序号，例如 261104101；九位数始终处于 Int 范围。
-        versionCode = hourlyVersionCode
-        versionName = "2.21.3"
+        versionCode = 1
+        versionName = "2.21.8"
         buildConfigField("boolean", "WITH_ASR", withAsr.toString())
         ndk { abiFilters += listOf("arm64-v8a") }
     }
@@ -53,6 +55,12 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.outputs.forEach { it.versionCode.set(hourlyVersionCode) }
     }
 }
 

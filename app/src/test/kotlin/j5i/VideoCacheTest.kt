@@ -5,6 +5,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 class VideoCacheTest {
+    @Test fun formatsVideoTimeWithHours() {
+        assertEquals("01:02:03", videoTime(3_723_000))
+        assertEquals("05:01", videoTime(301_000))
+        assertEquals("59:59", videoTime(3_599_000))
+        assertEquals("01:00:00", videoTime(3_600_000))
+    }
     @Test fun cacheKeyIsStableAndUrlSafe() {
         val url = "https://example.com/video.mp4?token=abc"
         val key = videoCacheKey(url)
@@ -15,9 +21,9 @@ class VideoCacheTest {
     }
 
     @Test fun resumePositionSkipsStartAndEndBoundaries() {
-        assertEquals(0, videoResumePosition(5_000, 60_000))
+        assertEquals(5_000, videoResumePosition(5_000, 60_000))
         assertEquals(12_000, videoResumePosition(12_000, 60_000))
-        assertEquals(0, videoResumePosition(55_000, 60_000))
-        assertEquals(0, videoResumePosition(12_000, 0))
+        assertEquals(55_000, videoResumePosition(55_000, 60_000))
+        assertEquals(12_000, videoResumePosition(12_000, 0))
     }
 }

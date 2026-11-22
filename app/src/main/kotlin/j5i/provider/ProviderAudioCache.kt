@@ -29,6 +29,7 @@ internal object ProviderAudioCache {
         return null
     }
 
+    @Synchronized
     fun cache(context: Context, item: MusicItem, public: Boolean): MusicItem {
         cached(context, item)?.let { cached ->
             // A private favorite may later be explicitly published to
@@ -86,6 +87,20 @@ internal object ProviderAudioCache {
         } finally { part.delete() }
     }
 
+    @Synchronized
+    fun clearPlaybackCache(context: Context, protectedIds: Set<Long>): Pair<Int, Int> {
+        val directory = File(context.filesDir, "provider-audio")
+        var removed = 0
+        var failed = 0
+        directory.listFiles().orEmpty().forEach { file ->
+            val id = audioCacheId(file.name) ?: return@forEach
+            if (id !in protectedIds && file.isFile && file.canonicalFile.parentFile == directory.canonicalFile) {
+                if (file.delete()) removed++ else failed++
+            }
+        }
+        return removed to failed
+    }
+
     fun delete(context: Context, item: MusicItem): Boolean {
         var deleted = privateFile(context, item).delete()
         if (Build.VERSION.SDK_INT >= 29) {
@@ -102,3 +117,6 @@ internal object ProviderAudioCache {
         return "${item.id}.m4a"
     }
 }
+
+internal fun audioCacheId(name: String): Long? =
+    if (name.endsWith(".m4a")) name.removeSuffix(".m4a").toLongOrNull() else null

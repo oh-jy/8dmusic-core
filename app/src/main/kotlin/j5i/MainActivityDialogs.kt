@@ -58,6 +58,12 @@ internal fun MainActivity.showSettingsSheet() {
             addView(settingRow("A", t("language"), languageLabel()) {
                 dialog.dismiss(); showLanguagePicker()
             })
+            addView(settingRow("⚒", t("tools"), "") {
+                dialog.dismiss(); showToolsSheet()
+            })
+            addView(settingRow("◫", "缓存管理", "") {
+                dialog.dismiss(); showPlaybackCacheManager()
+            })
             addView(settingRow("↑", "更新渠道", if (updateChannel() == "beta") "测试版" else "稳定版") {
                 dialog.dismiss()
                 pickOption("更新渠道", listOf("稳定版", "测试版"), if (updateChannel() == "beta") 1 else 0) { index ->

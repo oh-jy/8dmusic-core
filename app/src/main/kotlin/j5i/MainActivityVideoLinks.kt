@@ -3,7 +3,12 @@ package j5i.spatial8d
 import android.app.Dialog
 import android.content.Context
 import android.content.Intent
+import android.content.ClipData
 import android.net.Uri
+import android.text.TextUtils
+import android.view.Gravity
+import android.view.DragEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebChromeClient
@@ -11,11 +16,63 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
+import android.provider.OpenableColumns
 import j5i.spatial8d.ui.ThemeUi
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
 import j5i.spatial8d.provider.ProviderNetwork
+
+private const val VIDEO_HISTORY = "video_history"
+private const val VIDEO_TITLES = "video_titles"
+
+private fun MainActivity.videoTitles(): JSONObject = runCatching {
+    JSONObject(getPreferences(Context.MODE_PRIVATE).getString(VIDEO_TITLES, "{}") ?: "{}")
+}.getOrDefault(JSONObject())
+
+private fun MainActivity.videoTitle(uri: String, fallback: String): String =
+    videoTitles().optString(uri).takeIf { it.isNotBlank() }
+        ?: videoHistory().firstOrNull { it.uri == uri }?.title ?: fallback
+
+private fun MainActivity.videoHistory(): List<VideoHistoryEntry> =
+    readVideoHistory(getPreferences(Context.MODE_PRIVATE).getString(VIDEO_HISTORY, "[]") ?: "[]")
+
+private fun MainActivity.saveVideoHistory(entries: List<VideoHistoryEntry>) {
+    getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_HISTORY, writeVideoHistory(entries)).apply()
+}
+
+internal fun MainActivity.rememberVideo(uri: Uri, intent: Intent) {
+    val filename = if (uri.scheme == "content") runCatching {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull() else null
+    val title = intent.getStringExtra(Intent.EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+        ?: filename?.takeIf { it.isNotBlank() }
+        ?: uri.lastPathSegment?.takeIf { it.isNotBlank() }
+        ?: uri.host ?: "视频"
+    saveVideoHistory(recordVideoHistory(videoHistory(), uri.toString(), videoTitle(uri.toString(), title)))
+}
+
+private fun MainActivity.renameVideoHistory(entry: VideoHistoryEntry) {
+    lateinit var dialog: Dialog
+    dialog = ThemeUi.showSheet(this, palette, "重命名视频") {
+        val input = ThemeUi.input(this@renameVideoHistory, palette, "视频标题").apply { setText(entry.title) }
+        addView(input)
+        addView(ThemeUi.button(this@renameVideoHistory, palette, "保存", ThemeUi.ROLE_ACCENT_FILL) {
+            val title = input.text.toString().trim()
+            if (title.isEmpty()) toast("请输入视频标题") else {
+                val titles = videoTitles().put(entry.uri, title)
+                getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
+                saveVideoHistory(videoHistory().map { if (it.uri == entry.uri) it.copy(title = title) else it })
+                dialog.dismiss(); showVideoLinks()
+            }
+        })
+    }
+    dialog.setOnCancelListener { showVideoLinks() }
+    dialog.show()
+}
 
 private fun MainActivity.videoFavorites(): List<String> {
     val json = runCatching { JSONArray(getPreferences(Context.MODE_PRIVATE).getString("video_favorites", "[]")) }.getOrDefault(JSONArray())
@@ -40,6 +97,113 @@ internal fun MainActivity.toggleVideoFavorite(url: String) {
 internal fun MainActivity.showVideoLinks() {
     lateinit var sheet: Dialog
     sheet = ThemeUi.showSheet(this, palette, "视频链接", fullHeight = true) {
+        val favoriteRows = LinearLayout(this@showVideoLinks).apply { orientation = LinearLayout.VERTICAL }
+        var draggedUrl: String? = null
+        fun row(entry: VideoHistoryEntry, favorite: Boolean): LinearLayout = LinearLayout(this@showVideoLinks).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            background = ThemeUi.bgDrawable(this@showVideoLinks, palette.control, 8f)
+            if (favorite) {
+                addView(ThemeUi.text(this@showVideoLinks, "☰", 14f, palette, role = ThemeUi.ROLE_FAINT).apply {
+                    gravity = Gravity.CENTER
+                    contentDescription = "拖动排序 ${videoTitle(entry.uri, entry.title)}"
+                    setOnTouchListener { view, event ->
+                        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                            draggedUrl = entry.uri
+                            view.startDragAndDrop(ClipData.newPlainText("video favorite", ""), View.DragShadowBuilder(this@apply), entry.uri, 0)
+                        } else false
+                    }
+                }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 36f), ThemeUi.dp(this@showVideoLinks, 40f)))
+                setOnDragListener { view, event ->
+                    when (event.action) {
+                        DragEvent.ACTION_DRAG_STARTED -> draggedUrl != null
+                        DragEvent.ACTION_DRAG_ENTERED -> { view.alpha = 0.65f; true }
+                        DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> { view.alpha = 1f; true }
+                        DragEvent.ACTION_DRAG_LOCATION -> {
+                            var parent = favoriteRows.parent
+                            while (parent != null && parent !is android.widget.ScrollView) parent = parent.parent
+                            (parent as? android.widget.ScrollView)?.let { scroll ->
+                                val location = IntArray(2)
+                                view.getLocationOnScreen(location)
+                                val scrollLocation = IntArray(2)
+                                scroll.getLocationOnScreen(scrollLocation)
+                                val y = location[1] + event.y - scrollLocation[1]
+                                val edge = ThemeUi.dp(this@showVideoLinks, 48f)
+                                if (y < edge) scroll.smoothScrollBy(0, -edge)
+                                else if (y > scroll.height - edge) scroll.smoothScrollBy(0, edge)
+                            }
+                            true
+                        }
+                        DragEvent.ACTION_DROP -> {
+                            val source = draggedUrl
+                            val updated = videoFavorites().toMutableList()
+                            val from = updated.indexOf(source)
+                            val to = updated.indexOf(entry.uri)
+                            if (from >= 0 && to >= 0 && from != to) {
+                                updated.add(to, updated.removeAt(from))
+                                getPreferences(Context.MODE_PRIVATE).edit().putString("video_favorites", JSONArray(updated).toString()).apply()
+                                sheet.dismiss(); showVideoLinks()
+                            }
+                            draggedUrl = null
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            }
+            val title = ThemeUi.text(this@showVideoLinks, videoTitle(entry.uri, entry.title), 13f, palette).apply {
+                isSingleLine = true
+                ellipsize = TextUtils.TruncateAt.END
+                setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, 0, 0)
+            }
+            addView(title, LinearLayout.LayoutParams(0, ThemeUi.dp(this@showVideoLinks, 40f), 1f))
+            title.gravity = Gravity.CENTER_VERTICAL
+            val position = preferences.getInt("video-position:${entry.uri}", 0).coerceAtLeast(0)
+            addView(ThemeUi.text(this@showVideoLinks, videoTime(position), 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+                gravity = Gravity.CENTER
+                isSingleLine = true
+            }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 84f), ThemeUi.dp(this@showVideoLinks, 40f)))
+            val more = ThemeUi.text(this@showVideoLinks, "⋯", 20f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                gravity = Gravity.CENTER
+                contentDescription = "更多选项"
+            }
+            addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 48f), ThemeUi.dp(this@showVideoLinks, 40f)))
+            setOnClickListener {
+                sheet.dismiss()
+                if (favorite) openVideoLink(entry.uri)
+                else openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.uri), "video/*"))
+            }
+            more.setOnClickListener {
+                val options = LinearLayout(this@showVideoLinks).apply {
+                    orientation = LinearLayout.VERTICAL
+                    background = ThemeUi.bgDrawable(this@showVideoLinks, palette.surface, 8f)
+                }
+                val popup = PopupWindow(options, ThemeUi.dp(this@showVideoLinks, 120f), -2, true).apply {
+                    setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                    isOutsideTouchable = true
+                    elevation = ThemeUi.dp(this@showVideoLinks, 8f).toFloat()
+                }
+                fun option(label: String, action: () -> Unit) {
+                    options.addView(ThemeUi.text(this@showVideoLinks, label, 13f, palette).apply {
+                        gravity = Gravity.CENTER
+                        setOnClickListener { popup.dismiss(); action() }
+                    }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoLinks, 44f)))
+                }
+                option("重命名") { sheet.dismiss(); renameVideoHistory(entry.copy(title = videoTitle(entry.uri, entry.title))) }
+                option("删除") {
+                    if (favorite) toggleVideoFavorite(entry.uri) else {
+                        val titles = videoTitles()
+                        if (isVideoFavorite(entry.uri) && !titles.has(entry.uri)) {
+                            titles.put(entry.uri, entry.title)
+                            getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
+                        }
+                        saveVideoHistory(videoHistory().filterNot { it.uri == entry.uri })
+                        if (!isVideoFavorite(entry.uri)) preferences.edit().remove("video-position:${entry.uri}").apply()
+                    }
+                    sheet.dismiss(); showVideoLinks()
+                }
+                popup.showAsDropDown(more, 0, 0, Gravity.END)
+            }
+        }
         val input = ThemeUi.input(this@showVideoLinks, palette, "输入网页、MP4 或 M3U8 链接")
         addView(input)
         addView(ThemeUi.button(this@showVideoLinks, palette, "打开") {
@@ -51,24 +215,21 @@ internal fun MainActivity.showVideoLinks() {
                 sheet.dismiss(); openVideoLink(url)
             }
         })
+        addView(ThemeUi.text(this@showVideoLinks, "播放历史", 15f, palette, bold = true))
+        val history = videoHistory()
+        if (history.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, "暂无播放历史", 13f, palette, role = ThemeUi.ROLE_SUB))
+        history.forEach { entry -> addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) }) }
         addView(ThemeUi.text(this@showVideoLinks, "视频收藏", 15f, palette, bold = true))
         val favorites = videoFavorites()
         if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, "暂无视频收藏", 13f, palette, role = ThemeUi.ROLE_SUB))
+        else addView(ThemeUi.text(this@showVideoLinks, "拖动左侧图标调整顺序", 11f, palette, role = ThemeUi.ROLE_SUB))
         favorites.forEach { url ->
-            addView(LinearLayout(this@showVideoLinks).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(ThemeUi.button(this@showVideoLinks, palette, Uri.parse(url).let { saved ->
-                    if (saved.host == "player.bilibili.com") saved.getQueryParameter("bvid").orEmpty() +
-                        saved.getQueryParameter("cid")?.let { " · $it" }.orEmpty()
-                    else (saved.host.orEmpty() + saved.path.orEmpty()).take(60)
-                }) {
-                    sheet.dismiss(); openVideoLink(url)
-                }, LinearLayout.LayoutParams(0, -2, 1f))
-                addView(ThemeUi.button(this@showVideoLinks, palette, "删除") {
-                    toggleVideoFavorite(url); sheet.dismiss(); showVideoLinks()
-                })
-            })
+            val uri = Uri.parse(url)
+            val fallback = if (uri.host == "player.bilibili.com") uri.getQueryParameter("bvid").orEmpty() +
+                uri.getQueryParameter("cid")?.let { " · $it" }.orEmpty() else uri.host.orEmpty() + uri.path.orEmpty()
+            favoriteRows.addView(row(VideoHistoryEntry(url, fallback), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) })
         }
+        addView(favoriteRows)
     }
     sheet.show()
 }
@@ -91,8 +252,11 @@ internal fun MainActivity.openVideoLink(url: String) {
                     if (type.startsWith("video/") || type.contains("mpegurl")) return@use listOf(response.request.url.toString()) to true
                     val text = response.peekBody(262145).string().trimStart()
                     val json = type.contains("json") || text.startsWith("{") || text.startsWith("[")
-                    if (!json) return@use listOf(url) to false
-                    parseJsonVideoTargets(text, response.request.url.toUri()) to true
+                    if (json) parseJsonVideoTargets(text, response.request.url.toUri()) to true
+                    else {
+                        val targets = parseHtmlVideoTargets(text, response.request.url.toUri())
+                        if (targets.isEmpty()) listOf(url) to false else targets to true
+                    }
                 }
             }
             main.post {
@@ -135,7 +299,7 @@ private fun parseJsonVideoTargets(text: String, base: java.net.URI): List<String
         .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
     require(normalized.length <= 262144) { "JSON 响应过大" }
     val parsed = runCatching { JSONTokener(normalized).nextValue() }.getOrNull()
-    val candidates = (if (parsed == null) emptyList() else findM3u8(parsed)) + findM3u8InText(normalized)
+    val candidates = (if (parsed == null) emptyList() else findVideoUrls(parsed)) + findVideoUrlsInText(normalized)
     val streams = candidates.distinct().mapNotNull { address ->
         runCatching { base.resolve(address) }.getOrNull()?.takeIf {
             it.scheme in listOf("http", "https") && it.host != null && it.userInfo == null
@@ -181,14 +345,26 @@ private fun MainActivity.loadJsonWithWebView(url: String) {
         if (body.startsWith("{") || body.startsWith("[")) {
             runCatching { parseJsonVideoTargets(body, base) }
                 .onSuccess { targets -> cleanup(); showVideoTargets(targets, true) }
-                .onFailure { error -> cleanup(); toast(error.message ?: "JSON 中没有找到有效的视频地址") }
+                    .onFailure {
+                        val targets = parseHtmlVideoTargets(body, base)
+                        if (targets.isEmpty()) {
+                            cleanup(); toast(it.message ?: "响应中没有找到有效的视频地址")
+                        } else {
+                            cleanup(); showVideoTargets(targets, true)
+                        }
+                    }
         } else {
-            cleanup(); openWebVideo(url)
+                val targets = parseHtmlVideoTargets(body, base)
+                if (targets.isEmpty()) {
+                    cleanup(); openWebVideo(url)
+                } else {
+                    cleanup(); showVideoTargets(targets, true)
+                }
         }
     }
     web.webViewClient = object : WebViewClient() {
         override fun onPageFinished(view: WebView, pageUrl: String) {
-            view.evaluateJavascript("JSON.stringify(document.body ? document.body.innerText : '')") { raw ->
+            view.evaluateJavascript("JSON.stringify(document.documentElement ? document.documentElement.outerHTML : '')") { raw ->
                 val text = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
                 finishWith(text, runCatching { java.net.URI(pageUrl) }.getOrNull()
                     ?.takeIf { it.scheme in listOf("http", "https") && !it.host.isNullOrEmpty() }
@@ -200,26 +376,71 @@ private fun MainActivity.loadJsonWithWebView(url: String) {
 }
 
 internal fun findM3u8(value: Any?, depth: Int = 0): List<String> {
+    return findVideoUrls(value, depth).filter { isM3u8Address(it) }
+}
+
+private fun findVideoUrls(value: Any?, depth: Int = 0): List<String> {
     if (depth > 20) return emptyList()
     return when (value) {
-        is String -> findM3u8InText(value)
-        is JSONObject -> value.keys().asSequence().flatMap { findM3u8(value.opt(it), depth + 1).asSequence() }.toList()
-        is JSONArray -> (0 until value.length()).flatMap { findM3u8(value.opt(it), depth + 1) }
+        is String -> findVideoUrlsInText(value)
+        is JSONObject -> value.keys().asSequence().flatMap { findVideoUrls(value.opt(it), depth + 1).asSequence() }.toList()
+        is JSONArray -> (0 until value.length()).flatMap { findVideoUrls(value.opt(it), depth + 1) }
         else -> emptyList()
     }
 }
 
-private fun findM3u8InText(text: String): List<String> {
-    val unescaped = text.replace("\\\\/", "/").replace("\\/", "/")
+private fun isM3u8Address(value: String): Boolean =
+    runCatching { java.net.URI(value).path.orEmpty().endsWith(".m3u8", true) }.getOrDefault(false)
+
+private fun isVideoAddress(value: String): Boolean =
+    runCatching { java.net.URI(value).path.orEmpty().let { path ->
+        path.endsWith(".m3u8", true) || path.endsWith(".mp4", true)
+    } }.getOrDefault(false)
+
+private fun findVideoUrlsInText(text: String): List<String> {
+    val unescaped = text
+        .replace(Regex("\\\\u002[fF]"), "/")
+        .replace(Regex("\\\\u002[eE]"), ".")
+        .replace(Regex("\\\\u0026"), "&")
+        .replace(Regex("\\\\u003[fF]"), "?")
+        .replace(Regex("\\\\u003[dD]"), "=")
+        .replace("\\\\/", "/")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
     val absolute = Regex("https?://[^\\s\"'<>\\\\()\\[\\]]+", RegexOption.IGNORE_CASE)
         .findAll(unescaped)
         .map { it.value.trimEnd(')', ']', '}', ',', ';', '|') }
-        .filter { runCatching { java.net.URI(it).path.orEmpty().endsWith(".m3u8", true) }.getOrDefault(false) }
+        .filter(::isVideoAddress)
         .toList()
     if (absolute.isNotEmpty()) return absolute
     return listOfNotNull(unescaped.trim().takeIf {
-        runCatching { java.net.URI(it).path.orEmpty().endsWith(".m3u8", true) }.getOrDefault(false)
+        isVideoAddress(it)
     })
+}
+
+internal fun extractHtmlVideoTargets(html: String, base: java.net.URI): List<String> =
+    parseHtmlVideoTargets(html, base)
+
+private fun parseHtmlVideoTargets(html: String, base: java.net.URI): List<String> {
+    val candidates = findVideoUrlsInText(html).toMutableList()
+    val normalized = html
+        .replace(Regex("\\\\u002[fF]"), "/")
+        .replace(Regex("\\\\u002[eE]"), ".")
+        .replace(Regex("\\\\u0026"), "&")
+        .replace(Regex("\\\\u003[fF]"), "?")
+        .replace(Regex("\\\\u003[dD]"), "=")
+        .replace("\\\\/", "/")
+        .replace("\\/", "/")
+        .replace("&amp;", "&")
+    val relative = Regex("(?i)[\\\"']((?:\\./|\\../|/)[^\\\"'<>\\s]+\\.(?:m3u8|mp4)(?:\\?[^\\\"'<>\\s]*)?)(?=[\\\"'<>\\s]|$)")
+        .findAll(normalized)
+        .map { it.groupValues[1] }
+    candidates += relative
+    return candidates.mapNotNull { address ->
+        runCatching { base.resolve(address.trimEnd(')', ']', '}', ',', ';', '|')) }.getOrNull()?.takeIf {
+            it.scheme in listOf("http", "https") && it.host != null && it.userInfo == null && isVideoAddress(it.toString())
+        }?.toString()
+    }.distinct()
 }
 
 internal fun MainActivity.openWebVideo(url: String) {

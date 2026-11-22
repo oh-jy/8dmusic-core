@@ -53,8 +53,7 @@ if ($WithAsr) { $GradleArgs += '-PwithAsr=true' }
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 & $gradle --project-dir $PSScriptRoot --project-cache-dir "$PSScriptRoot\build\gradle" `
     "-Dkotlin.project.persistent.dir=$PSScriptRoot\build\kotlin" `
-    '-Pkotlin.compiler.execution.strategy=in-process' `
-    @tasks --console=plain --no-daemon @GradleArgs
+    @tasks --console=plain @GradleArgs
 if ($LASTEXITCODE -ne 0) { throw "Gradle build failed: $LASTEXITCODE" }
 $stopwatch.Stop()
 
