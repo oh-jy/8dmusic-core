@@ -108,6 +108,94 @@ internal fun MainActivity.prepareOnlineSelection(item: MusicItem, status: String
     return generation
 }
 
+private fun mvQualityRank(label: String): Int = when {
+    label.contains("蓝光") -> 40
+    label.contains("超清") -> 30
+    label.contains("高清") -> 20
+    label.contains("标清") || label.contains("流畅") -> 10
+    else -> 0
+}
+
+private fun highestMvOption(options: List<j5i.spatial8d.provider.ProviderTrackRef.MvOption>): j5i.spatial8d.provider.ProviderTrackRef.MvOption =
+    options.maxWithOrNull(compareBy<j5i.spatial8d.provider.ProviderTrackRef.MvOption>({ it.size > 0L }, { it.size }, { mvQualityRank(it.label) }))
+        ?: options.last()
+
+internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, autoSelectHighestQuality: Boolean = false) {
+    if (recordingKind.isNotEmpty()) { toast("请先停止录音，再播放 MV"); return }
+    val generation = prepareOnlineSelection(item, "正在解析 MV…")
+    dismissSource()
+    Thread {
+        val result = runCatching { j5i.spatial8d.provider.ProviderTrackRef.mvOptions(this, item) }
+        main.post {
+            if (generation != loadGeneration || isDestroyed || isFinishing) return@post
+            result.onSuccess { options ->
+                if (autoSelectHighestQuality) {
+                    val option = highestMvOption(options)
+                    playbackStatus = "正在自动播放最高质量 MV 音频：${option.label}"
+                    refreshPlayback()
+                    loadProviderMv(item, option, audioOnly = true, generation)
+                    return@onSuccess
+                }
+                playbackStatus = "请选择 MV 清晰度"
+                refreshPlayback()
+                lateinit var sheet: android.app.Dialog
+                sheet = j5i.spatial8d.ui.ThemeUi.showSheet(this, palette, "选择 MV 清晰度",
+                    "${if (audioOnly) "仅播放音轨" else "播放 MV 视频"} · 同一版本的音频和视频共用缓存") {
+                    options.forEach { option ->
+                        val cached = j5i.spatial8d.provider.ProviderMvCache.file(this@playProviderMv, item, option).let { it.isFile && it.length() > 1024L }
+                        val size = if (option.size > 0L) String.format(java.util.Locale.ROOT, " · %.1f MB", option.size / 1048576.0) else " · 大小未知"
+                        addView(j5i.spatial8d.ui.ThemeUi.button(this@playProviderMv, palette,
+                            option.label + size + if (cached) " · 已缓存" else "") {
+                            sheet.dismiss()
+                            if (generation == loadGeneration) loadProviderMv(item, option, audioOnly, generation)
+                        })
+                    }
+                }
+                sheet.show()
+            }.onFailure {
+                playbackStatus = "MV 解析失败：${it.message}"
+                toast(playbackStatus)
+                refreshPlayback()
+            }
+        }
+    }.start()
+}
+
+private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.provider.ProviderTrackRef.MvOption,
+    audioOnly: Boolean, generation: Int) {
+    Thread {
+        val result = runCatching {
+            j5i.spatial8d.provider.ProviderMvCache.cache(this, item, option,
+                { generation == loadGeneration && !isDestroyed }) { copied, total ->
+                main.post {
+                    if (generation == loadGeneration && !isDestroyed) {
+                        val downloaded = String.format(java.util.Locale.ROOT, "%.1f", copied / 1048576.0)
+                        val size = if (total > 0L) " / ${String.format(java.util.Locale.ROOT, "%.1f", total / 1048576.0)} MB" else " MB"
+                        playbackStatus = "正在缓存 MV：$downloaded$size（音频和视频共用）"
+                        refreshPlayback()
+                    }
+                }
+            }
+        }
+        main.post {
+            if (generation != loadGeneration || isDestroyed || isFinishing) return@post
+            result.onSuccess { media ->
+                if (audioOnly) load(media)
+                else {
+                    playbackStatus = "正在播放 MV 视频"
+                    refreshPlayback()
+                    openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(media.uri), "video/mp4")
+                        .putExtra("j5i.providerMv", Uri.parse(item.uri).getQueryParameter("mv")))
+                }
+            }.onFailure {
+                playbackStatus = "MV 解析失败：${it.message}"
+                toast(playbackStatus)
+                refreshPlayback()
+            }
+        }
+    }.start()
+}
+
 internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
     if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
         if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return }
@@ -117,7 +205,16 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
             main.post {
                 if (generation != loadGeneration) return@post
                 resolved.onSuccess { load(it, autoplay) }
-                    .onFailure { playbackStatus = "在线歌曲解析失败：${it.message}"; toast(playbackStatus); refreshPlayback() }
+                    .onFailure {
+                        val mv = Uri.parse(item.uri).getQueryParameter("mv").orEmpty()
+                        if (mv.isNotBlank()) {
+                            playProviderMv(item, audioOnly = true, autoSelectHighestQuality = true)
+                        } else {
+                            playbackStatus = "在线歌曲解析失败：${it.message}"
+                            toast(playbackStatus)
+                            refreshPlayback()
+                        }
+                    }
             }
         }.start()
         return
@@ -419,9 +516,13 @@ internal fun MainActivity.showPlaylist() {
                 onlinePlayingUri != null -> 2
                 else -> 0
             }) { tab, body, dialog ->
+                // FM and online share one body; invalidate delayed online
+                // callbacks before rebuilding the selected tab.
+                providerRequest++
                 fmDialog = if (tab == 1) dialog else null
                 onlineDialog = if (tab == 2) dialog else null
                 sourceSheetBody = if (tab == 0) null else body
+                if (tab == 0) body.tag = "local"
                 if (tab == 1) {
                     populateSourceSheet(body, false)
                     sourceStatusView = j5i.spatial8d.ui.ThemeUi.text(this, "", 11f, palette,

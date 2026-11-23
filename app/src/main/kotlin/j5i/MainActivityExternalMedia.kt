@@ -51,7 +51,7 @@ private fun MainActivity.videoIcon(res: Int, description: String, action: () -> 
 
 internal fun MainActivity.openExternalMedia(intent: Intent) {
     val uri = intent.data ?: return
-    val resumeKey = uri.toString()
+    val resumeKey = intent.getStringExtra("j5i.providerMv") ?: uri.toString()
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
     externalVideoDialog?.dismiss()
@@ -65,6 +65,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     val overlay = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
     val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(8, 8, 8, 8); setBackgroundColor(Color.TRANSPARENT) }
     val topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+    val rightControls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     val seek = SeekBar(this).apply {
         ThemeUi.configureSeekBar(this, palette, playback = true)
         thumbTintList = android.content.res.ColorStateList.valueOf(palette.accent)
@@ -103,6 +104,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setPadding(8, 8, 8, 8)
         setBackgroundColor(Color.TRANSPARENT)
     }
+    val controlGroups = listOf(controls, topBar, rightControls, centerButtons)
     centerButtons.addView(videoIcon(android.R.drawable.ic_media_rew, "后退 10 秒") {
         player.seekTo((player.currentPosition - 10000).coerceAtLeast(0)); showControls()
     }.apply {
@@ -118,7 +120,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 48f), ThemeUi.dp(this, 48f)))
     val hide = Runnable {
         if (player.isPlaying) {
-            listOf(controls, topBar, centerButtons).forEach { view ->
+            controlGroups.forEach { view ->
                 view.animate().alpha(0f).setDuration(250).withEndAction { view.visibility = android.view.View.INVISIBLE }.start()
             }
             hidden = true
@@ -126,7 +128,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     showControls = {
         hidden = false
-        listOf(controls, topBar, centerButtons).forEach { view ->
+        controlGroups.forEach { view ->
             view.animate().cancel()
             view.visibility = android.view.View.VISIBLE
             view.animate().alpha(1f).setDuration(150).start()
@@ -218,7 +220,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
             toggleVideoFavorite(uri.toString()); refreshFavorite(); showControls()
         }.topIcon()
         refreshFavorite()
-        topBar.addView(favoriteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
+        rightControls.addView(favoriteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
     }
     lateinit var muteButton: ImageButton
     muteButton = videoIcon(android.R.drawable.ic_lock_silent_mode_off, "静音") {
@@ -228,10 +230,19 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         muteButton.contentDescription = if (muted) "取消静音" else "静音"
         showControls()
     }.topIcon()
-    topBar.addView(muteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
-    topBar.addView(speedButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
-    topBar.addView(modeButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
-    topBar.addView(videoIcon(android.R.drawable.ic_menu_rotate, "切换横竖屏") {
+    rightControls.addView(muteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
+    rightControls.addView(speedButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
+    rightControls.addView(modeButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
+    val providerMvItem = currentItem?.takeIf { intent.hasExtra("j5i.providerMv") && it.uri.startsWith("online://plugin/") }
+    if (providerMvItem != null) rightControls.addView(TextView(this).apply {
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+        textSize = 12f
+        text = "清晰度"
+        contentDescription = "切换 MV 清晰度"
+        setOnClickListener { dialog.dismiss(); playProviderMv(providerMvItem, audioOnly = false) }
+    }, LinearLayout.LayoutParams(ThemeUi.dp(this, 60f), topButtonSize))
+    rightControls.addView(videoIcon(android.R.drawable.ic_menu_rotate, "切换横竖屏") {
         requestedOrientation = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         overlay.post { applyScaleMode() }
@@ -240,16 +251,20 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     controls.addView(seek, LinearLayout.LayoutParams(-1, ThemeUi.dp(this, 40f)))
     overlay.addView(player, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
     overlay.addView(topBar, FrameLayout.LayoutParams(-1, -2, Gravity.TOP).apply {
-        val margin = ThemeUi.dp(this@openExternalMedia, 16f)
+        val margin = ThemeUi.dp(this@openExternalMedia, 24f)
         setMargins(margin, margin, margin, 0)
     })
     overlay.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = ThemeUi.dp(this@openExternalMedia, 24f) })
+    overlay.addView(rightControls, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
+        rightMargin = ThemeUi.dp(this@openExternalMedia, 24f)
+        bottomMargin = ThemeUi.dp(this@openExternalMedia, 68f)
+    })
     overlay.addView(centerButtons, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.addView(feedback, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.addView(loading, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.setOnApplyWindowInsetsListener { _, insets ->
         val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout else null
-        val margin = ThemeUi.dp(this, 16f)
+        val margin = ThemeUi.dp(this, 24f)
         (topBar.layoutParams as FrameLayout.LayoutParams).apply {
             setMargins(margin + (cutout?.safeInsetLeft ?: 0), margin + (cutout?.safeInsetTop ?: 0), margin + (cutout?.safeInsetRight ?: 0), 0)
             topBar.layoutParams = this
@@ -260,6 +275,11 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
             bottomMargin = ThemeUi.dp(this@openExternalMedia, 24f) + (cutout?.safeInsetBottom ?: 0)
             controls.layoutParams = this
         }
+        (rightControls.layoutParams as FrameLayout.LayoutParams).apply {
+            rightMargin = ThemeUi.dp(this@openExternalMedia, 24f) + (cutout?.safeInsetRight ?: 0)
+            bottomMargin = ThemeUi.dp(this@openExternalMedia, 68f) + (cutout?.safeInsetBottom ?: 0)
+            rightControls.layoutParams = this
+        }
         insets
     }
     overlay.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -267,9 +287,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     fun toggleControls() {
         if (hidden) showControls() else {
-            controls.visibility = android.view.View.INVISIBLE
-            topBar.visibility = android.view.View.INVISIBLE
-            centerButtons.visibility = android.view.View.INVISIBLE
+            controlGroups.forEach { it.visibility = android.view.View.INVISIBLE }
             hidden = true
             main.removeCallbacks(hide)
         }

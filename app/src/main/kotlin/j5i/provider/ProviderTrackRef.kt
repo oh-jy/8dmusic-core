@@ -10,7 +10,7 @@ import java.net.URLEncoder
 internal object ProviderTrackRef {
     fun plugin(id: String, track: JSONObject) = MusicItem(
         (id + ":" + track.getString("id")).hashCode().toLong(), track.getString("title"),
-        uri("plugin", id, track.getString("id"), track.optString("duration")),
+        uri("plugin", id, track.getString("id"), track.optString("duration"), mv = track.optString("mvUrl")),
         duration = track.optLong("duration") * 1000, artist = track.optString("artist").ifEmpty { "未知歌手" },
         album = "plugin:https:$id")
 
@@ -20,6 +20,53 @@ internal object ProviderTrackRef {
         album = "provider:${if (track.audioUrl?.startsWith("http://", true) == true) "http" else "https"}:$id")
 
     fun isOnline(item: MusicItem) = item.uri.startsWith("online://plugin/") || item.uri.startsWith("online://provider/")
+
+    fun mvIdentity(reference: String): Pair<String, String> {
+        val uri = java.net.URI(reference)
+        require(uri.scheme == "online" && uri.host == "plugin" && uri.path == "/play") { "只有来源歌曲支持 MV 解析" }
+        val fields = uri.rawQuery.orEmpty().split('&').associate {
+            it.substringBefore('=') to java.net.URLDecoder.decode(it.substringAfter('=', ""), "UTF-8")
+        }
+        val source = fields["source"].orEmpty()
+        val mv = java.net.URI(fields["mv"].orEmpty())
+        require(mv.scheme == "https" && mv.rawUserInfo == null && mv.port == -1 && mv.rawQuery == null && mv.fragment == null) { "MV 地址无效" }
+        val id = when (source) {
+            "platform.qq" -> {
+                require(mv.host == "y.qq.com") { "QQ MV 地址无效" }
+                Regex("/n/ryqq/mv/([A-Za-z0-9]+)").matchEntire(mv.path)?.groupValues?.get(1)
+            }
+            "platform.kugou" -> {
+                require(mv.host == "www.kugou.com") { "酷狗 MV 地址无效" }
+                Regex("/mvweb/html/mv_([A-Fa-f0-9]{32})\\.html").matchEntire(mv.path)?.groupValues?.get(1)
+            }
+            else -> null
+        }
+        require(!id.isNullOrEmpty()) { "未找到有效的来源 MV 标识" }
+        return source to id
+    }
+
+    data class MvOption(val id: String, val label: String, val size: Long, val url: String)
+
+    fun mvOptions(context: Context, item: MusicItem): List<MvOption> {
+        val (source, mvId) = mvIdentity(item.uri)
+        val entry = ProviderPluginStore(context).list().firstOrNull { it.enabled && it.descriptor.id == source }
+            ?: error("插件来源不存在或已停用")
+        val request = JSONObject().put("version", 1).put("operation", "mvOptions").put("id", mvId)
+            .put("cookie", ProviderCredentials(context).get(source))
+        if (android.util.Log.isLoggable("8DProvider", android.util.Log.INFO))
+            android.util.Log.i("8DProvider", "查询可用 MV 清晰度 method=mvOptions source=$source mvId=$mvId")
+        val response = JSONObject(ProviderPluginRunner.invoke(context, entry, request.toString()))
+        val formats = response.getJSONArray("formats")
+        require(formats.length() in 1..12) { "没有可播放的 MV 版本" }
+        return (0 until formats.length()).map { index ->
+            val format = formats.getJSONObject(index)
+            val id = format.getString("id")
+            require(id.matches(Regex("[A-Za-z0-9_-]{1,32}"))) { "MV 清晰度标识无效" }
+            val url = format.getString("url")
+            ProviderBrokerPolicy.validateUrl(url, entry.descriptor.domains, allowHttp = "http-audio" in entry.descriptor.capabilities)
+            MvOption(id, format.getString("label").take(40), format.optLong("size").coerceAtLeast(0), url)
+        }.distinctBy { it.id }.sortedBy { if (it.size > 0) it.size else Long.MAX_VALUE }
+    }
 
     fun resolve(context: Context, item: MusicItem): MusicItem {
         val uri = Uri.parse(item.uri)
@@ -57,8 +104,8 @@ internal object ProviderTrackRef {
         return item.copy(uri = url, album = "provider:${if (entry.definition.usesHttp) "http" else "https"}:$id")
     }
 
-    private fun uri(kind: String, id: String, trackId: String, duration: String, audio: String = ""): String {
+    private fun uri(kind: String, id: String, trackId: String, duration: String, audio: String = "", mv: String = ""): String {
         fun enc(value: String) = URLEncoder.encode(value, "UTF-8")
-        return "online://$kind/play?source=${enc(id)}&id=${enc(trackId)}&duration=${enc(duration)}&audio=${enc(audio)}"
+        return "online://$kind/play?source=${enc(id)}&id=${enc(trackId)}&duration=${enc(duration)}&audio=${enc(audio)}&mv=${enc(mv)}"
     }
 }

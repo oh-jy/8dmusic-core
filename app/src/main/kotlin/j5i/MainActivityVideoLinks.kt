@@ -43,16 +43,19 @@ private fun MainActivity.saveVideoHistory(entries: List<VideoHistoryEntry>) {
 }
 
 internal fun MainActivity.rememberVideo(uri: Uri, intent: Intent) {
+    val providerMv = intent.getStringExtra("j5i.providerMv")?.takeIf { it.isNotBlank() }
+    val historyUri = providerMv ?: uri.toString()
     val filename = if (uri.scheme == "content") runCatching {
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         }
     }.getOrNull() else null
-    val title = intent.getStringExtra(Intent.EXTRA_TITLE)?.takeIf { it.isNotBlank() }
+    val title = (if (providerMv != null) currentItem?.name?.takeIf { it.isNotBlank() } else null)
+        ?: intent.getStringExtra(Intent.EXTRA_TITLE)?.takeIf { it.isNotBlank() }
         ?: filename?.takeIf { it.isNotBlank() }
         ?: uri.lastPathSegment?.takeIf { it.isNotBlank() }
         ?: uri.host ?: "视频"
-    saveVideoHistory(recordVideoHistory(videoHistory(), uri.toString(), videoTitle(uri.toString(), title)))
+    saveVideoHistory(recordVideoHistory(videoHistory(), historyUri, videoTitle(historyUri, title)))
 }
 
 private fun MainActivity.renameVideoHistory(entry: VideoHistoryEntry) {
@@ -168,7 +171,6 @@ internal fun MainActivity.showVideoLinks() {
             }
             addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 48f), ThemeUi.dp(this@showVideoLinks, 40f)))
             setOnClickListener {
-                sheet.dismiss()
                 if (favorite) openVideoLink(entry.uri)
                 else openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.uri), "video/*"))
             }
@@ -204,17 +206,28 @@ internal fun MainActivity.showVideoLinks() {
                 popup.showAsDropDown(more, 0, 0, Gravity.END)
             }
         }
-        val input = ThemeUi.input(this@showVideoLinks, palette, "输入网页、MP4 或 M3U8 链接")
-        addView(input)
-        addView(ThemeUi.button(this@showVideoLinks, palette, "打开") {
+        val input = ThemeUi.input(this@showVideoLinks, palette, "输入网页、MP4 或 M3U8 链接").apply {
+            setPadding(paddingLeft, paddingTop, ThemeUi.dp(this@showVideoLinks, 64f), paddingBottom)
+        }
+        val inputHeight = ThemeUi.dp(this@showVideoLinks, 44f)
+        val inputRow = FrameLayout(this@showVideoLinks).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, inputHeight)
+        }
+        inputRow.addView(input, FrameLayout.LayoutParams(-1, inputHeight))
+        inputRow.addView(ThemeUi.text(this@showVideoLinks, "打开", 13f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
+            gravity = Gravity.CENTER
+            setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, ThemeUi.dp(this@showVideoLinks, 10f), 0)
+            setOnClickListener {
             val url = input.text.toString().trim()
             val parsed = Uri.parse(url)
             if (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrEmpty() || parsed.userInfo != null) {
                 toast("请输入有效的 HTTP 或 HTTPS 链接")
             } else {
-                sheet.dismiss(); openVideoLink(url)
+                openVideoLink(url)
             }
-        })
+            }
+        }, FrameLayout.LayoutParams(-2, -1, Gravity.END or Gravity.CENTER_VERTICAL))
+        addView(inputRow)
         addView(ThemeUi.text(this@showVideoLinks, "播放历史", 15f, palette, bold = true))
         val history = videoHistory()
         if (history.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, "暂无播放历史", 13f, palette, role = ThemeUi.ROLE_SUB))

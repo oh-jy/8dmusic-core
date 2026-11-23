@@ -233,6 +233,7 @@ internal fun MainActivity.importedStations(): List<RadioStation> = providerStore
 
 internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolean) {
     sourceSheetBody = body
+    body.tag = if (online) "online" else "fm"
     body.removeAllViews()
     val type = if (online) ProviderDefinition.Type.MUSIC else ProviderDefinition.Type.FM
     val entries = try { providerStore.list().filter { it.enabled && it.definition.type == type } }
@@ -443,7 +444,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     }
     if (onlineQuery.isBlank() && providerResults.isEmpty() && pluginResults.isEmpty() && onlineAutoSource != selected.first) {
         onlineAutoSource = selected.first
-        body.post { if (!isDestroyed && providerSelection == selected.first) runSearch() }
+        val request = providerRequest
+        body.post { if (!isDestroyed && request == providerRequest && body.tag == "online" &&
+            sourceSheetBody === body && providerSelection == selected.first) runSearch() }
     }
     val visibleTracks = pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }
         .map { (id, track) -> j5i.spatial8d.provider.ProviderTrackRef.plugin(id, track) } +
@@ -489,6 +492,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val parts = track.optInt("partCount", 1)
         val badges = buildList {
             if (track.optBoolean("vip")) add("【V】")
+            if (track.optString("mvUrl").isNotBlank()) add("MV")
             if (track.optBoolean("compilation")) add("合集 $parts 首") else if (id == "platform.bilibili") add("视频")
         }
         val badge = badges.joinToString(" ")
@@ -547,6 +551,18 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
         addView(ThemeUi.button(this@showOnlineTrackActions, palette, "加入 / 新建歌单") {
             sheet.dismiss(); showOnlinePlaylistPicker(listOf(item))
         })
+        if (item.uri.startsWith("online://plugin/")) {
+            val mv = Uri.parse(item.uri).getQueryParameter("mv").orEmpty()
+            if (mv.isNotBlank()) {
+                addView(ThemeUi.button(this@showOnlineTrackActions, palette, "提取 MV 音频播放") {
+                    sheet.dismiss()
+                    playProviderMv(item, audioOnly = true)
+                })
+                addView(ThemeUi.button(this@showOnlineTrackActions, palette, "播放 MV 视频") {
+                    sheet.dismiss(); playProviderMv(item, audioOnly = false)
+                })
+            }
+        }
         if (item.uri.startsWith("online://plugin/") && item.uri.contains("source=platform.bilibili")) {
             addView(ThemeUi.button(this@showOnlineTrackActions, palette, "播放视频") {
                 val id = Uri.parse(item.uri).getQueryParameter("id").orEmpty()
@@ -651,6 +667,7 @@ private fun MainActivity.pluginSearch(entry: j5i.spatial8d.provider.ProviderPlug
 }
 
 private fun MainActivity.refreshOnlineResults(body: LinearLayout, scrollY: Int) {
+    if (body.tag != "online" || sourceSheetBody !== body || !body.isAttachedToWindow) return
     val oldScroll = (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }.lastOrNull()
     val oldRows = oldScroll?.getChildAt(0) as? LinearLayout
     var anchor: Pair<String, Int>? = null

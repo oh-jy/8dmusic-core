@@ -816,7 +816,15 @@ internal fun MainActivity.navbar(): LinearLayout {
                 videoTapAt = now
                 if (videoTapCount == 3) {
                     videoTapCount = 0
-                    showVideoLinks()
+                    lateinit var dialog: android.app.Dialog
+                    dialog = ThemeUi.showSheet(this@navbar, palette, "打开视频链接",
+                        subtitle = "是否打开视频链接和播放历史？", compactPicker = true) {
+                        addView(ThemeUi.button(this@navbar, palette, "打开", ThemeUi.ROLE_ACCENT_FILL) {
+                            dialog.dismiss()
+                            showVideoLinks()
+                        })
+                    }
+                    dialog.show()
                 }
             }
         })

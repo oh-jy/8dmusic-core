@@ -425,19 +425,19 @@ internal class ProceduralVisuals {
                     val opacity = (trackCount - track).coerceIn(0.0, 1.0)
                     if (opacity == 0.0) continue
                     val seed = ((index / slots) * 0.61803398875) % 1.0
-                    val travel = (seed + time * (.025 + (index % 7) * .002)) % 1.0
+                    val travel = (seed + time * (.020 + (index % 7) * .0015)) % 1.0
                     val angle = track * 2 * PI / trackCount + phase + travel * (3.0 + morph * 6.0)
                     val radius = unit * (.05 + travel * .67)
                     val bend = (sin(angle * 3 + phase * 2) * morph * .08 +
                         sin(angle * 5 - phase * 1.4 + travel * 8) * .025) * unit
                     val x = (cos(angle) * radius + bend).toFloat()
                     val y = (sin(angle) * radius * (.55 + .4 * sin(phase * .4) * sin(phase * .4))).toFloat()
-                    color(180f + (travel * 170).toFloat() + (time * 6).toFloat(), ((45 + 185 * (1 - travel)) * opacity).toInt())
-                    canvas.drawCircle(x, y, density * (.6f + (1 - travel).toFloat() * 1.5f + pulse), paint)
                     if (index % 13 == 0) {
-                        color(200f + (travel * 120).toFloat(), (45 * opacity).toInt())
-                        canvas.drawCircle(x, y, density * (2f + pulse * 1.5f), paint)
+                        color(200f + (travel * 120).toFloat(), (22 * opacity).toInt())
+                        canvas.drawCircle(x, y, density * (2.2f + pulse * .3f), paint)
                     }
+                    color(180f + (travel * 170).toFloat() + (time * 6).toFloat(), ((80 + 160 * (1 - travel)) * opacity).toInt())
+                    canvas.drawCircle(x, y, density * (.6f + (1 - travel).toFloat() * 1.5f + pulse * .25f), paint)
                 }
                 paint.style = Paint.Style.STROKE
             }
