@@ -64,7 +64,7 @@ internal fun MainActivity.showImportPreview(
         addView(content)
     }
     val dialog = AlertDialog.Builder(this).setTitle(title).setView(scroll)
-        .setNegativeButton("取消", null).setPositiveButton("确认导入") { _, _ -> confirm() }.create()
+        .setNegativeButton(t("cancel"), null).setPositiveButton(t("source.import.confirm")) { _, _ -> confirm() }.create()
     dialog.setOnShowListener {
         val maxHeight = (resources.displayMetrics.heightPixels * 0.55f).toInt()
         scroll.measure(android.view.View.MeasureSpec.makeMeasureSpec(dialog.window!!.decorView.width, android.view.View.MeasureSpec.AT_MOST),
@@ -78,36 +78,36 @@ internal fun MainActivity.showImportPreview(
 
 internal fun MainActivity.showProviderManager() {
     val entries = try { providerStore.list() } catch (e: Exception) {
-        toast("读取来源失败：${e.message}")
+        toast("${t("source.read_failed")}: ${errorDetail(e)}")
         return
     }
     lateinit var dialog: android.app.Dialog
-    dialog = ThemeUi.showSheet(this, palette, "管理在线来源", "来源按需启用；导入前会展示内容与风险。") {
+    dialog = ThemeUi.showSheet(this, palette, t("source.manager"), t("source.manager.hint")) {
         fun action(label: String, run: () -> Unit) {
             addView(ThemeUi.button(this@showProviderManager, palette, label) { dialog.dismiss(); run() })
         }
-        action("从文件导入来源或插件") { openProviderFile.launch(arrayOf("*/*")) }
-        action("扫描二维码导入") {
+        action(t("source.import.file")) { openProviderFile.launch(arrayOf("*/*")) }
+        action(t("source.import.qr")) {
             scanProvider.launch(ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                .setPrompt("扫描来源 JSON 或 HTTPS 配置地址").setBeepEnabled(false))
+                .setPrompt(t("source.qr.prompt")).setBeepEnabled(false))
         }
-        action("管理歌曲插件") { showPluginManager() }
-        if (entries.isNotEmpty()) addView(ThemeUi.text(this@showProviderManager, "已导入的配置", 12f, palette, bold = true))
+        action(t("source.plugins")) { showPluginManager() }
+        if (entries.isNotEmpty()) addView(ThemeUi.text(this@showProviderManager, t("source.imported"), 12f, palette, bold = true))
         entries.forEach { entry ->
-            action("${if (entry.enabled) "已启用" else "已停用"} · ${if (entry.definition.type == ProviderDefinition.Type.FM) "FM" else "歌曲"} · ${entry.definition.name}") {
+            action("${t(if (entry.enabled) "common.enabled" else "common.disabled")} · ${if (entry.definition.type == ProviderDefinition.Type.FM) "FM" else t("source.music")} · ${entry.definition.name}") {
                     AlertDialog.Builder(this@showProviderManager).setTitle(entry.definition.name)
-                        .setItems(arrayOf(if (entry.enabled) "停用" else "启用", "删除")) { _, choice ->
+                        .setItems(arrayOf(t(if (entry.enabled) "common.disable" else "common.enable"), t("delete"))) { _, choice ->
                             if (choice == 0) {
                                 runCatching { providerStore.setEnabled(entry.definition.id, !entry.enabled) }
                                     .onSuccess { if (entry.enabled) stopRemovedProvider(entry.definition.id) }
-                                    .onFailure { toast("操作失败：${it.message}") }
+                                    .onFailure { toast("${t("common.operation_failed")}: ${errorDetail(it)}") }
                                 refreshProviderUi()
                                 showProviderManager()
-                            } else AlertDialog.Builder(this@showProviderManager).setMessage("删除来源配置？不会删除音频文件。")
-                                .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
+                            } else AlertDialog.Builder(this@showProviderManager).setMessage(t("source.delete.confirm"))
+                                .setNegativeButton(t("cancel"), null).setPositiveButton(t("delete")) { _, _ ->
                                     runCatching { providerStore.remove(entry.definition.id) }
                                         .onSuccess { stopRemovedProvider(entry.definition.id) }
-                                        .onFailure { toast("删除失败：${it.message}") }
+                                        .onFailure { toast("${t("common.delete_failed")}: ${errorDetail(it)}") }
                                     refreshProviderUi()
                                     showProviderManager()
                                 }.show()
@@ -127,23 +127,23 @@ private fun MainActivity.stopRemovedProvider(id: String) {
         ++radioGeneration
         radioProbes.forEach { it.stop() }
         service?.radio?.stop()
-        playbackStatus = "来源已停用"
+        playbackStatus = t("plugin.source.disabled")
         refreshPlayback()
     } else if (currentItem?.album?.endsWith(":$id") == true && currentItem?.album?.startsWith("provider:") == true) {
         ++loadGeneration
         service?.stopLocal()
-        playbackStatus = "来源已停用"
+        playbackStatus = t("plugin.source.disabled")
         refreshPlayback()
     }
 }
 
-private fun readBounded(input: InputStream): ByteArray {
+private fun MainActivity.readBounded(input: InputStream): ByteArray {
     val out = ByteArrayOutputStream()
     val buffer = ByteArray(8192)
     while (true) {
         val n = input.read(buffer)
         if (n < 0) break
-        require(out.size() + n <= j5i.spatial8d.provider.ProviderJar.MAX_BYTES + 52) { "来源文件过大" }
+        require(out.size() + n <= j5i.spatial8d.provider.ProviderJar.MAX_BYTES + 52) { t("source.too_large") }
         out.write(buffer, 0, n)
     }
     return out.toByteArray()
@@ -152,7 +152,7 @@ private fun readBounded(input: InputStream): ByteArray {
 internal fun MainActivity.importProviderFile(uri: Uri) {
     Thread {
         val result = runCatching { requireNotNull(contentResolver.openInputStream(uri)).use(::readBounded) }
-        runOnUiThread { result.onSuccess(::previewProvider).onFailure { toast("导入失败：${it.message}") } }
+        runOnUiThread { result.onSuccess(::previewProvider).onFailure { toast("${t("common.import_failed")}: ${errorDetail(it)}") } }
     }.start()
 }
 
@@ -163,12 +163,12 @@ internal fun MainActivity.importProviderQr(contents: String) {
         return
     }
     if (!text.startsWith("https://", ignoreCase = true)) {
-        toast("二维码只支持 JSON 或 HTTPS 配置地址")
+        toast(t("source.qr.invalid"))
         return
     }
     Thread {
         val result = runCatching { ProviderNetwork.get(text, false, ProviderDefinition.MAX_BYTES) }
-        runOnUiThread { result.onSuccess(::previewProvider).onFailure { toast("读取来源失败：${it.message}") } }
+        runOnUiThread { result.onSuccess(::previewProvider).onFailure { toast("${t("source.read_failed")}: ${errorDetail(it)}") } }
     }.start()
 }
 
@@ -176,17 +176,17 @@ private fun MainActivity.previewProvider(bytes: ByteArray) {
     if (ProviderArchive.isEncrypted(bytes)) {
         val input = android.widget.EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-            hint = "请输入来源文件密码"
+            hint = t("source.password")
         }
-        AlertDialog.Builder(this).setTitle("解密来源文件").setView(input)
-            .setNegativeButton("取消", null).setPositiveButton("解密") { _, _ ->
+        AlertDialog.Builder(this).setTitle(t("source.decrypt")).setView(input)
+            .setNegativeButton(t("cancel"), null).setPositiveButton(t("plugin.login.decrypt")) { _, _ ->
                 val passphrase = input.text.toString().toCharArray()
                 input.text.clear()
                 Thread {
                     val result = try { runCatching { ProviderArchive.decrypt(bytes, passphrase) } }
                         finally { passphrase.fill('\u0000') }
                     runOnUiThread {
-                        result.onSuccess(::previewProvider).onFailure { toast("解密失败：密码错误或文件已损坏") }
+                        result.onSuccess(::previewProvider).onFailure { toast(t("source.decrypt.failed")) }
                     }
                 }.start()
             }.show()
@@ -197,24 +197,22 @@ private fun MainActivity.previewProvider(bytes: ByteArray) {
         return
     }
     val items = try { ProviderDefinition.parseImport(bytes) } catch (e: Exception) {
-        toast("配置无效：${e.message}")
+        toast("${t("source.invalid")}: ${errorDetail(e)}")
         return
     }
     val definitions = items.map(ProviderDefinition::parse)
     val cards = definitions.map { definition ->
         val fm = definition.type == ProviderDefinition.Type.FM
-        val summary = if (fm) "FM 电台 · ${definition.stations.size} 个电台 · ${definition.stations.sumOf { 1 + it.alternateUrls.size }} 条线路"
-            else "在线歌曲 · 搜索与播放"
-        val capability = if (fm) "播放配置中的直播地址，不支持自动更新或脚本。"
-            else "GET 搜索、读取音频地址，不支持登录、脚本及复杂签名。"
+        val summary = if (fm) t("source.summary.fm").format(definition.stations.size, definition.stations.sumOf { 1 + it.alternateUrls.size })
+            else t("source.summary.music")
+        val capability = t(if (fm) "source.capability.fm" else "source.capability.music")
         ImportPreviewCard(definition.name, summary,
-            "来源 ID\n${definition.id}\n\n能力\n$capability\n\n配置中的域名（${definition.domains.size}）\n${definition.domains.sorted().joinToString("\n")}")
+            "${t("plugin.source_id")}\n${definition.id}\n\n${t("source.capabilities")}\n$capability\n\n${t("source.domains")} (${definition.domains.size})\n${definition.domains.sorted().joinToString("\n")}")
     }
-    val warning = (if (definitions.any { it.usesHttp }) "明文 HTTP 风险：内容可能被窃听或篡改。\n\n" else "") +
-        "播放结果或直播列表可能包含其他音频域名。请确认来源可信，并已取得必要的使用权限。"
-    showImportPreview("确认导入来源", "请检查来源信息后再导入", cards, warning) {
-            runCatching { providerStore.putAll(items) }.onSuccess { toast("已导入 ${items.size} 个来源"); refreshProviderUi() }
-                .onFailure { toast("保存失败：${it.message}") }
+    val warning = (if (definitions.any { it.usesHttp }) "${t("source.warning.http")}\n\n" else "") + t("source.warning.trust")
+    showImportPreview(t("source.import.title"), t("source.import.review"), cards, warning) {
+            runCatching { providerStore.putAll(items) }.onSuccess { toast(t("source.import.count").format(items.size)); refreshProviderUi() }
+                .onFailure { toast("${t("plugin.login.save_failed")}: ${errorDetail(it)}") }
     }
 }
 
@@ -237,9 +235,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     body.removeAllViews()
     val type = if (online) ProviderDefinition.Type.MUSIC else ProviderDefinition.Type.FM
     val entries = try { providerStore.list().filter { it.enabled && it.definition.type == type } }
-    catch (e: Exception) { toast("来源读取失败：${e.message}"); return }
+    catch (e: Exception) { toast("${t("source.read_failed")}: ${errorDetail(e)}"); return }
     val plugins = if (online) try { pluginStore.list().filter { it.enabled && "search" in it.descriptor.capabilities } }
-        catch (e: Exception) { toast("插件读取失败：${e.message}"); return } else emptyList()
+        catch (e: Exception) { toast("${t("plugin.read_failed")}: ${errorDetail(e)}"); return } else emptyList()
     fun compactButton(label: String, selected: Boolean = false, action: () -> Unit) =
         ThemeUi.button(this, palette, label, ThemeUi.ROLE_TEXT, 30f).apply {
             setTextColor(if (selected) palette.accent else palette.sub)
@@ -251,23 +249,23 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         }
     val sourceHeader = ThemeUi.row(this).apply {
         gravity = android.view.Gravity.CENTER_VERTICAL
-        addView(ThemeUi.text(this@populateSourceSheet, if (online) "歌曲来源" else "电台来源", 12f, palette, role = ThemeUi.ROLE_SUB),
+        addView(ThemeUi.text(this@populateSourceSheet, t(if (online) "source.music.title" else "source.radio.title"), 12f, palette, role = ThemeUi.ROLE_SUB),
             LinearLayout.LayoutParams(0, -2, 1f))
-        addView(compactButton("来源管理") { showProviderManager() })
+        addView(compactButton(t("source.manage")) { showProviderManager() })
     }
     body.addView(sourceHeader)
     if (entries.isEmpty() && plugins.isEmpty()) {
         body.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = android.view.Gravity.CENTER
-            addView(ThemeUi.text(this@populateSourceSheet, if (online) "还没有在线歌曲来源" else "还没有电台来源", 16f, palette, bold = true))
-            addView(ThemeUi.text(this@populateSourceSheet, if (online) "导入歌曲插件或来源配置后，即可搜索播放" else "导入 FM 配置后，即可浏览和收听电台", 12f, palette, role = ThemeUi.ROLE_SUB))
-            addView(ThemeUi.button(this@populateSourceSheet, palette, "导入来源", ThemeUi.ROLE_ACCENT_FILL) { showProviderManager() })
+            addView(ThemeUi.text(this@populateSourceSheet, t(if (online) "source.music.empty" else "source.radio.empty"), 16f, palette, bold = true))
+            addView(ThemeUi.text(this@populateSourceSheet, t(if (online) "source.music.empty_hint" else "source.radio.empty_hint"), 12f, palette, role = ThemeUi.ROLE_SUB))
+            addView(ThemeUi.button(this@populateSourceSheet, palette, t("source.import"), ThemeUi.ROLE_ACCENT_FILL) { showProviderManager() })
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return
     }
     if (!online) {
-        val query = ThemeUi.input(this, palette, "搜索电台").apply {
+        val query = ThemeUi.input(this, palette, t("source.radio.search")).apply {
             layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@populateSourceSheet, 38f)).apply {
                 topMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
                 bottomMargin = ThemeUi.dp(this@populateSourceSheet, 6f)
@@ -276,6 +274,8 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val filters = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val stations = importedStations()
+        val generatedTypes = entries.flatMap { entry -> entry.definition.stations.filter { it.category.isEmpty() }.map { "${entry.definition.id}/${it.id}" } }.toSet()
+        val generatedLevels = entries.flatMap { entry -> entry.definition.stations.filter { it.level.isEmpty() }.map { "${entry.definition.id}/${it.id}" } }.toSet()
         val pinnedArray = runCatching { JSONArray(preferences.getString("pinnedRadioStations", "[]")) }.getOrDefault(JSONArray())
         val pinnedStations = (0 until pinnedArray.length()).mapNotNull { pinnedArray.optString(it).takeIf(String::isNotEmpty) }.toMutableList()
         var activeStation: android.view.View? = null
@@ -292,7 +292,12 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             })
             val buttons = ThemeUi.row(this)
             values.forEach { value ->
-                buttons.addView(compactButton(value, value == selected) { choose(value) })
+                val shown = when {
+                    value == "全部" -> t("playlist.all")
+                    value == "网络台" && stations.any { it.id in generatedTypes && it.type == value } -> t("ui.radio.network")
+                    else -> value
+                }
+                buttons.addView(compactButton(shown, value == selected) { choose(value) })
             }
             line.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(buttons) },
                 LinearLayout.LayoutParams(0, -2, 1f))
@@ -300,16 +305,16 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         }
         fun renderFilters() {
             filters.removeAllViews()
-            filterRow("地区", listOf("全部") + stations.map { it.region }.distinct(), sourceRegion) {
+            filterRow(t("source.radio.region"), listOf("全部") + stations.map { it.region }.distinct(), sourceRegion) {
                 sourceRegion = it; sourceCity = "全部"; populateSourceSheet(body, false)
             }
             if (sourceRegion != "全部" && sourceRegion != "全国") {
                 val cities = stations.filter { it.region == sourceRegion }.map { it.city }.distinct()
-                if (cities.size > 1) filterRow("城市", listOf("全部") + cities, sourceCity) {
+                if (cities.size > 1) filterRow(t("source.radio.city"), listOf("全部") + cities, sourceCity) {
                     sourceCity = it; populateSourceSheet(body, false)
                 }
             }
-            filterRow("类型", listOf("全部") + stations.map { it.type }.distinct(), sourceType) {
+            filterRow(t("source.radio.type"), listOf("全部") + stations.map { it.type }.distinct(), sourceType) {
                 sourceType = it; populateSourceSheet(body, false)
             }
         }
@@ -330,32 +335,34 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                     background = ThemeUi.bgDrawable(this@populateSourceSheet, if (active) palette.surfaceAlt else palette.surface, 8f)
                     addView(LinearLayout(this@populateSourceSheet).apply {
                         orientation = LinearLayout.VERTICAL
-                        addView(ThemeUi.text(this@populateSourceSheet, "${if (station.id in pinnedStations) "📌 " else ""}${station.name} · ${station.level}", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
-                        addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · ${station.type} · ${station.sources.size} 路源", 10f, palette, role = ThemeUi.ROLE_SUB))
+                        val level = if (station.id in generatedLevels) t("source.radio.imported") else station.level
+                        val type = if (station.id in generatedTypes) t("ui.radio.network") else station.type
+                        addView(ThemeUi.text(this@populateSourceSheet, "${if (station.id in pinnedStations) "📌 " else ""}${station.name} · $level", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
+                        addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · $type · ${t("source.radio.streams").format(station.sources.size)}", 10f, palette, role = ThemeUi.ROLE_SUB))
                         if (station.note.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT))
                     }, LinearLayout.LayoutParams(0, -2, 1f))
                     addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
-                        contentDescription = "${station.name}，更多操作"
+                        contentDescription = "${station.name}, ${t("playlist.more")}"
                         setPadding(ThemeUi.dp(this@populateSourceSheet, 10f), 0, ThemeUi.dp(this@populateSourceSheet, 10f), 0)
                         setOnClickListener {
                             lateinit var menu: android.app.Dialog
                             menu = ThemeUi.showSheet(this@populateSourceSheet, palette, station.name) {
-                                addView(ThemeUi.button(this@populateSourceSheet, palette, if (station.id in pinnedStations) "取消置顶" else "置顶电台") {
+                                addView(ThemeUi.button(this@populateSourceSheet, palette, t(if (station.id in pinnedStations) "source.radio.unpin" else "source.radio.pin")) {
                                     menu.dismiss()
                                     if (!pinnedStations.remove(station.id)) pinnedStations.add(0, station.id)
                                     preferences.edit().putString("pinnedRadioStations", JSONArray(pinnedStations).toString()).apply()
                                     renderStations()
                                 })
-                                addView(ThemeUi.button(this@populateSourceSheet, palette, "节目单") {
+                                addView(ThemeUi.button(this@populateSourceSheet, palette, t("source.radio.schedule")) {
                                     menu.dismiss(); showRadioSchedule(station)
                                 })
                             }
                             menu.show()
                         }
                     })
-                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE ▸" else "播放 ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                    addView(ThemeUi.text(this@populateSourceSheet, if (active) "LIVE ▸" else "${t("play")} ▸", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                         gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                        minWidth = kotlin.math.ceil(maxOf(paint.measureText("LIVE ▸"), paint.measureText("播放 ▸"))).toInt()
+                        minWidth = kotlin.math.ceil(maxOf(paint.measureText("LIVE ▸"), paint.measureText("${t("play")} ▸"))).toInt()
                     })
                     setOnClickListener { playRadio(station) }
                 })
@@ -376,12 +383,10 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         }, LinearLayout.LayoutParams(-1, 0, 1f))
         return
     }
-    val sources = listOf("@aggregate" to "聚合") + entries.map { it.definition.id to it.definition.name } + plugins.map { it.descriptor.id to it.descriptor.name }
+    val sources = listOf("@aggregate" to t("source.aggregate")) + entries.map { it.definition.id to it.definition.name } + plugins.map { it.descriptor.id to it.descriptor.name }
     val selected = sources.firstOrNull { it.first == providerSelection } ?: sources.first()
     providerSelection = selected.first
-    if (selected.first == "platform.bilibili") {
-        sourceHeader.addView(compactButton("合集缓存") { showBiliCacheManager() }, 1)
-    }
+    sourceHeader.addView(compactButton(t("source.cache")) { showPlaybackCacheManager() }, 1)
     sourceHeader.layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
         bottomMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
     }
@@ -408,16 +413,16 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     val selectedData = entries.firstOrNull { it.definition.id == selected.first }
     if (selectedPlugin != null && "login" in selectedPlugin.descriptor.capabilities) {
         val loggedIn = j5i.spatial8d.provider.ProviderCredentials(this).get(selected.first).isNotEmpty()
-        sourceHeader.addView(ThemeUi.text(this, if (loggedIn) "已登录" else "未登录", 10f, palette,
+        sourceHeader.addView(ThemeUi.text(this, t(if (loggedIn) "source.signed_in" else "source.signed_out"), 10f, palette,
             role = ThemeUi.ROLE_SUB), sourceHeader.childCount - 1)
-        sourceHeader.addView(compactButton("账号") { showPluginLogin(selected.first) }, sourceHeader.childCount - 1)
+        sourceHeader.addView(compactButton(t("source.account")) { showPluginLogin(selected.first) }, sourceHeader.childCount - 1)
     }
-    val query = ThemeUi.input(this, palette, "搜索歌曲").apply {
+    val query = ThemeUi.input(this, palette, t("plugin.search.hint")).apply {
         setText(onlineQuery)
         background = null
         imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
     }
-    val searchButton = ThemeUi.button(this, palette, "搜索", ThemeUi.ROLE_ACCENT_FILL, 34f).apply {
+    val searchButton = ThemeUi.button(this, palette, t("common.search"), ThemeUi.ROLE_ACCENT_FILL, 34f).apply {
         layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@populateSourceSheet, 34f)).apply {
             rightMargin = ThemeUi.dp(this@populateSourceSheet, 5f)
         }
@@ -456,11 +461,11 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
             bottomMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
         }
-        addView(compactButton("全部加入队列") {
+        addView(compactButton(t("source.queue.add_all")) {
             stageOnlineQueue((onlineQueue + visibleTracks).distinctBy { it.id }, providerSelection ?: "")
-            toast("已加入 ${visibleTracks.size} 首在线歌曲")
+            toast(t("source.queue.added_count").format(visibleTracks.size))
         })
-        addView(compactButton("保存到歌单") { showOnlinePlaylistPicker(visibleTracks) })
+        addView(compactButton(t("source.playlist.save")) { showOnlinePlaylistPicker(visibleTracks) })
     })
     val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     fun addTrack(title: String, artist: String, sourceId: String, item: MusicItem, available: Boolean = true,
@@ -479,11 +484,11 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 addView(ThemeUi.text(this@populateSourceSheet, "$artist · ${sources.firstOrNull { it.first == sourceId }?.second ?: sourceId}", 11f, palette, role = ThemeUi.ROLE_SUB))
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
-                contentDescription = "$title，更多操作"
+                contentDescription = "$title, ${t("playlist.more")}"
                 setPadding(ThemeUi.dp(this@populateSourceSheet, 10f), 0, ThemeUi.dp(this@populateSourceSheet, 10f), 0)
                 setOnClickListener { showOnlineTrackActions(item) }
             })
-            addView(ThemeUi.text(this@populateSourceSheet, if (available) "播放 ▸" else "暂无音源", 12f, palette, role = ThemeUi.ROLE_ACCENT))
+            addView(ThemeUi.text(this@populateSourceSheet, if (available) "${t("play")} ▸" else t("source.no_audio"), 12f, palette, role = ThemeUi.ROLE_ACCENT))
             setOnClickListener { play() }
         })
     }
@@ -493,7 +498,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val badges = buildList {
             if (track.optBoolean("vip")) add("【V】")
             if (track.optString("mvUrl").isNotBlank()) add("MV")
-            if (track.optBoolean("compilation")) add("合集 $parts 首") else if (id == "platform.bilibili") add("视频")
+            if (track.optBoolean("compilation")) add(t("source.collection.count").format(parts)) else if (id == "platform.bilibili") add(t("video.title"))
         }
         val badge = badges.joinToString(" ")
             addTrack(item.name, item.artist, id, item, badge = badge) {
@@ -518,18 +523,18 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 stageOnlineQueue(visibleItems, id, item.id)
             val entry = providerStore.list().firstOrNull { it.enabled && it.definition.id == id }
             val url = track.audioUrl
-            if (entry == null || url == null) { toast("来源已停用或未提供播放地址"); return@addTrack }
+            if (entry == null || url == null) { toast(t("source.unavailable")); return@addTrack }
             if (url.startsWith("http://", true) && !entry.definition.usesHttp) {
-                toast("该来源未授权明文 HTTP 播放")
+                toast(t("source.http.denied"))
                 return@addTrack
             }
-            if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return@addTrack }
+            if (recordingKind.isNotEmpty()) { toast(t("plugin.stop_recording")); return@addTrack }
             onlinePlayingUri = item.uri
             dismissSource()
             load(item)
         }
     }
-    if (providerResults.any { selected.first == "@aggregate" || it.first == selected.first } || pluginResults.any { selected.first == "@aggregate" || it.first == selected.first }) rows.addView(ThemeUi.button(this, palette, "加载更多") {
+    if (providerResults.any { selected.first == "@aggregate" || it.first == selected.first } || pluginResults.any { selected.first == "@aggregate" || it.first == selected.first }) rows.addView(ThemeUi.button(this, palette, t("source.more")) {
         onlinePage++
         if (selected.first == "@aggregate") searchAggregateProviders(body, entries.map { it.definition }, plugins, true)
         else if (selectedPlugin != null) searchPluginProvider(body, selectedPlugin, true)
@@ -542,65 +547,65 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
 
 internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
     lateinit var sheet: android.app.Dialog
-    sheet = ThemeUi.showSheet(this, palette, item.name.take(28), "${item.artist} · 在线歌曲不下载到本机") {
-        addView(ThemeUi.button(this@showOnlineTrackActions, palette, "加入当前播放队列") {
+    sheet = ThemeUi.showSheet(this, palette, item.name.take(28), "${item.artist} · ${t("source.online.hint")}") {
+        addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.queue.add")) {
             stageOnlineQueue((onlineQueue + item).distinctBy { it.id },
                 item.album.substringAfter(':').substringAfter(':'))
-            sheet.dismiss(); toast("已加入当前播放队列")
+            sheet.dismiss(); toast(t("source.queue.added"))
         })
-        addView(ThemeUi.button(this@showOnlineTrackActions, palette, "加入 / 新建歌单") {
+        addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.playlist.add")) {
             sheet.dismiss(); showOnlinePlaylistPicker(listOf(item))
         })
         if (item.uri.startsWith("online://plugin/")) {
             val mv = Uri.parse(item.uri).getQueryParameter("mv").orEmpty()
             if (mv.isNotBlank()) {
-                addView(ThemeUi.button(this@showOnlineTrackActions, palette, "提取 MV 音频播放") {
+                addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.mv.audio")) {
                     sheet.dismiss()
                     playProviderMv(item, audioOnly = true)
                 })
-                addView(ThemeUi.button(this@showOnlineTrackActions, palette, "播放 MV 视频") {
+                addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.mv.video")) {
                     sheet.dismiss(); playProviderMv(item, audioOnly = false)
                 })
             }
         }
         if (item.uri.startsWith("online://plugin/") && item.uri.contains("source=platform.bilibili")) {
-            addView(ThemeUi.button(this@showOnlineTrackActions, palette, "播放视频") {
+            addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.video.play")) {
                 val id = Uri.parse(item.uri).getQueryParameter("id").orEmpty()
                 val bvid = id.substringBefore(':')
                 val cid = id.substringAfter(':', "").toLongOrNull()
-                if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) toast("哔哩哔哩视频标识无效")
+                if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) toast(t("source.bili.invalid"))
                 else {
                     val url = Uri.parse("https://player.bilibili.com/player.html").buildUpon().appendQueryParameter("bvid", bvid)
                     if (cid != null && cid > 0) url.appendQueryParameter("cid", cid.toString())
                     sheet.dismiss(); openWebVideo(url.build().toString())
                 }
             })
-            addView(ThemeUi.button(this@showOnlineTrackActions, palette, "在哔哩哔哩中打开") {
+            addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.bili.open")) {
                 val id = android.net.Uri.parse(item.uri).getQueryParameter("id").orEmpty()
                 val bvid = id.substringBefore(':')
                 if (!bvid.matches(Regex("BV[0-9A-Za-z]+"))) {
-                    toast("哔哩哔哩视频标识无效")
+                    toast(t("source.bili.invalid"))
                     return@button
                 }
                 runCatching {
-                    if (!openBilibiliVideo(bvid)) toast("无法打开哔哩哔哩")
-                }.onFailure { toast("无法打开哔哩哔哩：${it.message}") }
+                    if (!openBilibiliVideo(bvid)) toast(t("source.bili.open_failed"))
+                }.onFailure { toast("${t("source.bili.open_failed")}: ${errorDetail(it)}") }
                 sheet.dismiss()
             })
             val cached = j5i.spatial8d.provider.ProviderAudioCache.cached(this@showOnlineTrackActions, item)
-            addView(ThemeUi.button(this@showOnlineTrackActions, palette, if (cached == null) "保存到 Download/bili" else "删除音频缓存").apply {
+            addView(ThemeUi.button(this@showOnlineTrackActions, palette, t(if (cached == null) "source.bili.save" else "source.bili.delete")).apply {
             setOnClickListener {
                 sheet.dismiss()
                 if (cached != null) {
                     val ok = j5i.spatial8d.provider.ProviderAudioCache.delete(this@showOnlineTrackActions, item)
-                    toast(if (ok) "缓存已删除" else "没有找到可删除的缓存")
+                    toast(t(if (ok) "source.bili.deleted" else "source.bili.no_cache"))
                 } else {
                     Thread {
                     val result = runCatching { j5i.spatial8d.provider.ProviderAudioCache.cache(this@showOnlineTrackActions, item, true) }
                     main.post { result.onSuccess { saved ->
                         musicStore.remember(saved); songs = (songs.filterNot { it.id == saved.id } + saved).toMutableList()
-                        musicStore.saveLibrary(songs); queue = musicStore.view(songs); toast("已保存到 Download/bili")
-                    }.onFailure { toast("缓存失败：${it.message}") } }
+                        musicStore.saveLibrary(songs); queue = musicStore.view(songs); toast(t("source.bili.saved"))
+                    }.onFailure { toast("${t("source.cache.failed")}: ${errorDetail(it)}") } }
                     }.start()
                 }
             }
@@ -624,23 +629,23 @@ private fun MainActivity.openBilibiliVideo(bvid: String): Boolean {
 
 internal fun MainActivity.showOnlinePlaylistPicker(items: List<MusicItem>) {
     lateinit var sheet: android.app.Dialog
-    sheet = ThemeUi.showSheet(this, palette, "保存 ${items.size} 首在线歌曲", "仅保存歌曲标识，播放时重新解析地址") {
+    sheet = ThemeUi.showSheet(this, palette, t("source.playlist.title").format(items.size), t("source.playlist.hint")) {
         musicStore.playlists.forEachIndexed { index, playlist ->
             addView(ThemeUi.button(this@showOnlinePlaylistPicker, palette, playlist.name) {
                 val count = addOnlineToPlaylist(index, items); sheet.dismiss()
-                toast(if (count > 0) "已加入 $count 首到 ${playlist.name}" else "歌曲已在这个歌单中")
+                toast(if (count > 0) t("source.playlist.added").format(count, playlist.name) else t("source.playlist.exists"))
             })
         }
-        addView(ThemeUi.button(this@showOnlinePlaylistPicker, palette, "收藏并自动下载") {
+        addView(ThemeUi.button(this@showOnlinePlaylistPicker, palette, t("source.playlist.download")) {
             sheet.dismiss(); downloadOnlineFavorite(items.first())
         })
-        addView(ThemeUi.button(this@showOnlinePlaylistPicker, palette, "新建歌单") {
+        addView(ThemeUi.button(this@showOnlinePlaylistPicker, palette, t("source.playlist.new")) {
             sheet.dismiss()
-            val input = ThemeUi.input(this@showOnlinePlaylistPicker, palette, "新歌单名称")
-            AlertDialog.Builder(this@showOnlinePlaylistPicker).setTitle("新建歌单").setView(input)
-                .setNegativeButton("取消", null).setPositiveButton("创建") { _, _ ->
+            val input = ThemeUi.input(this@showOnlinePlaylistPicker, palette, t("source.playlist.name"))
+            AlertDialog.Builder(this@showOnlinePlaylistPicker).setTitle(t("source.playlist.new")).setView(input)
+                .setNegativeButton(t("cancel"), null).setPositiveButton(t("source.playlist.create")) { _, _ ->
                     val added = addOnlineToPlaylist(-1, items, input.text.toString())
-                    toast(if (added > 0) "歌单已创建并保存 $added 首" else "名称为空或歌单已达到 10 个上限")
+                    toast(if (added > 0) t("source.playlist.created").format(added) else t("source.playlist.invalid"))
                 }.show()
         })
     }
@@ -708,7 +713,7 @@ private fun MainActivity.searchAggregateProviders(body: LinearLayout, providers:
     val scrollY = (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }
         .lastOrNull()?.scrollY ?: 0
     if (!append) { providerResults = emptyList(); pluginResults = emptyList() }
-    toast("正在搜索 ${providers.size + plugins.size} 个来源")
+    toast(t("source.search.count").format(providers.size + plugins.size))
     Thread {
         val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(6, providers.size + plugins.size))
         try {
@@ -733,7 +738,7 @@ private fun MainActivity.searchAggregateProviders(body: LinearLayout, providers:
                 val future = completion.poll(remaining, java.util.concurrent.TimeUnit.MILLISECONDS) ?: break
                 received++
                 val result = runCatching { future.get() }.getOrNull()
-                if (result == null) { failed += "来源超时"; continue }
+                if (result == null) { failed += t("source.search.timeout"); continue }
                 val label = providers.firstOrNull { it.id == result.first }?.name
                     ?: plugins.firstOrNull { it.descriptor.id == result.first }?.descriptor?.name ?: result.first
                 val data = result.second?.getOrElse { failed += label; emptyList() }
@@ -752,8 +757,8 @@ private fun MainActivity.searchAggregateProviders(body: LinearLayout, providers:
             runOnUiThread {
                 if (requestId != providerRequest || providerSelection != "@aggregate" || isDestroyed) return@runOnUiThread
                 if (added == 0 && append) onlinePage = (onlinePage - 1).coerceAtLeast(1)
-                if (failed.isNotEmpty()) toast("搜索完成；不可用：${failed.distinct().joinToString("、")}")
-                else if (added == 0) toast(if (append) "没有更多结果" else "没有找到歌曲")
+                if (failed.isNotEmpty()) toast(t("source.search.unavailable").format(failed.distinct().joinToString(", ")))
+                else if (added == 0) toast(t(if (append) "source.search.no_more" else "plugin.search.empty"))
             }
         } finally { pool.shutdownNow() }
     }.start()
@@ -782,11 +787,11 @@ private fun MainActivity.searchPluginProvider(body: LinearLayout, entry: j5i.spa
             if (pluginStore.list().none { it.enabled && it.descriptor.id == entry.descriptor.id }) return@runOnUiThread
             result.onSuccess { tracks ->
                 pluginResults = (if (append) pluginResults else emptyList()) + tracks.map { entry.descriptor.id to it }
-                if (tracks.isEmpty()) toast(if (append) "没有更多结果" else "没有找到歌曲")
+                if (tracks.isEmpty()) toast(t(if (append) "source.search.no_more" else "plugin.search.empty"))
                 refreshOnlineResults(body, scrollY)
             }.onFailure {
                 if (append) onlinePage = (onlinePage - 1).coerceAtLeast(1)
-                toast("搜索失败：${it.message}")
+                toast("${t("plugin.search.failed")}: ${errorDetail(it)}")
             }
         }
     }.start()
@@ -798,7 +803,7 @@ private fun MainActivity.searchImportedProvider(body: LinearLayout, provider: Pr
     val page = onlinePage
     val scrollY = (0 until body.childCount).mapNotNull { body.getChildAt(it) as? ScrollView }
         .lastOrNull()?.scrollY ?: 0
-    playbackStatus = "正在搜索 ${provider.name}…"
+    playbackStatus = t("source.search.progress").format(provider.name)
     Thread {
         val result = runCatching { ProviderSearch.search(provider, query, page) }
         runOnUiThread {
@@ -806,12 +811,12 @@ private fun MainActivity.searchImportedProvider(body: LinearLayout, provider: Pr
             if (providerStore.list().none { it.enabled && it.definition.id == provider.id }) return@runOnUiThread
             result.onSuccess { tracks ->
                 providerResults = (if (append) providerResults else emptyList()) + tracks.map { provider.id to it }
-                playbackStatus = if (tracks.isEmpty()) "没有更多结果" else "搜索完成"
+                playbackStatus = t(if (tracks.isEmpty()) "source.search.no_more" else "source.search.done")
                 refreshOnlineResults(body, scrollY)
             }.onFailure { error ->
                 if (append) onlinePage = (onlinePage - 1).coerceAtLeast(1)
-                playbackStatus = "搜索失败"
-                toast("搜索失败：${error.message}")
+                playbackStatus = t("plugin.search.failed")
+                toast("${t("plugin.search.failed")}: ${errorDetail(error)}")
             }
         }
     }.start()

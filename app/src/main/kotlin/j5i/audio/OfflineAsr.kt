@@ -52,7 +52,7 @@ class OfflineAsr(context: Context, private val onText: (String) -> Unit, private
                 pendingText = ""
             } catch (error: Exception) {
                 started.set(false)
-                onError(error.message ?: "模型加载失败")
+                onError(error.message ?: j5i.spatial8d.ui.AppLanguage.text(appContext, "asr.model_failed"))
             }
         }
     }
@@ -98,7 +98,7 @@ class OfflineAsr(context: Context, private val onText: (String) -> Unit, private
             decode(current)
         } catch (error: Exception) {
             started.set(false)
-            onError(error.message ?: "识别失败")
+            onError(error.message ?: j5i.spatial8d.ui.AppLanguage.text(appContext, "main.asr.failed"))
         }
     }
 

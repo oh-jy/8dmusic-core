@@ -15,6 +15,7 @@ data class MusicItem(
     val addedAt: Long = 0L,
     /** MediaStore DATE_MODIFIED 换算成毫秒；手动添加时回退为加入时间。 */
     val modifiedAt: Long = 0L,
+    val folder: String = "",
 )
 
 data class Playlist(val name: String, val ids: List<Long>, val rule: String = "")

@@ -61,12 +61,12 @@ internal fun MainActivity.showSettingsSheet() {
             addView(settingRow("⚒", t("tools"), "") {
                 dialog.dismiss(); showToolsSheet()
             })
-            addView(settingRow("◫", "缓存管理", "") {
+            addView(settingRow("◫", t("cache.title"), "") {
                 dialog.dismiss(); showPlaybackCacheManager()
             })
-            addView(settingRow("↑", "更新渠道", if (updateChannel() == "beta") "测试版" else "稳定版") {
+            addView(settingRow("↑", t("settings.update.channel"), t(if (updateChannel() == "beta") "settings.update.beta" else "settings.update.stable")) {
                 dialog.dismiss()
-                pickOption("更新渠道", listOf("稳定版", "测试版"), if (updateChannel() == "beta") 1 else 0) { index ->
+                pickOption(t("settings.update.channel"), listOf(t("settings.update.stable"), t("settings.update.beta")), if (updateChannel() == "beta") 1 else 0) { index ->
                     preferences.edit().putString("updateChannel", if (index == 1) "beta" else "stable").remove("updateLastCheck").apply()
                     checkAppUpdate()
                 }
@@ -155,7 +155,7 @@ internal fun MainActivity.showMetadataEditor() {
                     dialog.dismiss()
                     refreshAll()
                     toast(t("metadata.saved"))
-                } catch (e: Exception) { toast(e.message ?: t("metadata.read.only")) }
+                } catch (e: Exception) { toast(errorDetail(e).ifBlank { t("metadata.read.only") }) }
             })
         }
         dialog.show()
@@ -184,21 +184,21 @@ internal fun MainActivity.showExitDialog() {
             setPadding(ThemeUi.dp(this@showExitDialog, 18f), ThemeUi.dp(this@showExitDialog, 20f),
                 ThemeUi.dp(this@showExitDialog, 18f), ThemeUi.dp(this@showExitDialog, 10f))
             background = ThemeUi.bgDrawable(this@showExitDialog, palette.surface, 14f)
-            addView(ThemeUi.text(this@showExitDialog, "请确认", 18f, palette, bold = true))
-            addView(ThemeUi.text(this@showExitDialog, "请确认，选择退出播放或转入后台", 12f, palette,
+            addView(ThemeUi.text(this@showExitDialog, t("exit.confirm"), 18f, palette, bold = true))
+            addView(ThemeUi.text(this@showExitDialog, t("exit.hint"), 12f, palette,
                 role = ThemeUi.ROLE_SUB).apply { setPadding(0, ThemeUi.dp(this@showExitDialog, 8f), 0, ThemeUi.dp(this@showExitDialog, 16f)) })
             addView(ThemeUi.row(this@showExitDialog, gravity = Gravity.END).apply {
-                addView(ThemeUi.text(this@showExitDialog, "后台", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                addView(ThemeUi.text(this@showExitDialog, t("exit.background"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                     setPadding(ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f),
                         ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f))
                     setOnClickListener { exitDialog?.dismiss(); moveTaskToBack(true) }
                 })
-                addView(ThemeUi.text(this@showExitDialog, "取消", 13f, palette, role = ThemeUi.ROLE_SUB).apply {
+                addView(ThemeUi.text(this@showExitDialog, t("cancel"), 13f, palette, role = ThemeUi.ROLE_SUB).apply {
                     setPadding(ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f),
                         ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f))
                     setOnClickListener { exitDialog?.dismiss() }
                 })
-                addView(ThemeUi.text(this@showExitDialog, "退出", 13f, palette).apply {
+                addView(ThemeUi.text(this@showExitDialog, t("exit.action"), 13f, palette).apply {
                     setTextColor(0xffff7070.toInt())
                     setPadding(ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f),
                         ThemeUi.dp(this@showExitDialog, 12f), ThemeUi.dp(this@showExitDialog, 10f))
@@ -336,7 +336,7 @@ internal fun MainActivity.showInfoSheet() {
                 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 4f))
             })
-            addView(ThemeUi.button(this@showInfoSheet, palette, "检查更新") {
+            addView(ThemeUi.button(this@showInfoSheet, palette, t("update.check")) {
                 infoDialog?.dismiss()
                 checkAppUpdate()
             })
@@ -363,7 +363,7 @@ internal fun MainActivity.showInfoSheet() {
                     }
                 }, LinearLayout.LayoutParams(-2, -2))
             })
-            addView(ThemeUi.text(this@showInfoSheet, "开源地址：github.com/oh-jy/8dmusic-core",
+            addView(ThemeUi.text(this@showInfoSheet, t("info.open_source"),
                 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 setPadding(0, 0, 0, ThemeUi.dp(this@showInfoSheet, 6f))
                 setOnClickListener {
@@ -381,7 +381,7 @@ internal fun MainActivity.showInfoSheet() {
                         val dialog = Dialog(this@showInfoSheet)
                         dialog.setContentView(FrameLayout(this@showInfoSheet).apply {
                             addView(web, FrameLayout.LayoutParams(-1, -1))
-                            addView(ThemeUi.text(this@showInfoSheet, "关闭", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                            addView(ThemeUi.text(this@showInfoSheet, t("close"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                                 gravity = Gravity.CENTER
                                 setPadding(ThemeUi.dp(this@showInfoSheet, 14f), 0, ThemeUi.dp(this@showInfoSheet, 14f), 0)
                                 setOnClickListener { dialog.dismiss() }
@@ -415,7 +415,7 @@ internal fun MainActivity.showInfoSheet() {
         }
         val scroll = ScrollView(this).apply {
             tag = "infoScroll"
-            contentDescription = "说明滚动区"
+            contentDescription = t("info.scroll")
             isFillViewport = true
             isVerticalScrollBarEnabled = true
             isVerticalFadingEdgeEnabled = true
@@ -437,35 +437,35 @@ internal fun MainActivity.showInfoSheet() {
 internal fun MainActivity.showExportSheet() {
         if (exportDialog?.isShowing == true) return
         if (exporting) { showExportProgress(); return }
-        if (isLive) { toast("电台直播没有完整时间轴，请先录音再导出"); return }
-        if (service?.player?.duration ?: 0.0 <= 0.0) { toast("请先加载音频"); return }
+        if (isLive) { toast(t("export.live.unsupported")); return }
+        if (service?.player?.duration ?: 0.0 <= 0.0) { toast(t("export.load_first")); return }
         var format = 0
         var landscape = true
         var resolution = 720
         var previewSeconds = 5
-        val sheet = ThemeUi.showSheet(this, palette, "导出", subtitle = "选择格式与保存位置") {
+        val sheet = ThemeUi.showSheet(this, palette, t("plugin.login.export"), subtitle = t("export.select_hint")) {
             val formatRow = ThemeUi.row(this@showExportSheet)
-            val wav = RadioButton(this@showExportSheet).apply { text = "WAV\n无损音质"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val wav = RadioButton(this@showExportSheet).apply { text = t("export.wav.label"); textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
             val mp3Btn = RadioButton(this@showExportSheet).apply { text = "MP3\n192kbps"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
-            val mp4Btn = RadioButton(this@showExportSheet).apply { text = "MP4\n可视化"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
-            val gifBtn = RadioButton(this@showExportSheet).apply { text = "GIF\n无声动图"; textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val mp4Btn = RadioButton(this@showExportSheet).apply { text = t("export.mp4.label"); textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
+            val gifBtn = RadioButton(this@showExportSheet).apply { text = t("export.gif.label"); textSize = 11f; gravity = Gravity.CENTER; setPadding(0, 0, 0, 0) }
             val orientationRow = ThemeUi.row(this@showExportSheet)
-            val portrait = RadioButton(this@showExportSheet).apply { text = "竖屏"; textSize = 12f }
-            val horizontal = RadioButton(this@showExportSheet).apply { text = "横屏"; textSize = 12f }
+            val portrait = RadioButton(this@showExportSheet).apply { text = t("export.portrait"); textSize = 12f }
+            val horizontal = RadioButton(this@showExportSheet).apply { text = t("export.landscape"); textSize = 12f }
             val resolutionRow = ThemeUi.row(this@showExportSheet)
             val clipRow = ThemeUi.row(this@showExportSheet)
             val smoothGifLoop = android.widget.CheckBox(this@showExportSheet).apply {
-                text = "尽量平滑 GIF 首尾循环"; setTextColor(palette.text)
+                text = t("export.gif.smooth"); setTextColor(palette.text)
                 buttonTintList = ColorStateList.valueOf(palette.accent)
             }
-            val creativeButton = ThemeUi.button(this@showExportSheet, palette, "画面创作设置", ThemeUi.ROLE_CONTROL) {
+            val creativeButton = ThemeUi.button(this@showExportSheet, palette, t("export.creative"), ThemeUi.ROLE_CONTROL) {
                 showVisualCreative()
             }
-            val copyrightHint = ThemeUi.text(this@showExportSheet, "分享前请确认音乐、歌词及图片的使用授权", 11f, palette, role = ThemeUi.ROLE_SUB)
-            val clipStart = ThemeUi.input(this@showExportSheet, palette, "起始秒数（默认 0）").apply {
+            val copyrightHint = ThemeUi.text(this@showExportSheet, t("export.copyright"), 11f, palette, role = ThemeUi.ROLE_SUB)
+            val clipStart = ThemeUi.input(this@showExportSheet, palette, t("export.clip.start")).apply {
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             }
-            val clipDuration = ThemeUi.input(this@showExportSheet, palette, "时长秒数（留空为整曲）").apply {
+            val clipDuration = ThemeUi.input(this@showExportSheet, palette, t("export.clip.duration")).apply {
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             }
             fun clip(): Pair<Double, Double>? {
@@ -475,31 +475,31 @@ internal fun MainActivity.showExportSheet() {
                 val length = if (durationText.isEmpty()) 0.0 else durationText.toDoubleOrNull()
                 if (start == null || length == null || !start.isFinite() || !length.isFinite() || start < 0 || length < 0 ||
                     start >= (service?.player?.duration ?: 0.0) / (service?.player?.transform?.speed ?: 1.0)) {
-                    toast("片段范围无效"); return null
+                    toast(t("export.clip.invalid")); return null
                 }
                 if (format == 3 && length != 0.0 && length !in 1.0..10.0) {
-                    toast("GIF 时长需在 1 到 10 秒之间"); return null
+                    toast(t("export.gif.duration")); return null
                 }
                 if (format == 3 && visualizerView.creative.outroText.isNotBlank() &&
                     (if (length == 0.0) 5.0 else length) + visualizerView.creative.outroDuration > 10.0) {
-                    toast("添加片尾后，GIF 总时长不能超过 10 秒"); return null
+                    toast(t("export.gif.outro")); return null
                 }
                 return start to length
             }
-            val previewDurationButton = ThemeUi.button(this@showExportSheet, palette, "时长 ${previewSeconds}秒", ThemeUi.ROLE_CONTROL) {
+            val previewDurationButton = ThemeUi.button(this@showExportSheet, palette, t("export.duration.short").format(previewSeconds), ThemeUi.ROLE_CONTROL) {
                 val options = listOf(2, 5, 10)
-                pickOption("预览时长", options.map { "$it 秒" }, options.indexOf(previewSeconds)) { index ->
+                pickOption(t("export.preview.duration"), options.map { "$it ${t("creative.seconds")}" }, options.indexOf(previewSeconds)) { index ->
                     previewSeconds = options[index]
-                    (it as android.widget.Button).text = "时长 ${previewSeconds}秒"
+                    (it as android.widget.Button).text = t("export.duration.short").format(previewSeconds)
                 }
             }
-            val previewButton = ThemeUi.button(this@showExportSheet, palette, "预览开头", ThemeUi.ROLE_CONTROL) {
+            val previewButton = ThemeUi.button(this@showExportSheet, palette, t("export.preview.start"), ThemeUi.ROLE_CONTROL) {
                 val selectedClip = clip() ?: return@button
                 val length = if (format == 3 && selectedClip.second == 0.0) 5.0 else selectedClip.second
                 exportMp4(null, landscape, resolution, selectedClip.first,
                     if (length > 0) minOf(previewSeconds.toDouble(), length) else previewSeconds.toDouble(), preview = true)
             }
-            val previewEndButton = ThemeUi.button(this@showExportSheet, palette, "预览结尾", ThemeUi.ROLE_CONTROL) {
+            val previewEndButton = ThemeUi.button(this@showExportSheet, palette, t("export.preview.end"), ThemeUi.ROLE_CONTROL) {
                 val selectedClip = clip() ?: return@button
                 val length = if (format == 3 && selectedClip.second == 0.0) 5.0 else selectedClip.second
                 exportMp4(null, landscape, resolution, selectedClip.first, length, preview = true,
@@ -507,7 +507,7 @@ internal fun MainActivity.showExportSheet() {
             }
             val durationRow = ThemeUi.row(this@showExportSheet)
             val gap = ThemeUi.dp(this@showExportSheet, 4f)
-            listOf("15 秒" to "15", "30 秒" to "30", "整曲" to "").forEachIndexed { index, (label, seconds) ->
+            listOf("15 ${t("creative.seconds")}" to "15", "30 ${t("creative.seconds")}" to "30", t("export.full_track") to "").forEachIndexed { index, (label, seconds) ->
                 durationRow.addView(ThemeUi.button(this@showExportSheet, palette, label, ThemeUi.ROLE_CONTROL) {
                     clipDuration.setText(seconds)
                 }, LinearLayout.LayoutParams(0, -2, 1f).apply { if (index > 0) marginStart = gap })
@@ -540,7 +540,7 @@ internal fun MainActivity.showExportSheet() {
                 copyrightHint.visibility = if (value >= 2) View.VISIBLE else View.GONE
                 previewRow.visibility = if (value >= 2) View.VISIBLE else View.GONE
                 durationRow.visibility = if (value == 2) View.VISIBLE else View.GONE
-                clipDuration.hint = if (value == 3) "时长 1–10 秒（默认 5）" else "时长秒数（留空为整曲）"
+                clipDuration.hint = t(if (value == 3) "export.gif.duration_hint" else "export.clip.duration")
                 listOf(wav, mp3Btn, mp4Btn, gifBtn).forEach { it.setTextColor(palette.text); it.buttonTintList = ColorStateList.valueOf(palette.accent) }
             }
             wav.setOnClickListener { setFormat(0) }
@@ -587,14 +587,14 @@ internal fun MainActivity.showExportSheet() {
                 addView(ThemeUi.text(this@showExportSheet, actionLabel, 12f, palette, role = ThemeUi.ROLE_ACCENT))
                 setOnClickListener { action() }
             }
-            addView(destination("默认位置", "音频保存到 Music/8D，视频保存到 Movies/8D", "导出 ▸") {
+            addView(destination(t("export.destination.default"), t("export.destination.default_hint"), "${t("plugin.login.export")} ▸") {
                 val selectedClip = if (format >= 2) clip() ?: return@destination else 0.0 to 0.0
                 exportDialog?.dismiss()
                 val name = currentItem?.name?.substringBeforeLast('.') ?: "8d_export"
                 if (format >= 2) exportPublicVideo(name, landscape, resolution, selectedClip.first, selectedClip.second, format == 3,
                     smoothGifLoop.isChecked) else exportPublic(name, format == 1)
             })
-            addView(destination("自选位置…", "拉起系统对话框，自选目录与文件名", "选择 ▸") {
+            addView(destination(t("export.destination.custom"), t("export.destination.custom_hint"), "${t("export.choose")} ▸") {
                 val selectedClip = if (format >= 2) clip() ?: return@destination else 0.0 to 0.0
                 exportDialog?.dismiss()
                 val name = currentItem?.name?.substringBeforeLast('.') ?: "8d_export"
@@ -611,13 +611,13 @@ internal fun MainActivity.showExportSheet() {
     }
 
 /** versionCode 为 yyMMddHH + 同小时序号（共 9 位），换算成可读发布时间。 */
-private fun formatReleaseTime(code: Long): String {
+private fun MainActivity.formatReleaseTime(code: Long): String {
     val text = code.toString()
-    if (text.length != 9 || text.any { !it.isDigit() }) return "构建号 $code"
+    if (text.length != 9 || text.any { !it.isDigit() }) return t("about.build_number").format(code)
     val year = "20${text.substring(0, 2)}"
     val month = text.substring(2, 4)
     val day = text.substring(4, 6)
     val hour = text.substring(6, 8)
     val sequence = text.substring(8).toInt()
-    return "发布于$year-$month-$day ${hour}时 第${sequence}次构建"
+    return t("about.release_time").format(year, month, day, hour, sequence)
 }

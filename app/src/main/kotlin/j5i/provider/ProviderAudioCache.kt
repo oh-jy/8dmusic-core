@@ -6,6 +6,8 @@ import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.PlaybackCacheMetadata
+import j5i.spatial8d.ui.AppLanguage
 import org.json.JSONObject
 import java.io.File
 
@@ -13,7 +15,10 @@ import java.io.File
 internal object ProviderAudioCache {
     fun cached(context: Context, item: MusicItem): MusicItem? {
         val file = privateFile(context, item).takeIf { it.isFile && it.length() > 1024 }
-        if (file != null) return item.copy(uri = android.net.Uri.fromFile(file).toString(), size = file.length(), album = cacheAlbum(item))
+        if (file != null) {
+            remember(context, file, item)
+            return item.copy(uri = android.net.Uri.fromFile(file).toString(), size = file.length(), album = cacheAlbum(item))
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             val name = fileName(item)
             context.contentResolver.query(MediaStore.Downloads.EXTERNAL_CONTENT_URI,
@@ -40,6 +45,7 @@ internal object ProviderAudioCache {
         require(source.uri.startsWith("https://") || source.uri.startsWith("http://")) { "缓存只接受 HTTP(S) 音频" }
         val part = File(context.cacheDir, "provider-${item.id}.part")
         val target = privateFile(context, item)
+        check(PlaybackCacheMetadata.tryBegin(target)) { AppLanguage.text(context, "cache.protected") }
         try {
             val pluginId = source.album.substringAfter("plugin:https:", "")
             val entry = if (pluginId.isNotEmpty()) ProviderPluginStore(context).list().first { it.enabled && it.descriptor.id == pluginId } else null
@@ -83,8 +89,9 @@ internal object ProviderAudioCache {
             }
             target.parentFile?.mkdirs()
             check(part.renameTo(target)) { "无法保存音频缓存" }
+            remember(context, target, item)
             return item.copy(uri = android.net.Uri.fromFile(target).toString(), size = target.length(), album = cacheAlbum(item))
-        } finally { part.delete() }
+        } finally { part.delete(); PlaybackCacheMetadata.end(target) }
     }
 
     @Synchronized
@@ -94,11 +101,21 @@ internal object ProviderAudioCache {
         var failed = 0
         directory.listFiles().orEmpty().forEach { file ->
             val id = audioCacheId(file.name) ?: return@forEach
-            if (id !in protectedIds && file.isFile && file.canonicalFile.parentFile == directory.canonicalFile) {
-                if (file.delete()) removed++ else failed++
+            if (id !in protectedIds && !PlaybackCacheMetadata.isActive(file) && file.isFile && file.canonicalFile.parentFile == directory.canonicalFile) {
+                if (file.delete()) { PlaybackCacheMetadata.remove(context, file); removed++ } else failed++
             }
         }
         return removed to failed
+    }
+
+    fun deletePrivate(context: Context, id: Long): Boolean {
+        val directory = File(context.filesDir, "provider-audio")
+        val file = File(directory, "$id.m4a")
+        if (!PlaybackCacheMetadata.tryBegin(file)) return false
+        try {
+            return if (!file.isFile || file.canonicalFile.parentFile != directory.canonicalFile) false
+            else file.delete().also { if (it) PlaybackCacheMetadata.remove(context, file) }
+        } finally { PlaybackCacheMetadata.end(file) }
     }
 
     fun delete(context: Context, item: MusicItem): Boolean {
@@ -111,6 +128,11 @@ internal object ProviderAudioCache {
     }
 
     private fun privateFile(context: Context, item: MusicItem) = File(context.filesDir, "provider-audio/${fileName(item)}")
+    private fun remember(context: Context, file: File, item: MusicItem) {
+        val source = runCatching { android.net.Uri.parse(item.uri).getQueryParameter("source").orEmpty() }.getOrDefault("")
+            .ifEmpty { item.album.substringAfter("在线缓存:", "") }
+        if (item.name.isNotBlank()) PlaybackCacheMetadata.put(context, file, item.name, source)
+    }
     private fun cacheAlbum(item: MusicItem): String = if (item.uri.contains("source=platform.bilibili"))
         "在线缓存:platform.bilibili" else "在线缓存"
     private fun fileName(item: MusicItem): String {

@@ -68,8 +68,8 @@ internal fun MainActivity.tabRow(labels: List<String>, selected: Int, compact: B
 
 
 internal fun MainActivity.downloadOnlineFavorite(item: MusicItem) {
-        if (!favoriteDownloads.add(item.id)) { toast("正在下载，请稍候"); return }
-        toast("正在下载原始音频，完成后加入收藏")
+        if (!favoriteDownloads.add(item.id)) { toast(t("favorite.downloading")); return }
+        toast(t("favorite.downloading.original"))
         val app = applicationContext
         Thread {
             val result = runCatching {
@@ -77,7 +77,7 @@ internal fun MainActivity.downloadOnlineFavorite(item: MusicItem) {
                     item.album.startsWith("plugin:https:") || item.album.startsWith("provider:")) {
                     return@runCatching j5i.spatial8d.provider.ProviderAudioCache.cache(app, item, false)
                 }
-                require(!item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) { "暂不支持收藏分段直播流" }
+                require(!item.uri.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) { t("favorite.hls.unsupported") }
                 val dir = java.io.File(app.filesDir, "online-favorites").apply { mkdirs() }
                 val target = java.io.File(dir, "${item.id}.audio")
                 val part = java.io.File(dir, "${item.id}.part")
@@ -88,25 +88,25 @@ internal fun MainActivity.downloadOnlineFavorite(item: MusicItem) {
                                 Log.i("8DFavorite", "下载在线收藏原始音频 method=downloadOnlineFavorite id=${item.id}")
                             val response = j5i.spatial8d.provider.ProviderNetwork.open(item.uri, item.album.startsWith("provider:http:"))
                             response.use {
-                                check(it.isSuccessful) { "音频下载失败（HTTP ${it.code}）" }
-                                val body = requireNotNull(it.body) { "音频响应为空" }
+                                check(it.isSuccessful) { t("favorite.download.http").format(it.code) }
+                                val body = requireNotNull(it.body) { t("favorite.download.empty_response") }
                                 val expected = body.contentLength()
                                 body.byteStream().use { input -> part.outputStream().use { output -> input.copyTo(output) } }
-                                check(expected <= 0 || part.length() == expected) { "音频下载不完整" }
+                                check(expected <= 0 || part.length() == expected) { t("favorite.download.incomplete") }
                             }
                         } else {
-                            requireNotNull(app.contentResolver.openInputStream(android.net.Uri.parse(item.uri))) { "无法读取缓存音频" }
+                            requireNotNull(app.contentResolver.openInputStream(android.net.Uri.parse(item.uri))) { t("favorite.cache.read_failed") }
                                 .use { input -> part.outputStream().use { input.copyTo(it) } }
                         }
-                        check(part.length() > 0) { "音频文件为空" }
+                        check(part.length() > 0) { t("favorite.download.empty") }
                         val extractor = android.media.MediaExtractor()
                         try {
                             extractor.setDataSource(part.absolutePath)
                             check((0 until extractor.trackCount).any {
                                 extractor.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-                            }) { "下载内容不是可识别的音频" }
+                            }) { t("favorite.download.invalid") }
                         } finally { extractor.release() }
-                        check(part.renameTo(target)) { "保存音频失败" }
+                        check(part.renameTo(target)) { t("favorite.save_failed") }
                     }
                     item.copy(uri = android.net.Uri.fromFile(target).toString(), size = target.length(), album = "在线收藏")
                 } finally { if (part.exists()) part.delete() }
@@ -119,9 +119,9 @@ internal fun MainActivity.downloadOnlineFavorite(item: MusicItem) {
                     musicStore.saveLibrary(songs)
                     if (!musicStore.isFavorite(saved.id)) musicStore.toggleFavorite(saved.id)
                     queue = musicStore.view(songs)
-                    toast("已下载并加入收藏")
+                    toast(t("favorite.saved"))
                     if (!isDestroyed) refreshPlayback()
-                }.onFailure { toast(it.message ?: "下载失败，未加入收藏") }
+                }.onFailure { toast(it.message ?: t("favorite.failed")) }
             }
         }.start()
     }
@@ -131,9 +131,9 @@ internal fun MainActivity.dismissSource() { fmDialog?.dismiss(); onlineDialog?.d
 
 internal fun MainActivity.playRadio(station: RadioStation) {
         val entry = providerStore.list().firstOrNull { it.enabled && station.id.startsWith(it.definition.id + "/") }
-            ?: run { toast("来源不存在或已停用"); return }
+            ?: run { toast(t("playback.source.missing")); return }
         radioAllowHttp = entry.definition.usesHttp
-        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音，再切换音源"); return }
+        if (recordingKind.isNotEmpty()) { toast(t("radio.stop_recording")); return }
         if (isViewReady(this@playRadio::visualizerView)) visualizerView.pcmClock.reset()
         ++loadGeneration
         radioProbes.forEach { it.stop() }
@@ -167,12 +167,12 @@ internal fun MainActivity.playRadio(station: RadioStation) {
 internal fun MainActivity.raceRadioSources(preferred: Int, generation: Int) {
         val allIndices = listOf(preferred) + radioSources.indices.filterNot { it == preferred }
         val indices = allIndices.take(3)
-        playbackStatus = "并行连接 ${indices.size} 路音源…"
+        playbackStatus = t("radio.connect.parallel").format(indices.size)
         var selected = false
         var failed = 0
         val probes = indices.map { index ->
             val source = radioSources[index]
-            j5i.spatial8d.audio.RadioPlayer(probe = true).also { probe ->
+            j5i.spatial8d.audio.RadioPlayer(this, probe = true).also { probe ->
                 probe.preset = preset
                 probe.semi = transform.semi.roundToInt()
                 probe.onReady = { main.post {
@@ -207,21 +207,23 @@ internal fun MainActivity.raceRadioSources(preferred: Int, generation: Int) {
 internal fun MainActivity.tryRadioSource(index: Int, generation: Int = radioGeneration) {
         if (generation != radioGeneration) return
         if (index >= radioSources.size) {
-            playbackStatus = "所有备用源均不可用"
+            playbackStatus = t("radio.sources.failed")
             service?.radio?.stop()
             refreshAll()
             return
         }
         radioSourceIndex = index
         val source = radioSources[index]
-        val name = currentItem?.name ?: "电台"
-        playbackStatus = "连接 ${index + 1}/${radioSources.size} · ${source.label}"
+        val name = currentItem?.name ?: t("radio.name")
+        val generatedLine = Regex("线路 ([0-9]+)").matchEntire(source.label)?.groupValues?.get(1)
+        val sourceLabel = generatedLine?.let { t("source.radio.line").format(it) } ?: source.label
+        playbackStatus = t("radio.connecting").format(index + 1, radioSources.size, sourceLabel)
         service?.radio?.preset = preset
         service?.radio?.denoise = transform.denoiseLevel
         service?.radio?.semi = transform.semi.roundToInt()
         service?.radio?.onReady = { main.post {
             if (generation == radioGeneration) preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
-            playbackStatus = "电台播放中 · $name · ${source.label}"
+            playbackStatus = t("radio.playing.source").format(name, sourceLabel)
             refreshPlayback()
         } }
         service?.radio?.onError = { main.post { if (generation == radioGeneration) tryRadioSource(index + 1, generation) } }

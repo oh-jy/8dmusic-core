@@ -55,7 +55,7 @@ internal fun MainActivity.addAndPlay(uri: Uri) {
         val name = runCatching { contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
-        } }.getOrNull() ?: uri.lastPathSegment ?: "音频"
+        } }.getOrNull() ?: uri.lastPathSegment ?: t("source.music")
         val item = musicStore.cached().firstOrNull { it.uri == uri.toString() }
             ?: MusicItem(System.nanoTime(), name, uri.toString())
         musicStore.remember(item)
@@ -109,6 +109,7 @@ internal fun MainActivity.prepareOnlineSelection(item: MusicItem, status: String
 }
 
 private fun mvQualityRank(label: String): Int = when {
+    label.endsWith("P", ignoreCase = true) -> label.dropLast(1).toIntOrNull() ?: 0
     label.contains("蓝光") -> 40
     label.contains("超清") -> 30
     label.contains("高清") -> 20
@@ -121,8 +122,9 @@ private fun highestMvOption(options: List<j5i.spatial8d.provider.ProviderTrackRe
         ?: options.last()
 
 internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, autoSelectHighestQuality: Boolean = false) {
-    if (recordingKind.isNotEmpty()) { toast("请先停止录音，再播放 MV"); return }
-    val generation = prepareOnlineSelection(item, "正在解析 MV…")
+    if (recordingKind.isNotEmpty()) { toast(t("playback.stop_recording_mv")); return }
+    val returnToOnline = !audioOnly && onlineDialog?.isShowing == true
+    val generation = prepareOnlineSelection(item, t("playback.mv.resolving"))
     dismissSource()
     Thread {
         val result = runCatching { j5i.spatial8d.provider.ProviderTrackRef.mvOptions(this, item) }
@@ -131,29 +133,29 @@ internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, au
             result.onSuccess { options ->
                 if (autoSelectHighestQuality) {
                     val option = highestMvOption(options)
-                    playbackStatus = "正在自动播放最高质量 MV 音频：${option.label}"
+                    playbackStatus = t("playback.mv.auto").format(j5i.spatial8d.ui.AppLanguage.mvQuality(this, option.label))
                     refreshPlayback()
                     loadProviderMv(item, option, audioOnly = true, generation)
                     return@onSuccess
                 }
-                playbackStatus = "请选择 MV 清晰度"
+                playbackStatus = t("playback.mv.choose")
                 refreshPlayback()
                 lateinit var sheet: android.app.Dialog
-                sheet = j5i.spatial8d.ui.ThemeUi.showSheet(this, palette, "选择 MV 清晰度",
-                    "${if (audioOnly) "仅播放音轨" else "播放 MV 视频"} · 同一版本的音频和视频共用缓存") {
+                sheet = j5i.spatial8d.ui.ThemeUi.showSheet(this, palette, t("playback.mv.choose"),
+                    "${t(if (audioOnly) "playback.mv.audio_only" else "source.mv.video")} · ${t("playback.mv.shared_cache")}") {
                     options.forEach { option ->
                         val cached = j5i.spatial8d.provider.ProviderMvCache.file(this@playProviderMv, item, option).let { it.isFile && it.length() > 1024L }
-                        val size = if (option.size > 0L) String.format(java.util.Locale.ROOT, " · %.1f MB", option.size / 1048576.0) else " · 大小未知"
+                        val size = if (option.size > 0L) String.format(java.util.Locale.ROOT, " · %.1f MB", option.size / 1048576.0) else " · ${t("playback.mv.unknown_size")}"
                         addView(j5i.spatial8d.ui.ThemeUi.button(this@playProviderMv, palette,
-                            option.label + size + if (cached) " · 已缓存" else "") {
+                            j5i.spatial8d.ui.AppLanguage.mvQuality(this@playProviderMv, option.label) + size + if (cached) " · ${t("plugin.cached")}" else "") {
                             sheet.dismiss()
-                            if (generation == loadGeneration) loadProviderMv(item, option, audioOnly, generation)
+                            if (generation == loadGeneration) loadProviderMv(item, option, audioOnly, generation, returnToOnline)
                         })
                     }
                 }
                 sheet.show()
             }.onFailure {
-                playbackStatus = "MV 解析失败：${it.message}"
+                playbackStatus = "${t("video.mv.resolve_failed")}: ${errorDetail(it)}"
                 toast(playbackStatus)
                 refreshPlayback()
             }
@@ -162,7 +164,7 @@ internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, au
 }
 
 private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.provider.ProviderTrackRef.MvOption,
-    audioOnly: Boolean, generation: Int) {
+    audioOnly: Boolean, generation: Int, returnToOnline: Boolean = false) {
     Thread {
         val result = runCatching {
             j5i.spatial8d.provider.ProviderMvCache.cache(this, item, option,
@@ -171,7 +173,7 @@ private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.p
                     if (generation == loadGeneration && !isDestroyed) {
                         val downloaded = String.format(java.util.Locale.ROOT, "%.1f", copied / 1048576.0)
                         val size = if (total > 0L) " / ${String.format(java.util.Locale.ROOT, "%.1f", total / 1048576.0)} MB" else " MB"
-                        playbackStatus = "正在缓存 MV：$downloaded$size（音频和视频共用）"
+                        playbackStatus = t("playback.mv.caching").format(downloaded, size)
                         refreshPlayback()
                     }
                 }
@@ -182,13 +184,15 @@ private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.p
             result.onSuccess { media ->
                 if (audioOnly) load(media)
                 else {
-                    playbackStatus = "正在播放 MV 视频"
+                    playbackStatus = t("playback.mv.playing")
                     refreshPlayback()
                     openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(media.uri), "video/mp4")
-                        .putExtra("j5i.providerMv", Uri.parse(item.uri).getQueryParameter("mv")))
+                        .putExtra("j5i.providerMv", Uri.parse(item.uri).getQueryParameter("mv"))
+                        .putExtra("j5i.providerMvQuality", option.id)
+                        .putExtra("j5i.returnToOnline", returnToOnline))
                 }
             }.onFailure {
-                playbackStatus = "MV 解析失败：${it.message}"
+                playbackStatus = "${t("video.mv.resolve_failed")}: ${errorDetail(it)}"
                 toast(playbackStatus)
                 refreshPlayback()
             }
@@ -198,8 +202,8 @@ private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.p
 
 internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
     if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
-        if (recordingKind.isNotEmpty()) { toast("请先停止录音，再切换歌曲"); return }
-        val generation = prepareOnlineSelection(item, "正在解析在线歌曲…")
+        if (recordingKind.isNotEmpty()) { toast(t("plugin.stop_recording")); return }
+        val generation = prepareOnlineSelection(item, t("playback.online.resolving"))
         Thread {
             val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
             main.post {
@@ -210,7 +214,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
                         if (mv.isNotBlank()) {
                             playProviderMv(item, audioOnly = true, autoSelectHighestQuality = true)
                         } else {
-                            playbackStatus = "在线歌曲解析失败：${it.message}"
+                            playbackStatus = "${t("playback.online.failed")}: ${errorDetail(it)}"
                             toast(playbackStatus)
                             refreshPlayback()
                         }
@@ -222,19 +226,19 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         if (item.album.startsWith("provider:")) {
             val id = item.album.substringAfter(':').substringAfter(':', "")
             if (providerStore.list().none { it.enabled && it.definition.id == id }) {
-                toast("来源不存在或已停用")
+                toast(t("playback.source.missing"))
                 return
             }
         }
         if (item.album.startsWith("plugin:https:")) {
             val id = item.album.substringAfter("plugin:https:")
             if (runCatching { pluginStore.list().none { it.enabled && it.descriptor.id == id } }.getOrDefault(true)) {
-                toast("插件来源不存在或已停用")
+                toast(t("playback.plugin.missing"))
                 return
             }
         }
         // 所有选歌、切歌和冷启动恢复共用同一条加载链路，旧代号回调全部丢弃。
-        if (recordingKind.isNotEmpty()) { playbackStatus = "请先停止录音，再切换歌曲"; refreshPlayback(); return }
+        if (recordingKind.isNotEmpty()) { playbackStatus = t("plugin.stop_recording"); refreshPlayback(); return }
         releaseOnlineQueueIfOutside(item)
         if (isViewReady(this@load::visualizerView)) visualizerView.pcmClock.reset()
         val generation = ++loadGeneration
@@ -285,7 +289,7 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
             return
         }
         songTitle.text = Lyrics.displayTitle(item.name)
-        playbackStatus = "正在准备播放…"
+        playbackStatus = t("playback.preparing")
         Thread {
             try {
                 val remote = item.uri.startsWith("https://") || item.uri.startsWith("http://")
@@ -328,13 +332,13 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
                 android.util.Log.w("8DQueue", "播放加载失败：${item.name}", e)
                 main.post {
                     if (generation != loadGeneration) return@post
-                    if (e.message?.contains("已取消旧音频解码") == true) return@post
+                    if (e is j5i.spatial8d.audio.DecodeCancelledException) return@post
                     service?.player?.stop()
-                    playbackStatus = e.message ?: "加载失败"
+                    playbackStatus = errorDetail(e).ifBlank { t("playback.load_failed") }
                     if (autoplay && autoplayRequests <= 3 && currentQueue.isNotEmpty()) {
                         // 自动续播最多容错三首，坏文件不能造成无限跳曲。
                         main.postDelayed({ if (generation == loadGeneration) next(auto = true) }, 300)
-                    } else if (autoplay) playbackStatus = "连续加载失败，已停止自动续播：$playbackStatus"
+                    } else if (autoplay) playbackStatus = t("playback.autoplay_stopped").format(playbackStatus)
                     refreshPlayback()
                 }
             }
@@ -371,7 +375,7 @@ internal fun MainActivity.prepareLoaded(item: MusicItem, head: j5i.spatial8d.cor
         service?.player?.reverse = reverse
         // prepare 已把起点设为零；恢复位置时再定位一次，避免连续重建两代渲染缓存。
         if (resumePosition > 0.0) service?.player?.seek(resumePosition)
-        playbackStatus = "已加载 · ${head.sampleRate} Hz"
+        playbackStatus = t("playback.loaded").format(head.sampleRate)
         if (service?.player?.isPlaying == true) playbackStatus = t("status.playing")
         seekGuardUntil = SystemClock.elapsedRealtime() + 1500
         if (!item.uri.startsWith("http")) preferences.edit().putString("lastUri", item.uri).apply()
@@ -464,7 +468,7 @@ internal fun MainActivity.next(auto: Boolean = false) {
             return
         }
         if (items.isEmpty()) {
-            playbackStatus = "播放列表为空，请先添加或扫描音频"
+            playbackStatus = t("playback.queue.empty")
             refreshPlayback()
             showPlaylist()
             return
@@ -487,7 +491,7 @@ internal fun MainActivity.previous() {
         if (isLive) { skipStation(-1); return }
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (items.isEmpty()) {
-            playbackStatus = "播放列表为空，请先添加或扫描音频"
+            playbackStatus = t("playback.queue.empty")
             refreshPlayback()
             showPlaylist()
             return
@@ -498,7 +502,7 @@ internal fun MainActivity.previous() {
         load(items[target])
     }
 
-internal fun MainActivity.showPlaylist() {
+internal fun MainActivity.showPlaylist(requestedTab: Int? = null) {
         // 弹层回调的视图队列会成为切歌快照，过滤/排序改变时同步更新。
         playlistDialog = PlaylistDialog(this, musicStore, dark, currentItem?.id ?: -1L,
             { item ->
@@ -511,7 +515,7 @@ internal fun MainActivity.showPlaylist() {
                     currentQueue = it
                     service?.syncQueue(it, currentUri)
                 }
-            }, songs, initialTab = when {
+            }, songs, initialTab = requestedTab ?: when {
                 isLive -> 1
                 onlinePlayingUri != null -> 2
                 else -> 0

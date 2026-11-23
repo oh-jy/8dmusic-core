@@ -3,6 +3,8 @@ package j5i.spatial8d
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class VideoCacheTest {
     @Test fun formatsVideoTimeWithHours() {
@@ -18,6 +20,47 @@ class VideoCacheTest {
         assertEquals(key, videoCacheKey(url))
         assertNotEquals(key, videoCacheKey("$url&part=2"))
         check(key.all { it in '0'..'9' || it in 'a'..'f' })
+    }
+
+    @Test fun concurrentCacheWritersRemainProtectedUntilBothFinish() {
+        val file = java.io.File("video-cache-test.mp4")
+        PlaybackCacheMetadata.begin(file)
+        PlaybackCacheMetadata.begin(file)
+        assertTrue(PlaybackCacheMetadata.isActive(file))
+        PlaybackCacheMetadata.end(file)
+        assertTrue(PlaybackCacheMetadata.isActive(file))
+        PlaybackCacheMetadata.end(file)
+        assertFalse(PlaybackCacheMetadata.isActive(file))
+        assertTrue(PlaybackCacheMetadata.tryBegin(file))
+        assertFalse(PlaybackCacheMetadata.tryBegin(file))
+        PlaybackCacheMetadata.end(file)
+    }
+
+    @Test fun deletingAndWritingCannotReserveSameFile() {
+        val file = java.io.File("video-cache-race.mp4")
+        val acquired = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val writer = Thread {
+            check(PlaybackCacheMetadata.tryBegin(file))
+            acquired.countDown()
+            release.await()
+            PlaybackCacheMetadata.end(file)
+        }
+        writer.start()
+        assertTrue(acquired.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        try { assertFalse(PlaybackCacheMetadata.tryBegin(file)) }
+        finally { release.countDown(); writer.join(5000) }
+        assertTrue(PlaybackCacheMetadata.tryBegin(file))
+        PlaybackCacheMetadata.end(file)
+    }
+
+    @Test fun cacheNamesAndMetadataRejectUnsafeValues() {
+        assertTrue(isVideoCacheName("a".repeat(64) + ".mp4"))
+        assertFalse(isVideoCacheName("../" + "a".repeat(64) + ".mp4"))
+        assertFalse(isVideoCacheName("a".repeat(64) + ".mp4.part"))
+        assertEquals("", cacheMetadataValue("https://example.test/video?token=secret"))
+        assertEquals("", cacheMetadataValue("x".repeat(201) + "https://example.test"))
+        assertEquals(200, cacheMetadataValue("x".repeat(201)).length)
     }
 
     @Test fun resumePositionSkipsStartAndEndBoundaries() {

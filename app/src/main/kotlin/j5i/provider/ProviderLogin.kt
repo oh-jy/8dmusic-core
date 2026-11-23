@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.TextView
+import j5i.spatial8d.ui.AppLanguage
 
 /** Official-site login only; the plugin receives the resulting cookie, never a WebView. */
 internal object ProviderLogin {
@@ -25,7 +26,8 @@ internal object ProviderLogin {
     }
 
     fun open(context: Context, id: String, done: (String?) -> Unit): Dialog? {
-        val site = site(id) ?: run { done("此插件未提供受支持的官方网页登录"); return null }
+        fun t(key: String) = AppLanguage.text(context, key)
+        val site = site(id) ?: run { done(t("plugin.login.unsupported")); return null }
         val manager = CookieManager.getInstance().apply { setAcceptCookie(true) }
         val view = WebView(context)
         val dialog = Dialog(context, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
@@ -35,19 +37,19 @@ internal object ProviderLogin {
         val content = FrameLayout(context)
         val close = TextView(context).apply {
             text = "×"; textSize = 28f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
-            contentDescription = "关闭登录页面"; setBackgroundColor(0x66000000)
+            contentDescription = t("plugin.login.close"); setBackgroundColor(0x66000000)
             setOnClickListener { dialog.dismiss() }
         }
         content.addView(view, FrameLayout.LayoutParams(-1, -1))
         content.addView(close, FrameLayout.LayoutParams(56, 56, Gravity.TOP or Gravity.END))
         val finish = TextView(context).apply {
-            text = "完成登录"; textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
-            contentDescription = "已在网页完成登录，手动保存凭据"
+            text = t("plugin.login.finish"); textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.WHITE)
+            contentDescription = t("plugin.login.finish_description")
             setBackgroundColor(0x66000000)
             setPadding(28, 0, 28, 0)
             setOnClickListener {
                 val cookie = ProviderCookie.normalize(manager.getCookie(site.cookieUrl).orEmpty())
-                if (cookie.isBlank()) { text = "未检测到凭据"; return@setOnClickListener }
+                if (cookie.isBlank()) { text = t("plugin.login.no_credentials"); return@setOnClickListener }
                 val result = runCatching { ProviderCredentials(context).save(id, cookie); ProviderLoginBackup.save(context, id, cookie) }
                 if (result.isSuccess) {
                     completed = true
@@ -55,7 +57,7 @@ internal object ProviderLogin {
                     dialog.dismiss()
                 } else {
                     close.text = "!"
-                    done("登录成功，但凭据加密保存或备份失败，请重试")
+                    done(t("plugin.login.backup_failed"))
                 }
             }
         }
@@ -77,7 +79,7 @@ internal object ProviderLogin {
                         close.text = "!"
                         if (!reportedSaveFailure) {
                             reportedSaveFailure = true
-                            done("登录成功，但凭据加密保存或备份失败，请重试")
+                            done(t("plugin.login.backup_failed"))
                         }
                     }
                 } else view.postDelayed(this, 1000)

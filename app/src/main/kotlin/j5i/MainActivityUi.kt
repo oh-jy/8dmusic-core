@@ -55,7 +55,7 @@ internal fun MainActivity.buildUi() {
         root.addView(card { addView(visualization) }.apply {
             (layoutParams as LinearLayout.LayoutParams).topMargin = ThemeUi.dp(this@buildUi, 6f)
         })
-        status = ThemeUi.text(this, "请选择音频文件", 13f, palette.copy(faint = palette.sub), role = ThemeUi.ROLE_SUB)
+        status = ThemeUi.text(this, t("ui.audio.select"), 13f, palette.copy(faint = palette.sub), role = ThemeUi.ROLE_SUB)
         val panelHost = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         val spaceCard = spaceSettingsCard()
         val effectsCard = transformCard()
@@ -162,6 +162,21 @@ internal fun MainActivity.resizeCurveToRemainingSpace() {
         curveContent.layoutParams = curveContent.layoutParams.apply { this.height = height }
     }
 
+internal fun MainActivity.displayPresetName(name: String): String {
+    if (name == "自定义") return t("preset.custom")
+    val prefix = listOf("标准绕头 · ", "标准模式 · ").firstOrNull { name.startsWith(it) } ?: return name
+    val suffix = name.removePrefix(prefix)
+    val number = Regex("自定义 ([0-9]+)").matchEntire(suffix)?.groupValues?.get(1)
+    return t("preset.standard_prefix") + if (number != null) t("preset.generated").format(number) else suffix
+}
+
+internal fun MainActivity.displayPresetNote(name: String, note: String): String = when {
+    name == "自定义" -> t("preset.custom.note")
+    note == "用户保存的自定义空间风格" -> t("preset.saved.note")
+    note == "自定义空间风格" -> t("preset.saved.legacy_note")
+    else -> note
+}
+
 internal fun MainActivity.refreshAll() {
         updatingControls = true
         palette = ThemeUi.palette(dark)
@@ -169,7 +184,8 @@ internal fun MainActivity.refreshAll() {
         // so opening a panel never leaves a deferred visual correction until the first touch.
         refreshControls()
         // 下拉、展开控件、方向、曲线共用 preset，任何入口修改后都从这里统一回灌。
-        presetPicker.text = preset.name.replaceFirst("标准绕头 · ", "标准模式 · ")
+        presetPicker.text = displayPresetName(preset.name)
+        presetNote.text = displayPresetNote(preset.name, preset.note)
         val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
         if (presetIndex >= 0) {
             presetPicker.text = AppLanguage.preset(this, presetIndex)
@@ -191,11 +207,7 @@ internal fun MainActivity.refreshAll() {
             val steps = ((definition.max - definition.min) * 10.0.pow(definition.digits)).roundToInt()
             slider.max = steps
             slider.progress = ((value - definition.min) * 10.0.pow(definition.digits)).roundToInt()
-            sliderValues[key]?.text = formatValue(key, value).removeSuffix(definition.unit) + when (key) {
-                "period", "rt60" -> t("unit.seconds")
-                "room", "sourceDistance" -> t("unit.meters")
-                else -> ""
-            }
+            sliderValues[key]?.text = localizedParameterValue(key, value)
         }
         visualization.preset = preset
         val playing = if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
@@ -257,8 +269,20 @@ internal fun MainActivity.refreshAll() {
         refreshPlayback()
     }
 
+internal fun MainActivity.localizedParameterValue(key: String, value: Double): String {
+        val formatted = formatValue(key, value)
+        val definition = SLIDERS.firstOrNull { it.key == key } ?: return formatted
+        val unit = when (key) {
+            "period", "rt60" -> t("unit.seconds")
+            "room", "sourceDistance" -> t("unit.meters")
+            else -> return formatted
+        }
+        return formatted.removeSuffix(definition.unit) + unit
+    }
+
 internal fun MainActivity.refreshPresetSummary() {
-        presetPicker.text = preset.name.replaceFirst("标准绕头 · ", "标准模式 · ")
+        presetPicker.text = displayPresetName(preset.name)
+        presetNote.text = displayPresetNote(preset.name, preset.note)
         val presetIndex = SPACE_PRESETS.indexOfFirst { it.name == preset.name }
         if (presetIndex >= 0) {
             presetPicker.text = AppLanguage.preset(this, presetIndex)
@@ -436,7 +460,7 @@ internal fun MainActivity.refreshPlayback() {
         val station = if (isLive) importedStations().firstOrNull { it.id == currentStationId } else null
         modeTextView.text = station?.let {
             Regex("(?:FM|AM)\\s?\\d+(?:\\.\\d+)?", RegexOption.IGNORE_CASE).find("${it.name} ${it.note}")?.value
-                ?: if (it.type == "网络台") "网络电台" else "电台直播"
+                ?: t(if (it.type == "网络台") "ui.radio.network" else "ui.radio.live")
         }.orEmpty()
         modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
         playerBar.findViewWithTag<View>("radioSchedule")?.visibility = if (isLive) View.VISIBLE else View.GONE
@@ -455,7 +479,7 @@ internal fun MainActivity.refreshPlayback() {
                 if (idx >= 0) ls[idx].text else null
             }?.takeIf { it.isNotBlank() }
         } else null
-        val statusLine = if (isLive) "● LIVE · ${asrTranscript.takeIf { it.isNotBlank() } ?: "流媒体实时处理 · $effectiveStatus"}"
+        val statusLine = if (isLive) "● LIVE · ${asrTranscript.takeIf { it.isNotBlank() } ?: "${t("ui.radio.processing")} · $effectiveStatus"}"
             else currentLine ?: effectiveStatus
         val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.let { subtitle ->
@@ -480,7 +504,7 @@ internal fun MainActivity.refreshPlayback() {
         if (isViewReady(this@refreshPlayback::exportButton)) {
             exportButton.setImageResource(if (!isLive) j5i.spatial8d.R.drawable.ic_export else if (recordingKind == "playback") j5i.spatial8d.R.drawable.ic_record_stop else j5i.spatial8d.R.drawable.ic_record)
             exportButton.imageTintList = ColorStateList.valueOf(if (isLive && recordingKind == "playback") 0xffff5d5d.toInt() else palette.controlText)
-            exportButton.contentDescription = if (!isLive) "导出音频或视频" else if (recordingKind == "playback") "停止录音" else "录制电台最终输出"
+            exportButton.contentDescription = t(if (!isLive) "ui.export.description" else if (recordingKind == "playback") "playlist.record.stop" else "ui.record.radio")
         }
         if (isViewReady(this@refreshPlayback::favoriteButton)) {
             favoriteButton.background = null
@@ -493,14 +517,14 @@ internal fun MainActivity.refreshPlayback() {
                 val favorite = musicStore.isFavorite(item.id)
                 val color = if (favorite) 0xffff5c7a.toInt() else palette.controlText
                 favoriteButton.setImageDrawable(j5i.spatial8d.ui.HeartDrawable(favorite, color))
-                favoriteButton.contentDescription = if (favorite) "取消收藏" else "收藏"
+                favoriteButton.contentDescription = t(if (favorite) "ui.favorite.remove" else "ui.favorite.add")
             }
         }
         if (!seeking) seek.progress = if (player?.duration ?: 0.0 > 0)
             (player!!.position / player.duration * 1000).toInt() else 0
         durationHint.text = if (player?.duration ?: 0.0 > 0) time(player!!.duration / transform.speed) else "--:--"
-        service?.updateMedia(currentItem?.name ?: "8D 空间音频",
-            if (isLive) "电台直播 · 8D 实时处理" else currentItem?.artist ?: playbackStatus,
+        service?.updateMedia(currentItem?.name ?: t("app.name"),
+            if (isLive) t("ui.radio.media") else currentItem?.artist?.let { AppLanguage.artist(this, it) } ?: playbackStatus,
             playing, if (isLive) 0.0 else player?.position ?: 0.0, if (isLive) 0.0 else player?.duration ?: 0.0)
         // 应用图标旋转（约 30 秒一圈），跟随播放状态。
         if (playing) disc.rotation = (SystemClock.uptimeMillis() / 83f) % 360f
@@ -527,7 +551,7 @@ internal fun MainActivity.applyTransform(syncControls: Boolean = true) {
         if (isLive) {
             // 直播时间轴不可变速或倒放；与 UTS 一致，只把半音映射到 AudioTrack pitch。
             service?.radio?.semi = transform.semi.roundToInt()
-            playbackStatus = if (transform.semi == 0.0) "电台已恢复原声" else "电台变声已更新（${transform.semi.toInt()}半音）"
+            playbackStatus = if (transform.semi == 0.0) t("ui.radio.original") else t("ui.radio.pitch").format(transform.semi.toInt())
             if (syncControls) refreshAll()
             return
         }
@@ -536,8 +560,8 @@ internal fun MainActivity.applyTransform(syncControls: Boolean = true) {
         service?.controlsReverse = reverse
         service?.radio?.denoise = transform.denoiseLevel
         // 实时播放走 PlaybackParams，导出时才离线重算 PCM，因此这里立即完成。
-        playbackStatus = if (transform.active) "音频已更新（${formatSpeedShort(transform.speed)}× · ${transform.semi.toInt()}半音）"
-            else "已恢复原始速度"
+        playbackStatus = if (transform.active) t("ui.audio.transform").format(formatSpeedShort(transform.speed), transform.semi.toInt())
+            else t("ui.audio.speed_original")
         savePlaybackState()
         // 所有滑块、快捷标签、下拉和实际 transform 共用同一次回写，避免只改引擎不改文字。
         if (syncControls) refreshAll()
@@ -808,7 +832,7 @@ internal fun MainActivity.navbar(): LinearLayout {
             imageTintList = ColorStateList.valueOf(palette.controlText)
             background = ThemeUi.bgDrawable(this@navbar, palette.control, 15f)
             setPadding(ThemeUi.dp(this@navbar, 6f), 0, ThemeUi.dp(this@navbar, 6f), 0)
-            contentDescription = "连续点击三次打开视频链接"
+            contentDescription = t("video.entry.accessibility")
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@navbar, 30f), ThemeUi.dp(this@navbar, 30f)).apply { leftMargin = ThemeUi.dp(this@navbar, 4f) }
             setOnClickListener {
                 val now = android.os.SystemClock.elapsedRealtime()
@@ -817,9 +841,9 @@ internal fun MainActivity.navbar(): LinearLayout {
                 if (videoTapCount == 3) {
                     videoTapCount = 0
                     lateinit var dialog: android.app.Dialog
-                    dialog = ThemeUi.showSheet(this@navbar, palette, "打开视频链接",
-                        subtitle = "是否打开视频链接和播放历史？", compactPicker = true) {
-                        addView(ThemeUi.button(this@navbar, palette, "打开", ThemeUi.ROLE_ACCENT_FILL) {
+                    dialog = ThemeUi.showSheet(this@navbar, palette, t("video.entry.title"),
+                        subtitle = t("video.entry.confirm"), compactPicker = true) {
+                        addView(ThemeUi.button(this@navbar, palette, t("video.open"), ThemeUi.ROLE_ACCENT_FILL) {
                             dialog.dismiss()
                             showVideoLinks()
                         })
@@ -883,13 +907,13 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         }
         disc.setOnClickListener { showPlaylist() }
         meta.addView(disc)
-        songTitle = ThemeUi.text(this, "未加载音频", 14f, palette, bold = true).apply {
+        songTitle = ThemeUi.text(this, t("ui.audio.unloaded"), 14f, palette, bold = true).apply {
             ThemeUi.hideOverflow(this)
             accessibilityDelegate = object : View.AccessibilityDelegate() {
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
                     info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(
-                        android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK, if (isLive) "查看节目单" else t("edit.metadata")))
+                        android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK, if (isLive) t("ui.schedule.open") else t("edit.metadata")))
                 }
             }
             setOnClickListener {
@@ -932,7 +956,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             background = null
             setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f), ThemeUi.dp(this@nowPlayingBar, 8f), ThemeUi.dp(this@nowPlayingBar, 6f))
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 34f), ThemeUi.dp(this@nowPlayingBar, 30f))
-            contentDescription = "收藏"
+            contentDescription = t("ui.favorite.add")
             setOnClickListener {
                 val item = currentItem ?: return@setOnClickListener
                 if (isLive || item.uri.isBlank()) return@setOnClickListener
@@ -943,7 +967,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
                     return@setOnClickListener
                 }
                 musicStore.toggleFavorite(item.id)
-                playbackStatus = if (musicStore.isFavorite(item.id)) "已加入收藏" else "已取消收藏"
+                playbackStatus = t(if (musicStore.isFavorite(item.id)) "ui.favorite.added" else "ui.favorite.removed")
                 queue = musicStore.view(songs)
                 if (musicStore.playlistIndex == j5i.spatial8d.data.FAVORITES_INDEX) currentQueue = queue
                 refreshPlayback()
@@ -951,10 +975,10 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             }
         }
         meta.addView(favoriteButton)
-        meta.addView(ThemeUi.text(this, "节目单", 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+        meta.addView(ThemeUi.text(this, t("source.radio.schedule"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
             tag = "radioSchedule"
             gravity = Gravity.CENTER
-            contentDescription = "查看节目单"
+            contentDescription = t("ui.schedule.open")
             setPadding(ThemeUi.dp(this@nowPlayingBar, 8f), 0, ThemeUi.dp(this@nowPlayingBar, 8f), 0)
             setOnClickListener { openCurrentRadioSchedule() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ThemeUi.dp(this, 48f)))
@@ -1056,7 +1080,7 @@ internal fun MainActivity.iconControl(icon: Int, big: Boolean = false, action: (
         setPadding(ThemeUi.dp(this@iconControl, if (big) 12f else 9f), 0, ThemeUi.dp(this@iconControl, if (big) 12f else 9f), 0)
         layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@iconControl, if (big) 48f else 38f), ThemeUi.dp(this@iconControl, if (big) 48f else 38f))
         setOnClickListener { action() }
-        contentDescription = "播放控制"
+        contentDescription = t("playback.controls")
     }
 
 internal fun MainActivity.bg(view: View, color: Int, radiusDp: Float = 12f) {
@@ -1083,7 +1107,7 @@ internal fun MainActivity.isPlaying(): Boolean =
 internal fun MainActivity.finishRecording(label: String, statusView: TextView) {
         val path = recordingPath
         recordingKind = ""; recordingPath = ""
-        statusView.text = "$label 已停止，正在保存…"
+        statusView.text = t("record.stopped").format(label)
         dismissSource()
         publishRecording(java.io.File(path))
         refreshPlayback()
@@ -1099,14 +1123,14 @@ internal fun MainActivity.publishRecording(file: java.io.File) {
         }
         val uri = contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
         try {
-            if (uri == null) error("无法创建音乐库条目")
+            if (uri == null) error(t("record.create_failed"))
             contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
-                ?: error("无法写入录音")
+                ?: error(t("record.write_failed"))
             values.clear(); values.put(MediaStore.Audio.Media.IS_PENDING, 0)
             contentResolver.update(uri, values, null, null)
-            playbackStatus = "录音已保存到 Music/8D/${file.name}"
+            playbackStatus = t("record.saved").format("Music/8D/${file.name}")
         } catch (e: Exception) {
             if (uri != null) contentResolver.delete(uri, null, null)
-            playbackStatus = "录音保存失败：${e.message}"
+            playbackStatus = "${t("record.save_failed")}: ${e.message}"
         } finally { file.delete(); refreshPlayback() }
     }

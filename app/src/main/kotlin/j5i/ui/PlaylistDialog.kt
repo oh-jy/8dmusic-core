@@ -101,6 +101,10 @@ class PlaylistDialog(
         refresh()
     }
 
+    fun relayout() {
+        dialog?.takeIf { it.isShowing }?.let { ThemeUi.layoutSheet(it) }
+    }
+
     fun show() {
         dialog = createDialog().also {
             it.show()
@@ -184,9 +188,9 @@ class PlaylistDialog(
             saveButton = button(t("playlist.save")) { toggleSave() }
             addView(saveButton)
             addView(count)
-            recordButton = button("录音") { (context as? PlaylistHost)?.toggleMicRecording() }
+            recordButton = button(t("playlist.record")) { (context as? PlaylistHost)?.toggleMicRecording() }
             addView(recordButton)
-            cleanupButton = button("清在线") { (context as? PlaylistHost)?.pruneOnlineReferences() }
+            cleanupButton = button(t("playlist.clear_online")) { (context as? PlaylistHost)?.pruneOnlineReferences() }
             addView(cleanupButton)
             addView(button(t("scan")) { (context as? PlaylistHost)?.scanMusic(); close() })
         })
@@ -211,12 +215,12 @@ class PlaylistDialog(
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 setPadding(dp(18), dp(36), dp(18), dp(24))
-                addView(ThemeUi.text(c, "需要音频权限才能读取本机歌曲", 13f, p, bold = true))
-                addView(ThemeUi.text(c, "首次使用请允许；若已拒绝，请到系统设置开启「音乐和音频」。", 11f, p, role = ThemeUi.ROLE_SUB))
+                addView(ThemeUi.text(c, t("playlist.permission"), 13f, p, bold = true))
+                addView(ThemeUi.text(c, t("playlist.permission.hint"), 11f, p, role = ThemeUi.ROLE_SUB))
                 addView(ThemeUi.row(c).apply {
                     gravity = Gravity.CENTER
-                    addView(button("重新请求授权") { (context as? PlaylistHost)?.scanMusic(); dismiss() })
-                    addView(button("去设置开启") {
+                    addView(button(t("playlist.permission.retry")) { (context as? PlaylistHost)?.scanMusic(); dismiss() })
+                    addView(button(t("playlist.permission.settings")) {
                         context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                             android.net.Uri.parse("package:${context.packageName}")))
                     })
@@ -228,7 +232,7 @@ class PlaylistDialog(
             addView(list)
         }
         localBody.addView(listScroll)
-        status = ThemeUi.text(c, "点按播放 · 长按歌曲拖动排序 · 操作菜单可移除、删除或编辑", 11f, p, role = ThemeUi.ROLE_SUB)
+        status = ThemeUi.text(c, t("playlist.instructions"), 11f, p, role = ThemeUi.ROLE_SUB)
         localBody.addView(status)
         refresh(scrollToPlaying = true)
         return Dialog(c).apply {
@@ -242,7 +246,7 @@ class PlaylistDialog(
 
     private fun renderSourceTabs(selected: Int) {
         sourceTabs.removeAllViews()
-        listOf("本地歌曲", "FM", "在线歌曲").forEachIndexed { index, label ->
+        listOf(t("playlist.local"), "FM", t("playlist.online")).forEachIndexed { index, label ->
             sourceTabs.addView(chip(label, index == selected) {
                 selectSourceTab(index)
             }.apply { layoutParams = LinearLayout.LayoutParams(0, dp(42), 1f) })
@@ -275,13 +279,13 @@ class PlaylistDialog(
         songs = store.view(source)
         if (::recordButton.isInitialized) {
             (recordButton as? TextView)?.text =
-                if ((context as? PlaylistHost)?.isMicRecording() == true) "停止录音" else "录音"
+                t(if ((context as? PlaylistHost)?.isMicRecording() == true) "playlist.record.stop" else "playlist.record")
         }
         if (::cleanupButton.isInitialized) {
             cleanupButton.visibility = if (source.any { it.uri.startsWith("online://") }) View.VISIBLE else View.GONE
         }
         saveButton.visibility = if (store.query.isNotBlank() && songs.isNotEmpty()) View.VISIBLE else View.GONE
-        count.text = if (songs.size == source.size) "${source.size} 首" else "${songs.size} / ${source.size} 首"
+        count.text = t("playlist.count").format(if (songs.size == source.size) "${source.size}" else "${songs.size} / ${source.size}")
         tabs.removeAllViews()
         tabs.addView(chip(t("playlist.all"), store.playlistIndex == -1) { store.playlistIndex = -1; refresh() })
         tabs.addView(chip("♥ ${t("playlist.favorites")}", store.playlistIndex == FAVORITES_INDEX) { store.playlistIndex = FAVORITES_INDEX; refresh() })
@@ -290,7 +294,7 @@ class PlaylistDialog(
                 // 内置收藏列表不在 playlists 集合内，只有用户自建列表可删除。
                 setOnLongClickListener {
                     lateinit var sheet: Dialog
-                    sheet = ThemeUi.showSheet(context, p, "删除播放列表", "删除“${playlist.name}”？") {
+                    sheet = ThemeUi.showSheet(context, p, t("playlist.delete.title"), t("playlist.delete.confirm").format(playlist.name)) {
                         addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
                             sheet.dismiss(); store.deletePlaylist(index); refresh()
                         })
@@ -303,15 +307,15 @@ class PlaylistDialog(
         sortRow.removeAllViews()
         val actions = ThemeUi.row(context)
         actions.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))
-        listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "album" to t("sort.album"), "time" to t("sort.time"), "manual" to t("sort.manual")).forEach { (key, label) ->
-            actions.addView(chip(label, store.sort == key) { store.setSort(key); refresh() })
+        listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "album" to t("sort.album"), "time" to t("sort.time"), "folder" to t("sort.folder"), "manual" to t("sort.manual")).forEach { (key, label) ->
+            actions.addView(sortOption(label, store.sort == key) { store.setSort(key); refresh() })
         }
         // The trailing action pair remains fixed after Custom in the UTS order row.
         val trailing = ThemeUi.row(context)
         if (store.sort != "manual") trailing.addView(chip(if (store.ascending) "↑" else "↓", false) { store.toggleAscending(); refresh() })
-        else trailing.addView(chip(if (reorderMode) "完成排序" else "整理顺序", false) {
+        else trailing.addView(chip(t(if (reorderMode) "playlist.order.finish" else "playlist.order.organize"), false) {
             reorderMode = !reorderMode
-            status.text = if (reorderMode) "整理模式：上下拖动歌曲，点「完成排序」退出" else "排序已完成"
+            status.text = t(if (reorderMode) "playlist.order.hint" else "playlist.order.done")
             refresh()
         })
         list.removeAllViews()
@@ -321,8 +325,8 @@ class PlaylistDialog(
         // 等底部弹层完成布局后再滚动，提前 scrollTo 拿不到有效高度。
         if (scrollToPlaying && active >= 0) scrollToCurrent(active)
         if (songs.isEmpty() && hasAudioPermission()) list.addView(ThemeUi.text(context,
-            if (store.playlistIndex == FAVORITES_INDEX) "收藏为空，点播放控制处的空心爱心添加"
-            else if (source.isEmpty()) "请先添加或扫描音频" else "没有匹配的音频", 12f, p, role = ThemeUi.ROLE_SUB).apply {
+            t(if (store.playlistIndex == FAVORITES_INDEX) "playlist.empty.favorites"
+            else if (source.isEmpty()) "playlist.empty.library" else "playlist.empty.filter"), 12f, p, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(40), dp(16), dp(40))
         })
         sortRow.addView(HorizontalScrollView(context).apply {
@@ -336,7 +340,7 @@ class PlaylistDialog(
 
     private fun scrollToCurrent(active: Int = songs.indexOfFirst { it.id == currentId }) {
         if (active < 0) {
-            Toast.makeText(context, "当前歌曲不在此列表或筛选结果中", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, t("playlist.locate.missing"), Toast.LENGTH_SHORT).show()
             return
         }
         listScroll.post {
@@ -348,13 +352,13 @@ class PlaylistDialog(
 
     private fun locateButton(localPlaying: Boolean): TextView =
         ThemeUi.text(context, "◎", 20f, p, role = ThemeUi.ROLE_ACCENT).apply {
-            contentDescription = "定位当前歌曲"
+            contentDescription = t("playlist.locate")
             gravity = Gravity.CENTER
             alpha = if (localPlaying) 1f else 0.4f
             minWidth = dp(48); minHeight = dp(48)
             setOnClickListener {
                 if (localPlaying) scrollToCurrent()
-                else Toast.makeText(context, "仅本地音乐播放时可定位", Toast.LENGTH_SHORT).show()
+                else Toast.makeText(context, t("playlist.locate.local"), Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -381,17 +385,17 @@ class PlaylistDialog(
             addView(ThemeUi.text(c, (if (active) "▶ " else "") + displayName, 13f, p, bold = active, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply { ThemeUi.hideOverflow(this) })
             addView(ThemeUi.row(c).apply {
                 if (song.album == "B站音频" || song.uri.startsWith("file://") && song.uri.contains("/files/bili/")) {
-                    addView(ThemeUi.text(c, "B站", 9f, p, role = ThemeUi.ROLE_ACCENT).apply {
+                    addView(ThemeUi.text(c, t("playlist.bili.badge"), 9f, p, role = ThemeUi.ROLE_ACCENT).apply {
                         background = ThemeUi.bgDrawable(c, p.control, 4f)
                         setPadding(dp(4), 0, dp(4), 0)
-                        contentDescription = "哔哩哔哩下载或缓存音频"
+                        contentDescription = t("playlist.bili.audio")
                     }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(4) })
                 }
-                addView(ThemeUi.text(c, "${song.artist} · ${song.album} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(ThemeUi.text(c, "${AppLanguage.artist(c, song.artist)} · ${AppLanguage.album(c, song.album)} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) }, LinearLayout.LayoutParams(0, -2, 1f))
             })
         })
         row.addView(ThemeUi.text(c, "⋯", 18f, p, role = ThemeUi.ROLE_ACCENT).apply {
-            contentDescription = "${song.name}，更多操作"
+            contentDescription = "${song.name}, ${t("playlist.more")}"
             gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
             setOnClickListener { showRowActions(song) }
@@ -417,12 +421,12 @@ class PlaylistDialog(
         lateinit var sheet: Dialog
         val displayName = song.name.replace(Regex("\\.[A-Za-z0-9]{1,8}$"), "")
         sheet = ThemeUi.showSheet(context, p, displayName.take(28),
-            "${song.artist} · ${song.album}") {
+            "${AppLanguage.artist(context, song.artist)} · ${AppLanguage.album(context, song.album)}") {
             if (store.playlistIndex >= 0) addView(sheetButton(t("remove"), ThemeUi.ROLE_CONTROL) {
                 sheet.dismiss(); confirmRemove(song)
             })
             if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
-                addView(sheetButton("从音乐库移除", ThemeUi.ROLE_CONTROL) {
+                addView(sheetButton(t("playlist.remove.library"), ThemeUi.ROLE_CONTROL) {
                     sheet.dismiss(); store.removePermanently(song); syncLibrary()
                 })
             } else {
@@ -440,11 +444,11 @@ class PlaylistDialog(
     private fun confirmRemove(song: MusicItem) {
         lateinit var sheet: Dialog
         sheet = ThemeUi.showSheet(context, p, t("remove"),
-            "从当前自定义播放列表移除“${song.name}”？不会删除原文件，且无法恢复。") {
+            t("playlist.remove.confirm").format(song.name)) {
             addView(sheetButton(t("remove"), ThemeUi.ROLE_ACCENT_FILL) {
                 sheet.dismiss()
                 store.removeFromCurrentPlaylist(song)
-                status.text = "已从当前列表移除，不删除源文件"
+                status.text = t("playlist.remove.done")
                 refresh()
             })
         }
@@ -454,7 +458,7 @@ class PlaylistDialog(
     private fun confirmDelete(song: MusicItem) {
         lateinit var sheet: Dialog
         sheet = ThemeUi.showSheet(context, p, t("delete"),
-            "删除“${song.name}”的原文件并移出所有列表？若系统要求确认，请在系统弹窗中允许。此操作无法恢复。") {
+            t("playlist.file.delete.confirm").format(song.name)) {
             addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
                 sheet.dismiss(); requestDelete(song)
             })
@@ -468,9 +472,9 @@ class PlaylistDialog(
             host.deleteLibrarySource(song) { deleted ->
                 if (deleted) {
                     store.removePermanently(song)
-                    status.text = "原文件已删除，已从所有列表移除"
+                    status.text = t("playlist.file.deleted")
                     syncLibrary()
-                } else status.text = "原文件未删除或已取消，歌曲仍保留在列表"
+                } else status.text = t("playlist.file.cancelled")
             }
             return
         }
@@ -480,9 +484,9 @@ class PlaylistDialog(
         else false
         if (deleted) {
             store.removePermanently(song)
-            status.text = "原文件已删除，已从所有列表移除"
+            status.text = t("playlist.file.deleted")
             syncLibrary()
-        } else status.text = "原文件未删除，歌曲仍保留在列表"
+        } else status.text = t("playlist.file.not_deleted")
     }
 
     private fun syncLibrary() {
@@ -515,7 +519,7 @@ class PlaylistDialog(
         row.alpha = 0.96f
         list.invalidate()
         listScroll.postOnAnimation(autoScroll)
-        status.text = "拖动中：亮线显示插入位置"
+        status.text = t("playlist.dragging")
     }
 
     private fun moveDrag(rawY: Float) {
@@ -542,7 +546,7 @@ class PlaylistDialog(
             }
             child.alpha = if (i == dragTarget) 0.72f else 1f
         }
-        status.text = "插入第 ${dragTarget + 1} 位 · 松手保存"
+        status.text = t("playlist.drag.position").format(dragTarget + 1)
         list.invalidate()
     }
 
@@ -554,7 +558,7 @@ class PlaylistDialog(
         dragTarget = -1
         dragView = null
         rowTops.clear()
-        status.text = if (cancel) "已取消排序" else "顺序已保存"
+        status.text = t(if (cancel) "playlist.order.cancelled" else "playlist.order.saved")
         refresh()
     }
 
@@ -592,7 +596,7 @@ class PlaylistDialog(
                 setPadding(dp(10), dp(8), dp(4), dp(8))
                 setOnClickListener {
                     if (store.addPlaylist(input.text.toString(), store.view(source))) { saveOpen = false; root.removeView(row); refresh() }
-                    else Toast.makeText(context, "名称为空、列表为空或已达到 10 个上限", Toast.LENGTH_SHORT).show()
+                    else Toast.makeText(context, t("playlist.create.invalid"), Toast.LENGTH_SHORT).show()
                 }
             })
             root.addView(row, index)
@@ -606,6 +610,15 @@ class PlaylistDialog(
         isSelected = selected
         textSize = 11f; setPadding(dp(6), 0, dp(6), 0)
         layoutParams = LinearLayout.LayoutParams(-2, dp(30)).apply { leftMargin = dp(4); topMargin = dp(4); bottomMargin = dp(4) }
+    }
+    private fun sortOption(label: String, selected: Boolean, action: () -> Unit) = ThemeUi.text(
+        context, label, 11f, p, role = if (selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT
+    ).apply {
+        gravity = Gravity.CENTER
+        isSelected = selected
+        setPadding(dp(2), dp(4), dp(2), dp(4))
+        layoutParams = LinearLayout.LayoutParams(-2, dp(30)).apply { leftMargin = dp(2) }
+        setOnClickListener { action() }
     }
     private fun dp(value: Int) = ThemeUi.dp(context, value.toFloat())
     private fun hasAudioPermission(): Boolean {

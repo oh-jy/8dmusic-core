@@ -3,6 +3,7 @@ package j5i.spatial8d.provider
 import android.content.Context
 import android.net.Uri
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.ui.AppLanguage
 import org.json.JSONObject
 import java.net.URLEncoder
 
@@ -39,6 +40,10 @@ internal object ProviderTrackRef {
                 require(mv.host == "www.kugou.com") { "酷狗 MV 地址无效" }
                 Regex("/mvweb/html/mv_([A-Fa-f0-9]{32})\\.html").matchEntire(mv.path)?.groupValues?.get(1)
             }
+            "platform.netease" -> {
+                require(mv.host == "music.163.com") { "网易云 MV 地址无效" }
+                Regex("/mv/([0-9]+)").matchEntire(mv.path)?.groupValues?.get(1)
+            }
             else -> null
         }
         require(!id.isNullOrEmpty()) { "未找到有效的来源 MV 标识" }
@@ -50,18 +55,18 @@ internal object ProviderTrackRef {
     fun mvOptions(context: Context, item: MusicItem): List<MvOption> {
         val (source, mvId) = mvIdentity(item.uri)
         val entry = ProviderPluginStore(context).list().firstOrNull { it.enabled && it.descriptor.id == source }
-            ?: error("插件来源不存在或已停用")
+            ?: error(AppLanguage.text(context, "provider.error.plugin_unavailable"))
         val request = JSONObject().put("version", 1).put("operation", "mvOptions").put("id", mvId)
             .put("cookie", ProviderCredentials(context).get(source))
         if (android.util.Log.isLoggable("8DProvider", android.util.Log.INFO))
             android.util.Log.i("8DProvider", "查询可用 MV 清晰度 method=mvOptions source=$source mvId=$mvId")
         val response = JSONObject(ProviderPluginRunner.invoke(context, entry, request.toString()))
         val formats = response.getJSONArray("formats")
-        require(formats.length() in 1..12) { "没有可播放的 MV 版本" }
+        require(formats.length() in 1..12) { AppLanguage.text(context, "provider.error.no_mv_formats") }
         return (0 until formats.length()).map { index ->
             val format = formats.getJSONObject(index)
             val id = format.getString("id")
-            require(id.matches(Regex("[A-Za-z0-9_-]{1,32}"))) { "MV 清晰度标识无效" }
+            require(id.matches(Regex("[A-Za-z0-9_-]{1,32}"))) { AppLanguage.text(context, "provider.error.mv_format_id") }
             val url = format.getString("url")
             ProviderBrokerPolicy.validateUrl(url, entry.descriptor.domains, allowHttp = "http-audio" in entry.descriptor.capabilities)
             MvOption(id, format.getString("label").take(40), format.optLong("size").coerceAtLeast(0), url)
@@ -72,11 +77,11 @@ internal object ProviderTrackRef {
         val uri = Uri.parse(item.uri)
         val id = uri.getQueryParameter("source").orEmpty()
         val trackId = uri.getQueryParameter("id").orEmpty()
-        require(id.isNotEmpty() && trackId.isNotEmpty()) { "在线歌曲标识无效" }
+        require(id.isNotEmpty() && trackId.isNotEmpty()) { AppLanguage.text(context, "provider.error.track_id") }
         if (uri.host == "plugin") {
             val store = ProviderPluginStore(context)
             val entry = store.list().firstOrNull { it.enabled && it.descriptor.id == id }
-                ?: error("插件来源不存在或已停用")
+                ?: error(AppLanguage.text(context, "provider.error.plugin_unavailable"))
             val credential = ProviderCredentials(context).get(id)
             val request = JSONObject().put("version", 1).put("operation", "resolve").put("id", trackId)
                 .put("cookie", credential)
@@ -93,14 +98,14 @@ internal object ProviderTrackRef {
             android.util.Log.i("8DProvider", "resolved source=$id track=$trackId host=${java.net.URI(url).host}")
             return item.copy(uri = url)
         }
-        require(uri.host == "provider") { "不支持的在线歌曲类型" }
+        require(uri.host == "provider") { AppLanguage.text(context, "provider.error.track_type") }
         val entry = ProviderStore(context).list().firstOrNull { it.enabled && it.definition.id == id }
-            ?: error("在线来源不存在或已停用")
+            ?: error(AppLanguage.text(context, "provider.error.source_unavailable"))
         val url = uri.getQueryParameter("audio").orEmpty()
-        require(url.isNotEmpty()) { "此声明式来源没有持久播放地址，请重新搜索播放" }
+        require(url.isNotEmpty()) { AppLanguage.text(context, "provider.error.no_play_url") }
         val audio = java.net.URI(url)
         require(audio.host != null && audio.host in entry.definition.domains && audio.userInfo == null &&
-            (audio.scheme == "https" || entry.definition.usesHttp && audio.scheme == "http")) { "播放地址不在来源授权范围内" }
+            (audio.scheme == "https" || entry.definition.usesHttp && audio.scheme == "http")) { AppLanguage.text(context, "provider.error.unauthorized_url") }
         return item.copy(uri = url, album = "provider:${if (entry.definition.usesHttp) "http" else "https"}:$id")
     }
 

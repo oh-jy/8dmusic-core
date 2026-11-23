@@ -54,18 +54,18 @@ internal fun MainActivity.rememberVideo(uri: Uri, intent: Intent) {
         ?: intent.getStringExtra(Intent.EXTRA_TITLE)?.takeIf { it.isNotBlank() }
         ?: filename?.takeIf { it.isNotBlank() }
         ?: uri.lastPathSegment?.takeIf { it.isNotBlank() }
-        ?: uri.host ?: "视频"
+        ?: uri.host ?: t("video.title")
     saveVideoHistory(recordVideoHistory(videoHistory(), historyUri, videoTitle(historyUri, title)))
 }
 
 private fun MainActivity.renameVideoHistory(entry: VideoHistoryEntry) {
     lateinit var dialog: Dialog
-    dialog = ThemeUi.showSheet(this, palette, "重命名视频") {
-        val input = ThemeUi.input(this@renameVideoHistory, palette, "视频标题").apply { setText(entry.title) }
+    dialog = ThemeUi.showSheet(this, palette, t("video.rename")) {
+        val input = ThemeUi.input(this@renameVideoHistory, palette, t("video.title.hint")).apply { setText(entry.title) }
         addView(input)
-        addView(ThemeUi.button(this@renameVideoHistory, palette, "保存", ThemeUi.ROLE_ACCENT_FILL) {
+        addView(ThemeUi.button(this@renameVideoHistory, palette, t("save"), ThemeUi.ROLE_ACCENT_FILL) {
             val title = input.text.toString().trim()
-            if (title.isEmpty()) toast("请输入视频标题") else {
+            if (title.isEmpty()) toast(t("video.title.required")) else {
                 val titles = videoTitles().put(entry.uri, title)
                 getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
                 saveVideoHistory(videoHistory().map { if (it.uri == entry.uri) it.copy(title = title) else it })
@@ -89,17 +89,17 @@ internal fun MainActivity.toggleVideoFavorite(url: String) {
     val stableBilibili = uri.host == "player.bilibili.com" && uri.path == "/player.html" &&
         uri.queryParameterNames.all { it in setOf("bvid", "cid") }
     if (uri.userInfo != null || uri.encodedQuery != null && !stableBilibili) {
-        toast("带查询参数的链接可能包含临时凭据，不能收藏"); return
+        toast(t("video.favorite.credentials")); return
     }
     val current = videoFavorites()
     val updated = if (url in current) current - url else current + url
     getPreferences(Context.MODE_PRIVATE).edit().putString("video_favorites", JSONArray(updated).toString()).apply()
-    toast(if (url in current) "已取消视频收藏" else "已加入视频收藏")
+    toast(t(if (url in current) "video.favorite.removed" else "video.favorite.added"))
 }
 
 internal fun MainActivity.showVideoLinks() {
     lateinit var sheet: Dialog
-    sheet = ThemeUi.showSheet(this, palette, "视频链接", fullHeight = true) {
+    sheet = ThemeUi.showSheet(this, palette, t("video.links"), fullHeight = true) {
         val favoriteRows = LinearLayout(this@showVideoLinks).apply { orientation = LinearLayout.VERTICAL }
         var draggedUrl: String? = null
         fun row(entry: VideoHistoryEntry, favorite: Boolean): LinearLayout = LinearLayout(this@showVideoLinks).apply {
@@ -108,7 +108,7 @@ internal fun MainActivity.showVideoLinks() {
             if (favorite) {
                 addView(ThemeUi.text(this@showVideoLinks, "☰", 14f, palette, role = ThemeUi.ROLE_FAINT).apply {
                     gravity = Gravity.CENTER
-                    contentDescription = "拖动排序 ${videoTitle(entry.uri, entry.title)}"
+                    contentDescription = "${t("video.drag")} ${videoTitle(entry.uri, entry.title)}"
                     setOnTouchListener { view, event ->
                         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                             draggedUrl = entry.uri
@@ -167,7 +167,7 @@ internal fun MainActivity.showVideoLinks() {
             }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 84f), ThemeUi.dp(this@showVideoLinks, 40f)))
             val more = ThemeUi.text(this@showVideoLinks, "⋯", 20f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 gravity = Gravity.CENTER
-                contentDescription = "更多选项"
+                contentDescription = t("video.more")
             }
             addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 48f), ThemeUi.dp(this@showVideoLinks, 40f)))
             setOnClickListener {
@@ -190,8 +190,8 @@ internal fun MainActivity.showVideoLinks() {
                         setOnClickListener { popup.dismiss(); action() }
                     }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoLinks, 44f)))
                 }
-                option("重命名") { sheet.dismiss(); renameVideoHistory(entry.copy(title = videoTitle(entry.uri, entry.title))) }
-                option("删除") {
+                option(t("video.rename.action")) { sheet.dismiss(); renameVideoHistory(entry.copy(title = videoTitle(entry.uri, entry.title))) }
+                option(t("delete")) {
                     if (favorite) toggleVideoFavorite(entry.uri) else {
                         val titles = videoTitles()
                         if (isVideoFavorite(entry.uri) && !titles.has(entry.uri)) {
@@ -206,7 +206,7 @@ internal fun MainActivity.showVideoLinks() {
                 popup.showAsDropDown(more, 0, 0, Gravity.END)
             }
         }
-        val input = ThemeUi.input(this@showVideoLinks, palette, "输入网页、MP4 或 M3U8 链接").apply {
+        val input = ThemeUi.input(this@showVideoLinks, palette, t("video.url.hint")).apply {
             setPadding(paddingLeft, paddingTop, ThemeUi.dp(this@showVideoLinks, 64f), paddingBottom)
         }
         val inputHeight = ThemeUi.dp(this@showVideoLinks, 44f)
@@ -214,28 +214,28 @@ internal fun MainActivity.showVideoLinks() {
             layoutParams = LinearLayout.LayoutParams(-1, inputHeight)
         }
         inputRow.addView(input, FrameLayout.LayoutParams(-1, inputHeight))
-        inputRow.addView(ThemeUi.text(this@showVideoLinks, "打开", 13f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
+        inputRow.addView(ThemeUi.text(this@showVideoLinks, t("video.open"), 13f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
             gravity = Gravity.CENTER
             setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, ThemeUi.dp(this@showVideoLinks, 10f), 0)
             setOnClickListener {
             val url = input.text.toString().trim()
             val parsed = Uri.parse(url)
             if (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrEmpty() || parsed.userInfo != null) {
-                toast("请输入有效的 HTTP 或 HTTPS 链接")
+                toast(t("video.url.invalid"))
             } else {
                 openVideoLink(url)
             }
             }
         }, FrameLayout.LayoutParams(-2, -1, Gravity.END or Gravity.CENTER_VERTICAL))
         addView(inputRow)
-        addView(ThemeUi.text(this@showVideoLinks, "播放历史", 15f, palette, bold = true))
+        addView(ThemeUi.text(this@showVideoLinks, t("video.history"), 15f, palette, bold = true))
         val history = videoHistory()
-        if (history.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, "暂无播放历史", 13f, palette, role = ThemeUi.ROLE_SUB))
+        if (history.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, t("video.history.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
         history.forEach { entry -> addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) }) }
-        addView(ThemeUi.text(this@showVideoLinks, "视频收藏", 15f, palette, bold = true))
+        addView(ThemeUi.text(this@showVideoLinks, t("video.favorites"), 15f, palette, bold = true))
         val favorites = videoFavorites()
-        if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, "暂无视频收藏", 13f, palette, role = ThemeUi.ROLE_SUB))
-        else addView(ThemeUi.text(this@showVideoLinks, "拖动左侧图标调整顺序", 11f, palette, role = ThemeUi.ROLE_SUB))
+        if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, t("video.favorites.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
+        else addView(ThemeUi.text(this@showVideoLinks, t("video.drag.hint"), 11f, palette, role = ThemeUi.ROLE_SUB))
         favorites.forEach { url ->
             val uri = Uri.parse(url)
             val fallback = if (uri.host == "player.bilibili.com") uri.getQueryParameter("bvid").orEmpty() +
@@ -326,7 +326,7 @@ private fun MainActivity.showVideoTargets(targets: List<String>, video: Boolean)
     fun play(target: String) = openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(target), "video/*"))
     if (!video) openWebVideo(targets.first())
     else if (targets.size == 1) play(targets.first())
-    else pickOption("选择播放地址", targets.mapIndexed { index, target ->
+    else pickOption(t("video.choose_url"), targets.mapIndexed { index, target ->
         val uri = Uri.parse(target)
         "${index + 1}. ${uri.host.orEmpty()}${uri.path.orEmpty()}".take(120)
     }, -1) { index -> play(targets[index]) }
@@ -335,7 +335,7 @@ private fun MainActivity.showVideoTargets(targets: List<String>, video: Boolean)
 private fun MainActivity.loadJsonWithWebView(url: String) {
     val parsed = Uri.parse(url)
     if (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrEmpty() || parsed.userInfo != null) {
-        toast("请输入有效的 HTTP 或 HTTPS 链接"); return
+        toast(t("video.url.invalid")); return
     }
     val host = FrameLayout(this).apply { alpha = 0f }
     val web = WebView(this).apply {
@@ -361,7 +361,7 @@ private fun MainActivity.loadJsonWithWebView(url: String) {
                     .onFailure {
                         val targets = parseHtmlVideoTargets(body, base)
                         if (targets.isEmpty()) {
-                            cleanup(); toast(it.message ?: "响应中没有找到有效的视频地址")
+                            cleanup(); toast(t("video.response.invalid"))
                         } else {
                             cleanup(); showVideoTargets(targets, true)
                         }
@@ -457,7 +457,7 @@ private fun parseHtmlVideoTargets(html: String, base: java.net.URI): List<String
 }
 
 internal fun MainActivity.openWebVideo(url: String) {
-    if (recordingKind.isNotEmpty()) { toast("请先停止录音，再播放视频"); return }
+    if (recordingKind.isNotEmpty()) { toast(t("video.stop_recording")); return }
     service?.pause()
     lateinit var dialog: Dialog
     val container = FrameLayout(this)
@@ -493,11 +493,11 @@ internal fun MainActivity.openWebVideo(url: String) {
     val layout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         val bar = LinearLayout(this@openWebVideo).apply {
-            addView(ThemeUi.button(this@openWebVideo, palette, "关闭") { dialog.dismiss() })
-            addView(ThemeUi.button(this@openWebVideo, palette, if (isVideoFavorite(url)) "取消收藏" else "收藏视频").apply {
+            addView(ThemeUi.button(this@openWebVideo, palette, t("close")) { dialog.dismiss() })
+            addView(ThemeUi.button(this@openWebVideo, palette, t(if (isVideoFavorite(url)) "video.unfavorite" else "video.favorite")).apply {
                 setOnClickListener {
                     toggleVideoFavorite(url)
-                    text = if (isVideoFavorite(url)) "取消收藏" else "收藏视频"
+                    text = t(if (isVideoFavorite(url)) "video.unfavorite" else "video.favorite")
                 }
             })
         }

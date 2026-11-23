@@ -20,6 +20,7 @@ import j5i.spatial8d.core.PcmBuffer
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
 import j5i.spatial8d.visual.PerfTrace
+import j5i.spatial8d.ui.AppLanguage
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
@@ -92,6 +93,7 @@ class SpatialPlayer(context: Context) {
     private val main = Handler(Looper.getMainLooper())
     // Service 构造期间尚未 attach，直接保存传入 Context，不能提前读 applicationContext。
     private val appContext = context
+    private fun t(key: String) = AppLanguage.text(appContext, key)
     private val wakeLock by lazy {
         appContext.getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "spatial8d:AudioTrack").apply {
@@ -183,7 +185,7 @@ class SpatialPlayer(context: Context) {
         } catch (e: Exception) {
             paused = true
             syncWakeLock()
-            report("播放失败: ${e.message}")
+            report("${t("audio.play.failed")}: ${e.message}")
             false
         }
     }
@@ -307,14 +309,14 @@ class SpatialPlayer(context: Context) {
     private fun buildTrack() {
         try { track?.setVolume(1f) } catch (_: Exception) {}
         val min = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-        check(min > 0) { "AudioTrack 不支持采样率 $sampleRate" }
+        check(min > 0) { t("audio.track.rate").format(sampleRate) }
         track = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
             .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                 .setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
             .setBufferSizeInBytes(maxOf(min * 2, OUTPUT_CHUNK * 16))
             .setTransferMode(AudioTrack.MODE_STREAM).build()
-        check(track?.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
+        check(track?.state == AudioTrack.STATE_INITIALIZED) { t("audio.track.init") }
         trackStarted = false
         endMarkerArmed = false
         drainStartedAt = 0L
@@ -328,7 +330,7 @@ class SpatialPlayer(context: Context) {
         val pitch = ((if (transform.tape) transform.speed else 1.0) *
             2.0.pow(transform.semi / 12.0)).coerceIn(0.5, 2.0)
         try { track?.playbackParams = PlaybackParams().setSpeed(transform.speed.toFloat()).setPitch(pitch.toFloat()) }
-        catch (e: Exception) { report("播放参数设置失败: ${e.message}") }
+        catch (e: Exception) { report("${t("audio.params.failed")}: ${e.message}") }
     }
 
     private fun startWorkers() = synchronized(lock) {
@@ -380,7 +382,7 @@ class SpatialPlayer(context: Context) {
                         else audio.write(output, written, count * 4 - written)
                     }
                     if (n < 0 && (own != generation || track !== audio || paused)) break
-                    if (n < 0) error("AudioTrack 写入失败: $n")
+                    if (n < 0) error(t("audio.track.write").format(n))
                     written += n
                 }
                 if (own != generation || paused) continue
@@ -409,7 +411,7 @@ class SpatialPlayer(context: Context) {
         } catch (e: Exception) {
             if (own == generation) {
                 generation++
-                report("渲染播放失败: ${e.message}")
+                report("${t("audio.render.failed")}: ${e.message}")
             }
         } finally {
             // 旧线程退出时不能清掉已经启动的新一代输出线程。
@@ -491,7 +493,7 @@ class SpatialPlayer(context: Context) {
                 if (lead > sampleRate * PREROLL_SECONDS) Thread.sleep((count * 800L / sampleRate).coerceIn(8, 250))
             }
         } catch (e: Exception) {
-            if (own == generation) report("后台渲染失败: ${e.message}")
+            if (own == generation) report("${t("audio.render.background_failed")}: ${e.message}")
         } finally {
             current.writerFinished()
         }
@@ -610,7 +612,7 @@ class SpatialPlayer(context: Context) {
     fun export(stream: OutputStream, mp3: Boolean = false, wavPath: String? = null,
         mp3Path: String? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val source = decoded
-        if (source == null) { stream.close(); onDone(false, "没有已加载的音频"); return }
+        if (source == null) { stream.close(); onDone(false, t("audio.export.no_audio")); return }
         // 立即回报失败并关闭 SAF 输出流，避免界面只留下一个空文档。
         fun fail(message: String) {
             try { stream.close() } catch (_: Exception) {}
@@ -627,18 +629,18 @@ class SpatialPlayer(context: Context) {
                 val decodeStarted = System.currentTimeMillis()
                 while (!source.decodeDone) {
                     if (decoded !== source) {
-                        fail("当前音频已切换，请重新导出")
+                        fail(t("audio.export.changed"))
                         return@Thread
                     }
                     if (System.currentTimeMillis() - decodeStarted > 10 * 60_000L) {
-                        fail("音频解码超时，请确认能完整播放后再导出")
+                        fail(t("audio.export.timeout"))
                         return@Thread
                     }
                     // QQ 等在线音频先起播、后解码；必须等完整 PCM，不能导出当前水位。
                     Thread.sleep(200)
                 }
                 if (source.frames <= 0) {
-                    fail("音频没有完整 PCM，导出已取消")
+                    fail(t("audio.export.incomplete"))
                     return@Thread
                 }
                 onProgress(10)
@@ -662,21 +664,21 @@ class SpatialPlayer(context: Context) {
                     p.rt60, p.wet, tr.denoiseLevel, tr.clarityLevel, p.trajectory, p.sourceDistance, temp.absolutePath)
                 // 仅检查 RIFF 不够：44 字节空 WAV 也曾被当成导出成功。
                 if (!temp.isFile || temp.length() <= 44L || temp.length() < frames * 4L + 44L) {
-                    error("空间渲染没有生成完整 PCM")
+                    error(t("audio.export.render_incomplete"))
                 }
                 Log.i("8DExport", "renderedFrames=$frames wavBytes=${temp.length()} mp3=$mp3")
                 if (mp3) {
-                    val target = mp3Path ?: error("MP3 缺少临时文件路径")
+                    val target = mp3Path ?: error(t("audio.export.mp3_path"))
                     com.j5i.spatial8d.Mp3Export.nativeEncode(temp.absolutePath, target)
-                    if (!File(target).isFile || File(target).length() <= 1024L) error("MP3 编码没有生成有效音频")
+                    if (!File(target).isFile || File(target).length() <= 1024L) error(t("audio.export.mp3_invalid"))
                     File(target).inputStream().use { it.copyTo(stream) }
                 } else temp.inputStream().use { it.copyTo(stream) }
                 stream.use { it.flush() }
-                main.post { onDone(true, if (mp3) "MP3 导出完成" else "WAV 导出完成") }
+                main.post { onDone(true, t("export.complete.format").format(if (mp3) "MP3" else "WAV")) }
             } catch (e: Exception) {
                 try { stream.close() } catch (_: Exception) {}
                 Log.e("8DExport", "export failed", e)
-                main.post { onDone(false, "导出失败: ${e.message}") }
+                main.post { onDone(false, "${t("export.failed")}: ${e.message}") }
             } finally { temp?.delete() }
         }.start()
     }

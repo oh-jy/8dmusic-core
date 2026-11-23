@@ -52,7 +52,7 @@ class PlaybackService : Service() {
     }
 
     val player = SpatialPlayer(this)
-    val radio = RadioPlayer()
+    val radio = RadioPlayer(this)
     var controls: Controls? = null
     var onTrackChanged: ((MusicItem) -> Unit)? = null
     var onPlaybackError: ((String) -> Unit)? = null
@@ -76,7 +76,7 @@ class PlaybackService : Service() {
     private var pausedByHeadset = false
     private var pausedByFocus = false
     private lateinit var session: MediaSession
-    private var title = "8D 空间音频"
+    private var title = ""
     private var subtitle = ""
     private var playing = false
     private var positionMs = 0L
@@ -133,11 +133,12 @@ class PlaybackService : Service() {
     override fun onCreate() {
         j5i.spatial8d.provider.ProviderMigration.run(this)
         super.onCreate()
+        title = t("app.name")
         // 上次进程异常退出可能留下整轨 PCM；本进程尚未创建新缓冲。
         File(cacheDir, "decoded-pcm").listFiles()?.forEach { it.delete() }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL_ID, "播放控制", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL_ID, t("playback.controls"), NotificationManager.IMPORTANCE_LOW)
             )
         }
         session = MediaSession(this, "Spatial8D").apply {
@@ -177,7 +178,7 @@ class PlaybackService : Service() {
                 val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
                 main.post {
                     resolved.onSuccess { load(it, queue, autoplay, resumePosition) }
-                        .onFailure { onPlaybackError?.invoke("在线歌曲解析失败：${it.message}") }
+                        .onFailure { onPlaybackError?.invoke("${t("playback.online.failed")}: ${it.message}") }
                 }
             }
             return
@@ -185,12 +186,12 @@ class PlaybackService : Service() {
         if (item.album.startsWith("plugin:https:")) {
             val id = item.album.substringAfter("plugin:https:")
             val active = runCatching { j5i.spatial8d.provider.ProviderPluginStore(this).list().any { it.enabled && it.descriptor.id == id } }.getOrDefault(false)
-            if (!active) { onPlaybackError?.invoke("插件来源不存在或已停用"); return }
+            if (!active) { onPlaybackError?.invoke(t("playback.plugin.missing")); return }
         }
         if (item.album.startsWith("provider:")) {
             val id = item.album.substringAfter(':').substringAfter(':', "")
             val active = runCatching { j5i.spatial8d.provider.ProviderStore(this).list().any { it.enabled && it.definition.id == id } }.getOrDefault(false)
-            if (!active) { onPlaybackError?.invoke("来源不存在或已停用"); return }
+            if (!active) { onPlaybackError?.invoke(t("playback.source.missing")); return }
         }
         val own = ++loadGeneration
         desiredPlaying = autoplay
@@ -250,7 +251,7 @@ class PlaybackService : Service() {
                 main.post {
                     if (own == loadGeneration) {
                         Log.w("8DQueue", "load failed: ${item.name}", e)
-                        onPlaybackError?.invoke(e.message ?: "加载失败")
+                        onPlaybackError?.invoke(e.message ?: t("playback.load_failed"))
                         if (autoplay && queue.isNotEmpty() && ++autoplayFailures <= 3) continueQueue()
                         else transitioning = false
                     }
@@ -349,7 +350,7 @@ class PlaybackService : Service() {
 
     /** 每次页面刷新都复用此方法，确保电台与本地歌曲使用同一套系统控制。 */
     fun updateMedia(title: String, subtitle: String, playing: Boolean, position: Double = 0.0, duration: Double = 0.0) {
-        val newTitle = title.ifBlank { "8D 空间音频" }
+        val newTitle = title.ifBlank { t("app.name") }
         val newPositionMs = (position * 1000).toLong().coerceAtLeast(0)
         val newDurationMs = (duration * 1000).toLong().coerceAtLeast(0)
         val mediaChanged = !mediaInitialized || newTitle != this.title || subtitle != this.subtitle ||

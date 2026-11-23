@@ -55,8 +55,8 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
     externalVideoDialog?.dismiss()
-    if (!mime.startsWith("video/", true)) { runCatching { addAndPlay(uri) }.onFailure { toast("无法打开音频文件") }; return }
-    if (recordingKind.isNotEmpty()) { toast("请先停止录音，再播放视频"); return }
+    if (!mime.startsWith("video/", true)) { runCatching { addAndPlay(uri) }.onFailure { toast(t("video.audio.open_failed")) }; return }
+    if (recordingKind.isNotEmpty()) { toast(t("video.stop_recording")); return }
     if (uri.scheme == "content" && intent.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
         runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     }
@@ -66,24 +66,31 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(8, 8, 8, 8); setBackgroundColor(Color.TRANSPARENT) }
     val topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
     val rightControls = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+    val controlTextSize = 14f
     val seek = SeekBar(this).apply {
         ThemeUi.configureSeekBar(this, palette, playback = true)
         thumbTintList = android.content.res.ColorStateList.valueOf(palette.accent)
     }
     val time = TextView(this).apply {
-        setTextColor(Color.WHITE); gravity = Gravity.CENTER; text = "00:00 / 00:00"
-        textSize = 10f
+        setTextColor(Color.WHITE); gravity = Gravity.START or Gravity.CENTER_VERTICAL; text = "00:00 / 00:00"
+        textSize = controlTextSize
+        includeFontPadding = false
         isSingleLine = true
+        ellipsize = android.text.TextUtils.TruncateAt.END
     }
     val feedback = TextView(this).apply { setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER; visibility = View.GONE; setBackgroundColor(0xaa000000.toInt()); setPadding(24, 12, 24, 12) }
     val loading = TextView(this).apply {
         setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER
         setBackgroundColor(0xaa000000.toInt()); setPadding(28, 16, 28, 16)
-        text = "正在准备视频…"
+        text = t("video.preparing")
     }
     val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     var muted = false
     var speed = 1.0f; var prepared: android.media.MediaPlayer? = null; var dragging = false; var hidden = false; var completed = false
+    var qualityRequest = 0
+    var qualityResume: Pair<Int, Boolean>? = null
+    var currentVideoUri = uri
+    var currentQuality = intent.getStringExtra("j5i.providerMvQuality")
     externalVideoPreviousOrientation = requestedOrientation
     lateinit var dialog: android.app.Dialog
     lateinit var speedButton: TextView
@@ -91,12 +98,14 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     lateinit var showControls: () -> Unit
     var scaleMode = 1
     lateinit var applyScaleMode: () -> Unit
-    val centerPlay = videoIcon(android.R.drawable.ic_media_pause, "暂停") {
+    val centerPlay = videoIcon(R.drawable.video_pause, t("pause")) {
         if (player.isPlaying) player.pause() else { completed = false; player.start() }
         showControls()
     }.apply {
-        scaleType = android.widget.ImageView.ScaleType.CENTER
-        setPadding(24, 24, 24, 24)
+        scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+        val padding = ThemeUi.dp(this@openExternalMedia, 16f)
+        setPadding(padding, padding, padding, padding)
+        setColorFilter(Color.WHITE)
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xaa000000.toInt()) }
     }
     val centerButtons = LinearLayout(this).apply {
@@ -105,17 +114,21 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setBackgroundColor(Color.TRANSPARENT)
     }
     val controlGroups = listOf(controls, topBar, rightControls, centerButtons)
-    centerButtons.addView(videoIcon(android.R.drawable.ic_media_rew, "后退 10 秒") {
+    centerButtons.addView(videoIcon(R.drawable.video_rewind, t("video.rewind")) {
         player.seekTo((player.currentPosition - 10000).coerceAtLeast(0)); showControls()
     }.apply {
-        setPadding(20, 20, 20, 20)
+        val padding = ThemeUi.dp(this@openExternalMedia, 12f)
+        setPadding(padding, padding, padding, padding)
+        setColorFilter(Color.WHITE)
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xaa000000.toInt()) }
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 48f), ThemeUi.dp(this, 48f)))
     centerButtons.addView(centerPlay, LinearLayout.LayoutParams(ThemeUi.dp(this, 64f), ThemeUi.dp(this, 64f)).apply { leftMargin = ThemeUi.dp(this@openExternalMedia, 12f); rightMargin = leftMargin })
-    centerButtons.addView(videoIcon(android.R.drawable.ic_media_ff, "前进 10 秒") {
+    centerButtons.addView(videoIcon(R.drawable.video_forward, t("video.forward")) {
         player.seekTo((player.currentPosition + 10000).coerceAtMost(player.duration)); showControls()
     }.apply {
-        setPadding(20, 20, 20, 20)
+        val padding = ThemeUi.dp(this@openExternalMedia, 12f)
+        setPadding(padding, padding, padding, padding)
+        setColorFilter(Color.WHITE)
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xaa000000.toInt()) }
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 48f), ThemeUi.dp(this, 48f)))
     val hide = Runnable {
@@ -136,42 +149,53 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         main.removeCallbacks(hide)
         main.postDelayed(hide, 3000)
     }
+    fun showChoices(anchor: View, labels: List<String>, selected: Int, choose: (Int) -> Unit) {
+        main.removeCallbacks(hide)
+        val items = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ThemeUi.bgDrawable(this@openExternalMedia, palette.surface, 8f)
+        }
+        val scroll = android.widget.ScrollView(this).apply { addView(items) }
+        val anchorPosition = IntArray(2)
+        val overlayPosition = IntArray(2)
+        anchor.getLocationOnScreen(anchorPosition)
+        overlay.getLocationOnScreen(overlayPosition)
+        val rowHeight = ThemeUi.dp(this, 36f)
+        val height = minOf(rowHeight * labels.size, (anchorPosition[1] - overlayPosition[1] - ThemeUi.dp(this, 8f)).coerceAtLeast(rowHeight))
+        val popup = PopupWindow(scroll, ThemeUi.dp(this, 120f), height, true).apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            isOutsideTouchable = true
+            setOnDismissListener { showControls() }
+        }
+        labels.forEachIndexed { index, label ->
+            items.addView(ThemeUi.text(this, label, 14f, palette,
+                bold = index == selected, role = if (index == selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
+                gravity = Gravity.CENTER
+                setOnClickListener { popup.dismiss(); choose(index) }
+            }, LinearLayout.LayoutParams(-1, rowHeight))
+        }
+        popup.showAsDropDown(anchor, 0, -anchor.height - height, Gravity.END)
+    }
     speedButton = TextView(this).apply {
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
+        textSize = controlTextSize
+        includeFontPadding = false
         text = "1x"
-        contentDescription = "播放速度 1 倍"
+        contentDescription = "${t("video.speed")} 1x"
         setPadding(0, 0, 0, 0)
         setOnClickListener {
             val options = listOf(.5f, .75f, 1f, 1.25f, 1.5f, 2f, 3f, 4f)
-            main.removeCallbacks(hide)
-            val items = LinearLayout(this@openExternalMedia).apply {
-                orientation = LinearLayout.VERTICAL
-                background = ThemeUi.bgDrawable(this@openExternalMedia, palette.surface, 8f)
+            showChoices(this, options.map(::speedLabel), options.indexOf(speed)) { index ->
+                speed = options[index]
+                prepared?.let { media ->
+                    val playing = player.isPlaying
+                    media.playbackParams = media.playbackParams.setSpeed(speed)
+                    if (!playing) player.pause()
+                }
+                speedButton.text = speedLabel(speed)
+                speedButton.contentDescription = "${t("video.speed")} ${speedLabel(speed)}"
             }
-            val popup = PopupWindow(items, ThemeUi.dp(this@openExternalMedia, 88f), -2, true).apply {
-                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-                isOutsideTouchable = true
-                setOnDismissListener { showControls() }
-            }
-            options.forEach { value ->
-                items.addView(ThemeUi.text(this@openExternalMedia, speedLabel(value), 14f, palette,
-                    bold = value == speed, role = if (value == speed) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
-                    gravity = Gravity.CENTER
-                    setOnClickListener {
-                        speed = value
-                        prepared?.let { media ->
-                            val playing = player.isPlaying
-                            media.playbackParams = media.playbackParams.setSpeed(speed)
-                            if (!playing) player.pause()
-                        }
-                        speedButton.text = speedLabel(speed)
-                        speedButton.contentDescription = "播放速度 ${speedLabel(speed)}"
-                        popup.dismiss()
-                    }
-                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@openExternalMedia, 36f)))
-            }
-            popup.showAsDropDown(this, 0, 0, Gravity.END)
         }
     }
     applyScaleMode = {
@@ -192,11 +216,13 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         }
     }
     modeButton = TextView(this).apply {
-        setTextColor(Color.WHITE); gravity = Gravity.CENTER; text = "适应"; contentDescription = "画面比例 适应"
+        setTextColor(Color.WHITE); gravity = Gravity.CENTER; text = t("video.scale.fit"); contentDescription = "${t("video.scale")} $text"
+        textSize = controlTextSize
+        includeFontPadding = false
         setOnClickListener {
             scaleMode = (scaleMode + 1) % 4
-            val label = listOf("铺满", "适应", "裁剪", "拉伸")[scaleMode]
-            text = label; contentDescription = "画面比例 $label"; applyScaleMode(); showControls()
+            val label = t(listOf("video.scale.fill", "video.scale.fit", "video.scale.crop", "video.scale.stretch")[scaleMode])
+            text = label; contentDescription = "${t("video.scale")} $label"; applyScaleMode(); showControls()
         }
     }
     val topButtonSize = ThemeUi.dp(this, 36f)
@@ -206,43 +232,95 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setPadding(padding, padding, padding, padding)
         setColorFilter(Color.WHITE)
     }
-    topBar.addView(videoIcon(android.R.drawable.ic_menu_close_clear_cancel, "关闭视频") { dialog.dismiss() }.topIcon(), LinearLayout.LayoutParams(topButtonSize, topButtonSize))
-    topBar.addView(time, LinearLayout.LayoutParams(0, topButtonSize, 1f))
+    topBar.addView(videoIcon(R.drawable.video_close, t("video.close")) {
+        dialog.dismiss()
+        if (intent.getBooleanExtra("j5i.returnToOnline", false)) main.post { if (!isFinishing && !isDestroyed) showPlaylist(2) }
+    }.topIcon(), LinearLayout.LayoutParams(topButtonSize, topButtonSize))
+    rightControls.addView(time, LinearLayout.LayoutParams(0, topButtonSize, 1f))
     if (uri.scheme == "http" || uri.scheme == "https") {
         lateinit var favoriteButton: ImageButton
         fun refreshFavorite() {
             val selected = isVideoFavorite(uri.toString())
             favoriteButton.setImageDrawable(j5i.spatial8d.ui.HeartDrawable(selected, if (selected) 0xffff5c7a.toInt() else Color.WHITE))
             favoriteButton.clearColorFilter()
-            favoriteButton.contentDescription = if (selected) "取消视频收藏" else "收藏视频"
+            favoriteButton.contentDescription = t(if (selected) "video.unfavorite" else "video.favorite")
         }
-        favoriteButton = videoIcon(android.R.drawable.btn_star_big_off, "收藏视频") {
+        favoriteButton = videoIcon(android.R.drawable.btn_star_big_off, t("video.favorite")) {
             toggleVideoFavorite(uri.toString()); refreshFavorite(); showControls()
         }.topIcon()
         refreshFavorite()
         rightControls.addView(favoriteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
     }
     lateinit var muteButton: ImageButton
-    muteButton = videoIcon(android.R.drawable.ic_lock_silent_mode_off, "静音") {
+    muteButton = videoIcon(R.drawable.video_volume, t("video.mute")) {
         muted = !muted
         prepared?.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)
-        muteButton.setImageResource(if (muted) android.R.drawable.ic_lock_silent_mode else android.R.drawable.ic_lock_silent_mode_off)
-        muteButton.contentDescription = if (muted) "取消静音" else "静音"
+        muteButton.setImageResource(if (muted) R.drawable.video_muted else R.drawable.video_volume)
+        muteButton.contentDescription = t(if (muted) "video.unmute" else "video.mute")
         showControls()
     }.topIcon()
     rightControls.addView(muteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
     rightControls.addView(speedButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
-    rightControls.addView(modeButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
+    rightControls.addView(modeButton, LinearLayout.LayoutParams(ThemeUi.dp(this, if (j5i.spatial8d.ui.AppLanguage.resolved(this) == j5i.spatial8d.ui.AppLanguage.ENGLISH) 52f else 40f), topButtonSize))
     val providerMvItem = currentItem?.takeIf { intent.hasExtra("j5i.providerMv") && it.uri.startsWith("online://plugin/") }
     if (providerMvItem != null) rightControls.addView(TextView(this).apply {
         setTextColor(Color.WHITE)
         gravity = Gravity.CENTER
-        textSize = 12f
-        text = "清晰度"
-        contentDescription = "切换 MV 清晰度"
-        setOnClickListener { dialog.dismiss(); playProviderMv(providerMvItem, audioOnly = false) }
+        textSize = controlTextSize
+        includeFontPadding = false
+        text = t("video.quality")
+        contentDescription = t("video.quality.change")
+        setOnClickListener {
+            val anchor = this
+            val request = ++qualityRequest
+            toast(t("video.quality.loading"))
+            Thread {
+                val result = runCatching { j5i.spatial8d.provider.ProviderTrackRef.mvOptions(this@openExternalMedia, providerMvItem) }
+                main.post {
+                    if (!dialog.isShowing || request != qualityRequest) return@post
+                    result.onSuccess { options ->
+                        showChoices(anchor, options.map { option ->
+                            val size = if (option.size > 0) " %.1f MB".format(java.util.Locale.ROOT, option.size / 1048576.0) else ""
+                            j5i.spatial8d.ui.AppLanguage.mvQuality(this@openExternalMedia, option.label) + size
+                        }, options.indexOfFirst { it.id == currentQuality }) { index ->
+                            if (options[index].id == currentQuality) return@showChoices
+                            val cacheRequest = ++qualityRequest
+                            loading.text = t("video.mv.caching")
+                            loading.visibility = View.VISIBLE
+                            Thread {
+                                val media = runCatching {
+                                    j5i.spatial8d.provider.ProviderMvCache.cache(this@openExternalMedia, providerMvItem, options[index],
+                                        { dialog.isShowing && cacheRequest == qualityRequest }) { copied, total ->
+                                        main.post {
+                                            if (dialog.isShowing && cacheRequest == qualityRequest) {
+                                                val percent = if (total > 0) " ${(copied * 100 / total).coerceIn(0, 100)}%" else ""
+                                                loading.text = "${t("video.mv.caching")}$percent"
+                                            }
+                                        }
+                                    }
+                                }
+                                main.post {
+                                    if (!dialog.isShowing || cacheRequest != qualityRequest) return@post
+                                    media.onSuccess {
+                                        qualityResume = player.currentPosition.coerceAtLeast(0) to player.isPlaying
+                                        prepared = null
+                                        currentVideoUri = android.net.Uri.parse(it.uri)
+                                        currentQuality = options[index].id
+                                        player.setVideoURI(currentVideoUri)
+                                    }.onFailure { loading.visibility = View.GONE; toast("${t("video.mv.load_failed")}: ${errorDetail(it)}") }
+                                }
+                            }.start()
+                        }
+                    }.onFailure { toast("${t("video.mv.resolve_failed")}: ${errorDetail(it)}") }
+                }
+            }.start()
+        }
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 60f), topButtonSize))
-    rightControls.addView(videoIcon(android.R.drawable.ic_menu_rotate, "切换横竖屏") {
+    if (providerMvItem != null) rightControls.addView(videoIcon(R.drawable.ic_export, t("video.mv.export")) {
+        exportMvAudioPublic(currentVideoUri, providerMvItem.name)
+        showControls()
+    }.topIcon(), LinearLayout.LayoutParams(topButtonSize, topButtonSize))
+    rightControls.addView(videoIcon(R.drawable.video_rotate, t("video.rotate")) {
         requestedOrientation = if (resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
             android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         overlay.post { applyScaleMode() }
@@ -255,8 +333,9 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setMargins(margin, margin, margin, 0)
     })
     overlay.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = ThemeUi.dp(this@openExternalMedia, 24f) })
-    overlay.addView(rightControls, FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.END).apply {
-        rightMargin = ThemeUi.dp(this@openExternalMedia, 24f)
+    overlay.addView(rightControls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
+        leftMargin = ThemeUi.dp(this@openExternalMedia, 24f)
+        rightMargin = leftMargin
         bottomMargin = ThemeUi.dp(this@openExternalMedia, 68f)
     })
     overlay.addView(centerButtons, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
@@ -276,6 +355,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
             controls.layoutParams = this
         }
         (rightControls.layoutParams as FrameLayout.LayoutParams).apply {
+            leftMargin = ThemeUi.dp(this@openExternalMedia, 24f) + (cutout?.safeInsetLeft ?: 0)
             rightMargin = ThemeUi.dp(this@openExternalMedia, 24f) + (cutout?.safeInsetRight ?: 0)
             bottomMargin = ThemeUi.dp(this@openExternalMedia, 68f) + (cutout?.safeInsetBottom ?: 0)
             rightControls.layoutParams = this
@@ -312,12 +392,12 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
                     if (downX < overlay.width / 2f) {
                         val value = (startBrightness + change).coerceIn(0.01f, 1f)
                         dialog.window?.let { window -> window.attributes = window.attributes.apply { screenBrightness = value } }
-                        feedback.text = "亮度 ${(value * 100).toInt()}%"
+                        feedback.text = "${t("video.brightness")} ${(value * 100).toInt()}%"
                     } else {
                         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                         val value = (startVolume + change * maxVolume).toInt().coerceIn(0, maxVolume)
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, value, 0)
-                        feedback.text = "音量 ${if (maxVolume > 0) value * 100 / maxVolume else 0}%"
+                        feedback.text = "${t("video.volume")} ${if (maxVolume > 0) value * 100 / maxVolume else 0}%"
                     }
                     feedback.visibility = View.VISIBLE
                 }
@@ -381,12 +461,14 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
             if (!completed && player.duration > 0 && player.currentPosition > 0) {
                 preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
             }
-            centerPlay.setImageResource(if (player.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
+            centerPlay.setImageResource(if (player.isPlaying) R.drawable.video_pause else R.drawable.video_play)
+            centerPlay.contentDescription = t(if (player.isPlaying) "pause" else "play")
             main.postDelayed(this, 500)
         }
     }
     var cacheThread: Thread? = null
     dialog.setOnDismissListener {
+        qualityRequest++
         main.removeCallbacks(update); main.removeCallbacks(hide); cacheThread?.interrupt()
         if (!completed && player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
         player.stopPlayback(); prepared = null
@@ -400,14 +482,17 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         requestedOrientation = if (it.videoWidth > it.videoHeight) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         if (android.os.Build.VERSION.SDK_INT >= 23) it.setPlaybackParams(it.playbackParams.setSpeed(speed))
-        val saved = preferences.getInt("video-position:$resumeKey", 0)
+        val saved = qualityResume?.first ?: preferences.getInt("video-position:$resumeKey", 0)
         val resume = videoResumePosition(saved, it.duration)
         if (resume > 0) it.seekTo(resume)
         loading.visibility = View.GONE
-        it.start(); overlay.post { applyScaleMode() }; showControls()
+        val shouldPlay = qualityResume?.second ?: true
+        qualityResume = null
+        if (shouldPlay) it.start() else player.pause()
+        overlay.post { applyScaleMode() }; showControls()
     }
     player.setOnCompletionListener { completed = true; preferences.edit().remove("video-position:$resumeKey").apply() }
-    player.setOnErrorListener { _, _, _ -> toast("无法播放此视频"); dialog.dismiss(); true }
+    player.setOnErrorListener { _, _, _ -> toast(t("video.play_failed")); dialog.dismiss(); true }
     dialog.show(); main.post(update)
     val cached = if (isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
     fun startVideo(source: android.net.Uri) {
@@ -415,11 +500,14 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         player.setVideoURI(source)
     }
     if (cached != null) {
+        PlaybackCacheMetadata.put(this, cached, intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty(), uri.host.orEmpty())
         startVideo(android.net.Uri.fromFile(cached))
     } else if (isCacheableVideo(uri, mime)) {
         loading.visibility = View.VISIBLE
         val target = videoCacheFile(this, uri.toString())
-        cacheThread = Thread {
+        if (!PlaybackCacheMetadata.tryBegin(target)) {
+            startVideo(uri)
+        } else cacheThread = Thread {
             val part = File(target.parentFile, "${target.name}.part")
             try {
                 target.parentFile?.mkdirs()
@@ -440,19 +528,23 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
                                 val percent = (copied * 100 / total).toInt().coerceIn(0, 100)
                                 if (percent != lastPercent) {
                                     lastPercent = percent
-                                    main.post { if (dialog.isShowing) loading.text = "正在缓存视频… $percent%" }
+                                    main.post { if (dialog.isShowing) loading.text = "${t("video.caching")} $percent%" }
                                 }
                             }
                         }
                     } }
                 }
+                if (Thread.currentThread().isInterrupted) throw InterruptedException()
                 if (!part.renameTo(target)) error("video cache rename failed")
+                PlaybackCacheMetadata.put(this, target, intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty(), uri.host.orEmpty())
                 main.post { if (dialog.isShowing) startVideo(android.net.Uri.fromFile(target)) }
             } catch (_: InterruptedException) {
                 part.delete()
             } catch (_: Exception) {
                 part.delete()
-                main.post { if (dialog.isShowing) { loading.text = "在线播放中…"; startVideo(uri) } }
+                main.post { if (dialog.isShowing) { loading.text = t("video.streaming"); startVideo(uri) } }
+            } finally {
+                PlaybackCacheMetadata.end(target)
             }
         }.also { it.name = "video-cache-${videoCacheKey(uri.toString()).take(8)}"; it.start() }
     } else {

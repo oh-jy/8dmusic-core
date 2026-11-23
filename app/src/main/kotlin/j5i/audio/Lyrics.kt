@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.math.abs
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.ui.AppLanguage
 
 /** 一行带时间轴的歌词；时间以歌曲播放位置为基准，不包含设备延时。 */
 data class LyricLine(val timeMs: Long, val text: String)
@@ -54,6 +55,7 @@ data class LyricsCandidate(
  */
 class Lyrics(context: Context) {
     private val appContext = context.applicationContext
+    private fun text(key: String) = AppLanguage.text(appContext, key)
     // 歌词属于可长期复用的下载内容，不能放在系统可能随时清理的 cacheDir。
     private val cache = File(appContext.filesDir, "lyrics")
     private val legacyCache = File(appContext.cacheDir, "lyrics")
@@ -75,17 +77,17 @@ class Lyrics(context: Context) {
     ) {
         fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
-            ContextCompat.getMainExecutor(appContext).execute { callback(Result.failure(IllegalArgumentException("歌曲名称为空"))) }
+            ContextCompat.getMainExecutor(appContext).execute { callback(Result.failure(IllegalArgumentException(text("lyrics.error.title")))) }
             return
         }
-        progress("正在检索歌词候选…")
+        progress(text("lyrics.searching"))
         thread(name = "lyrics-candidates") {
             val result = try {
                 Result.success(searchCandidates(title.trim(), knownArtist(artist.trim()), durationSeconds))
             } catch (e: NoSuchElementException) {
                 Result.failure(e)
             } catch (e: Exception) {
-                Result.failure(IOException("暂时无法获取在线歌词", e))
+                Result.failure(IOException(text("lyrics.error.network"), e))
             }
             ContextCompat.getMainExecutor(appContext).execute { callback(result) }
         }
@@ -102,11 +104,11 @@ class Lyrics(context: Context) {
         fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
         if (title.isBlank()) {
             ContextCompat.getMainExecutor(appContext).execute {
-                callback(Result.failure(IllegalArgumentException("歌曲名称为空")))
+                callback(Result.failure(IllegalArgumentException(text("lyrics.error.title"))))
             }
             return
         }
-        progress("读取本地歌词缓存…")
+        progress(text("lyrics.progress.cache"))
         val cleanTitle = title.trim()
         val cleanArtist = knownArtist(artist.trim())
         val failureKey = key(cleanTitle, cleanArtist, durationSeconds)
@@ -125,18 +127,18 @@ class Lyrics(context: Context) {
             val result = try {
                 // 本地持久歌词优先，兼容旧缓存以及元数据变化造成的精确键失配。
                 Result.success(cachedLyrics(cleanTitle, cleanArtist, durationSeconds) ?: if (!allowNetwork) {
-                    throw NoSuchElementException("没有本地歌词缓存")
+                    throw NoSuchElementException(text("lyrics.error.cache"))
                 } else try {
-                    progress("LRCLIB 在线检索…")
+                    progress(text("lyrics.progress.lrclib"))
                     fetch(title.trim(), artist.trim(), durationSeconds)
                 } catch (e: Exception) {
                     Log.i("8DLyrics", "LRCLIB 未命中：${e.javaClass.simpleName}: ${e.message}")
-                    progress("LRCLIB 未命中，回退 QQ 歌词…")
+                    progress(text("lyrics.progress.qq"))
                     try {
                         fetchQq(title.trim(), knownArtist(artist.trim()), durationSeconds)
                     } catch (qqError: Exception) {
                         Log.i("8DLyrics", "QQ 未命中：${qqError.message}")
-                        progress("QQ 未命中，回退酷狗歌词…")
+                        progress(text("lyrics.progress.kugou"))
                         fetchKugou(title.trim(), knownArtist(artist.trim()), durationSeconds)
                     }
                 })
@@ -145,7 +147,7 @@ class Lyrics(context: Context) {
                 Result.failure(e)
             } catch (e: Exception) {
                 Log.w("8DLyrics", "QQ 请求失败", e)
-                Result.failure(IOException("暂时无法获取在线歌词", e))
+                Result.failure(IOException(text("lyrics.error.network"), e))
             }
             ContextCompat.getMainExecutor(appContext).execute {
                 synchronized(requestLock) {
@@ -214,7 +216,7 @@ class Lyrics(context: Context) {
         val best = candidates.mapNotNull { candidate ->
             score(candidate, title, cleanArtist, duration)?.let { it to candidate }
         }.maxWithOrNull(compareBy({ it.first }, { synchronizedWeight(it.second) }))?.second
-            ?: throw NoSuchElementException("未找到匹配歌词")
+            ?: throw NoSuchElementException(text("lyrics.error.no_match"))
         return parse(best).also { writeCache(file, best) }
     }
 
@@ -238,7 +240,7 @@ class Lyrics(context: Context) {
             merged += lrclibFuture.get(12, TimeUnit.SECONDS)
             merged += qqFuture.get(12, TimeUnit.SECONDS)
             merged += kugouFuture.get(12, TimeUnit.SECONDS)
-            if (merged.isEmpty()) throw NoSuchElementException("未找到可选的歌词候选")
+            if (merged.isEmpty()) throw NoSuchElementException(text("lyrics.error.no_candidates"))
             return merged.sortedByDescending { scoreCandidate(it, title, artist, duration) }
         } finally {
             executor.shutdown()
@@ -298,7 +300,7 @@ class Lyrics(context: Context) {
         onProgress: (String) -> Unit = {}
     ) {
         fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
-        progress("正在获取所选歌词…")
+        progress(text("lyrics.progress.fetch"))
         thread(name = "lyrics-apply") {
             val result = try {
                 val fetched = fetchCandidate(candidate, title, artist, durationSeconds, persist = true)
@@ -321,7 +323,7 @@ class Lyrics(context: Context) {
         onProgress: (String) -> Unit = {}
     ) {
         fun progress(stage: String) = ContextCompat.getMainExecutor(appContext).execute { onProgress(stage) }
-        progress("正在获取所选歌词…")
+        progress(text("lyrics.progress.fetch"))
         thread(name = "lyrics-preview") {
             val result = try {
                 Result.success(fetchCandidate(candidate, title, artist, durationSeconds, persist = false))
@@ -342,7 +344,7 @@ class Lyrics(context: Context) {
         "QQ" -> fetchQqByMid(candidate, title, artist, duration, persist)
         "酷狗" -> fetchKugouById(candidate, title, artist, persist)
         "LRCLIB" -> fetchLrclibRow(candidate, title, artist, duration, persist)
-        else -> throw NoSuchElementException("无效的歌词来源")
+        else -> throw NoSuchElementException(text("lyrics.error.source"))
     }
 
     private fun fetchLrclibRow(
@@ -353,7 +355,7 @@ class Lyrics(context: Context) {
         persist: Boolean
     ): LyricsResult {
         val row = try { JSONObject(candidate.query) } catch (_: Exception) { null }
-            ?: throw NoSuchElementException("LRCLIB 候选缺少歌词内容")
+            ?: throw NoSuchElementException(text("lyrics.error.lrclib_content"))
         val result = parse(row)
         if (persist) writeCache(cacheFile(title, knownArtist(artist), duration), result.toRow(duration))
         return result
@@ -368,12 +370,12 @@ class Lyrics(context: Context) {
     ): LyricsResult {
         val mid = candidate.query
         val decodedMid = decode(mid)
-        if (decodedMid.isBlank()) throw NoSuchElementException("QQ 候选缺少歌曲编号")
+        if (decodedMid.isBlank()) throw NoSuchElementException(text("lyrics.error.qq_id"))
         val lyric = JSONObject(request("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
             "?songmid=${encode(decodedMid)}&format=json&nobase64=1&g_tk=5381") ?: "{}")
         val synced = lyric.optString("lyric")
         val lines = parseLrc(synced)
-        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException(text("lyrics.error.content"))
         val result = LyricsResult(candidate.trackName, candidate.artistName, lines, toSimplified(synced))
         if (persist) writeCache(cacheFile(title, knownArtist(artist), duration), result.toRow(duration))
         return result
@@ -386,13 +388,13 @@ class Lyrics(context: Context) {
         persist: Boolean
     ): LyricsResult {
         val parts = decode(candidate.query).split("|", limit = 2)
-        if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) throw NoSuchElementException("酷狗候选缺少歌词编号")
+        if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) throw NoSuchElementException(text("lyrics.error.kugou_id"))
         val lyricUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8" +
             "&id=${encode(parts[0])}&accesskey=${encode(parts[1])}"
         val lyric = JSONObject(request(lyricUrl) ?: "{}")
         val synced = String(Base64.decode(lyric.optString("content"), Base64.DEFAULT), Charsets.UTF_8)
         val lines = parseLrc(synced)
-        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("所选歌词没有可解析内容")
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException(text("lyrics.error.content"))
         val result = LyricsResult(candidate.trackName, candidate.artistName, lines, toSimplified(synced))
         if (persist) writeCache(cacheFile(title, knownArtist(artist), 0.0), result.toRow(candidate.durationSeconds))
         return result
@@ -479,15 +481,15 @@ class Lyrics(context: Context) {
         candidates.firstOrNull()?.let { Log.i("8DLyrics", "QQ 规范化：actual=${normalizeTitle(decode(it.optString("songname")))} wanted=${normalizeTitle(title)} score=${scoreQq(it, title, artist, duration)}") }
         val best = candidates.mapNotNull { candidate ->
             scoreQq(candidate, title, artist, duration)?.let { it to candidate }
-        }.maxByOrNull { it.first }?.second ?: throw NoSuchElementException("未找到匹配歌词")
+        }.maxByOrNull { it.first }?.second ?: throw NoSuchElementException(text("lyrics.error.no_match"))
         val mid = best.optString("songmid")
-        if (mid.isEmpty()) throw NoSuchElementException("未找到匹配歌词")
+        if (mid.isEmpty()) throw NoSuchElementException(text("lyrics.error.no_match"))
         Log.i("8DLyrics", "QQ 选择：${best.optString("songname")} · $mid")
         val lyric = JSONObject(request("https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg" +
             "?songmid=${encode(mid)}&format=json&nobase64=1&g_tk=5381") ?: "{}")
         val synced = lyric.optString("lyric")
         val lines = parseLrc(synced)
-        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("未找到匹配歌词")
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException(text("lyrics.error.no_match"))
         val artists = best.optJSONArray("singer") ?: JSONArray()
         return LyricsResult(decode(best.optString("songname")),
             (0 until artists.length()).joinToString(" / ") { decode(artists.getJSONObject(it).optString("name")) },
@@ -559,13 +561,13 @@ class Lyrics(context: Context) {
             val score = (if (rowTitle == wanted) 100 else 60) + artistScore +
                 if (duration > 0) (30 - difference * 5).toInt().coerceAtLeast(-30) else 0
             score to row
-        }.maxByOrNull { it.first }?.second ?: throw NoSuchElementException("酷狗无匹配歌词")
+        }.maxByOrNull { it.first }?.second ?: throw NoSuchElementException(text("lyrics.error.kugou_match"))
         val lyricUrl = "http://lyrics.kugou.com/download?ver=1&client=pc&fmt=lrc&charset=utf8" +
             "&id=${encode(best.optString("id"))}&accesskey=${encode(best.optString("accesskey"))}"
         val lyric = JSONObject(request(lyricUrl) ?: "{}")
         val synced = String(Base64.decode(lyric.optString("content"), Base64.DEFAULT), Charsets.UTF_8)
         val lines = parseLrc(synced)
-        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException("酷狗无匹配歌词")
+        if (lines.isEmpty() && synced.isBlank()) throw NoSuchElementException(text("lyrics.error.kugou_match"))
         return LyricsResult(best.optString("song"), best.optString("singer"), lines, toSimplified(synced))
             .also { writeCache(cacheFile(title, artist, duration), best, it) }
     }
@@ -662,7 +664,7 @@ class Lyrics(context: Context) {
                 HttpURLConnection.HTTP_NOT_FOUND -> throw NotFoundException()
                 in 200..299 -> connection.inputStream.bufferedReader(Charsets.UTF_8).use {
                     val text = it.readText()
-                    if (text.length > 1_000_000) throw IOException("歌词响应过大") else text
+                    if (text.length > 1_000_000) throw IOException(this.text("lyrics.error.response_size")) else text
                 }
                 else -> throw IOException("HTTP $status · ${URL(url).host}")
             }

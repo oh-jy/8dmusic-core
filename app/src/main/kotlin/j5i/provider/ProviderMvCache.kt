@@ -6,6 +6,9 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.util.Log
 import j5i.spatial8d.data.MusicItem
+import j5i.spatial8d.PlaybackCacheMetadata
+import j5i.spatial8d.isVideoCacheName
+import j5i.spatial8d.ui.AppLanguage
 import j5i.spatial8d.videoCacheKey
 import java.io.File
 import java.io.InputStream
@@ -32,6 +35,16 @@ internal fun copyMvMedia(input: InputStream, output: OutputStream, total: Long,
 }
 
 internal object ProviderMvCache {
+    fun delete(context: Context, file: File): Boolean {
+        val directory = File(context.filesDir, "video-cache")
+        if (!PlaybackCacheMetadata.tryBegin(file)) return false
+        try {
+            return if (!file.isFile || !isVideoCacheName(file.name) ||
+                file.canonicalFile.parentFile != directory.canonicalFile) false
+            else file.delete().also { if (it) PlaybackCacheMetadata.remove(context, file) }
+        } finally { PlaybackCacheMetadata.end(file) }
+    }
+
     fun file(context: Context, item: MusicItem, option: ProviderTrackRef.MvOption): File {
         val (source, mvId) = ProviderTrackRef.mvIdentity(item.uri)
         return File(context.filesDir, "video-cache/${videoCacheKey("provider-mv:$source:$mvId:${option.id}")}.mp4")
@@ -42,36 +55,44 @@ internal object ProviderMvCache {
         progress: (Long, Long) -> Unit): MusicItem {
         val (source, mvId) = ProviderTrackRef.mvIdentity(item.uri)
         val entry = ProviderPluginStore(context).list().firstOrNull { it.enabled && it.descriptor.id == source }
-            ?: error("插件来源不存在或已停用")
+            ?: error(AppLanguage.text(context, "provider.error.plugin_unavailable"))
         val directory = File(context.filesDir, "video-cache").apply { check(isDirectory || mkdirs()) }
         val target = file(context, item, option)
-        check(active()) { "MV 加载已取消" }
+        check(PlaybackCacheMetadata.tryBegin(target)) { AppLanguage.text(context, "cache.protected") }
+        try {
+        check(active()) { AppLanguage.text(context, "provider.error.mv_cancelled") }
         if (!target.isFile || target.length() <= 1024L) {
             ProviderBrokerPolicy.validateUrl(option.url, entry.descriptor.domains, "http-audio" in entry.descriptor.capabilities)
             val part = File(target.path + ".part")
             try {
-                val headers = mapOf("Referer" to if (source == "platform.qq") "https://y.qq.com/" else "https://www.kugou.com/")
+                val headers = mapOf("Referer" to when (source) {
+                    "platform.qq" -> "https://y.qq.com/"
+                    "platform.netease" -> "https://music.163.com/"
+                    else -> "https://www.kugou.com/"
+                })
                 ProviderNetwork.open(option.url, "http-audio" in entry.descriptor.capabilities, headers).use { response ->
-                    check(response.isSuccessful) { "MV 下载失败（HTTP ${response.code}）" }
-                    val body = requireNotNull(response.body) { "MV 响应为空" }
+                    check(response.isSuccessful) { AppLanguage.text(context, "provider.error.mv_http").format(response.code) }
+                    val body = requireNotNull(response.body) { AppLanguage.text(context, "provider.error.mv_empty") }
                     val total = body.contentLength()
                     progress(0L, total)
                     body.byteStream().use { input -> part.outputStream().use { output ->
                         copyMvMedia(input, output, total, active, progress)
                     } }
                 }
-                check(active()) { "MV 加载已取消" }
+                check(active()) { AppLanguage.text(context, "provider.error.mv_cancelled") }
                 val extractor = MediaExtractor()
                 try {
                     extractor.setDataSource(part.absolutePath)
                     val types = (0 until extractor.trackCount).map { extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME).orEmpty() }
-                    check(types.any { it.startsWith("audio/") } && types.any { it.startsWith("video/") }) { "MV 没有可识别的音视频轨" }
+                    check(types.any { it.startsWith("audio/") } && types.any { it.startsWith("video/") }) { AppLanguage.text(context, "provider.error.mv_tracks") }
                 } finally { extractor.release() }
-                check(part.renameTo(target)) { "无法保存 MV 缓存" }
+                check(part.renameTo(target)) { AppLanguage.text(context, "provider.error.mv_save") }
                 if (Log.isLoggable("8DProvider", Log.INFO))
                     Log.i("8DProvider", "MV 单次缓存完成 method=cache source=$source mvId=$mvId quality=${option.id} bytes=${target.length()}")
             } finally { part.delete() }
         }
+        PlaybackCacheMetadata.put(context, target, item.name, source, option.label)
         return item.copy(uri = Uri.fromFile(target).toString(), size = target.length(), album = "在线缓存:$source")
+        } finally { PlaybackCacheMetadata.end(target) }
     }
 }

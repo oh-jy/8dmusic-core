@@ -19,6 +19,7 @@ import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.SpaceEngine
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.visual.PerfTrace
+import j5i.spatial8d.ui.AppLanguage
 import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.exp
@@ -30,7 +31,8 @@ import kotlin.math.roundToInt
  * 电台复用本地播放器的 JNI 空间渲染器，但不保留整轨 PCM。
  * HTTP/ICY -> MediaExtractor/MediaCodec -> 8D -> AudioTrack；直播没有 seek 和导出。
  */
-class RadioPlayer(private val probe: Boolean = false) {
+class RadioPlayer(private val context: android.content.Context, private val probe: Boolean = false) {
+    private fun t(key: String) = AppLanguage.text(context, key)
     var preset: SpacePreset = DEFAULT_SPACE_PRESET
         set(value) {
             if (field == value) return
@@ -114,7 +116,7 @@ class RadioPlayer(private val probe: Boolean = false) {
         } catch (e: Exception) {
             android.util.Log.i(tag, "probe failed: ${e.message}")
             if (own == generation && running) {
-                main.post { if (own == generation) onError?.invoke("连接失败：${e.message}") }
+                main.post { if (own == generation) onError?.invoke("${t("radio.connection.failed")}: ${e.message}") }
             }
         } finally {
             try { stream.close() } catch (_: Exception) {}
@@ -187,16 +189,16 @@ class RadioPlayer(private val probe: Boolean = false) {
                 if (!producedAudio) {
                     running = false
                     releaseTrack()
-                    main.post { if (own == generation) onError?.invoke("连接失败：${e.message}") }
+                    main.post { if (own == generation) onError?.invoke("${t("radio.connection.failed")}: ${e.message}") }
                     return
                 }
                 if (++failures >= 3) {
                     running = false
                     releaseTrack()
-                    main.post { if (own == generation) onError?.invoke("电台连接中断：${e.message}") }
+                    main.post { if (own == generation) onError?.invoke("${t("radio.connection.lost")}: ${e.message}") }
                     return
                 }
-                main.post { if (own == generation) onReconnecting?.invoke("电台连接中断，正在重连 $failures/2") }
+                main.post { if (own == generation) onReconnecting?.invoke(t("radio.connection.retry").format(failures)) }
                 Thread.sleep(500)
             }
         }
@@ -223,9 +225,9 @@ class RadioPlayer(private val probe: Boolean = false) {
             }, if (url.contains(".m3u8")) 5_000 else 3_000)
             val index = (0 until extractor.trackCount).firstOrNull {
                 extractor.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
-            } ?: error("流里没有音频轨")
+            } ?: error(t("radio.no_audio"))
             val format = extractor.getTrackFormat(index)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: error("音频格式不可识别")
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: error(t("radio.invalid_format"))
             sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE))
                 format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
             extractor.selectTrack(index)
@@ -301,7 +303,7 @@ class RadioPlayer(private val probe: Boolean = false) {
         var codec: MediaCodec? = null
         var ready = false
         try {
-            val first = stream.nextFrame() ?: error("直播流没有 AAC 帧")
+            val first = stream.nextFrame() ?: error(t("radio.no_aac"))
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC,
                 stream.sampleRate, stream.channels.coerceAtLeast(1))
             // 直解绕过 MediaExtractor，AAC-LC/HE-AAC 的 AudioSpecificConfig 必须显式提供。
@@ -370,7 +372,7 @@ class RadioPlayer(private val probe: Boolean = false) {
         source = stream
         var codec: MediaCodec? = null
         try {
-            val first = stream.nextFrame() ?: error("直播流没有 MP3 帧")
+            val first = stream.nextFrame() ?: error(t("radio.no_mp3"))
             sampleRate = stream.sampleRate
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_MPEG, sampleRate, stream.channels)
             codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_AUDIO_MPEG)
@@ -442,7 +444,7 @@ class RadioPlayer(private val probe: Boolean = false) {
                     else audio.write(output, written, output.size - written)
                 }
                 if (n < 0 && (own != generation || track !== audio || !running || paused)) return
-                if (n < 0) error("AudioTrack 写入失败：$n")
+                if (n < 0) error(t("audio.track.write").format(n))
                 written += n
             }
             if (own != generation || !running || paused) return
@@ -487,7 +489,7 @@ class RadioPlayer(private val probe: Boolean = false) {
         }
         if (p.raw) {
             if (renderer == 0L) renderer = createRenderer()
-            check(renderer != 0L) { "空间渲染器初始化失败" }
+            check(renderer != 0L) { t("radio.renderer.failed") }
             return NativeSpatialPlayer.renderStream(renderer, chunk, bpf, channels, floating, frames, playedFrames)
         }
         val current = engine ?: SpaceEngine(sampleRate.toDouble()).also {
@@ -554,7 +556,7 @@ class RadioPlayer(private val probe: Boolean = false) {
                 .setAudioFormat(AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(sampleRate).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
             .setBufferSizeInBytes(maxOf(min, CHUNK * 8)).setTransferMode(AudioTrack.MODE_STREAM).build().also {
-                    check(it.state == AudioTrack.STATE_INITIALIZED) { "AudioTrack 初始化失败" }
+                    check(it.state == AudioTrack.STATE_INITIALIZED) { t("audio.track.init") }
                     if (running && !paused && own == generation) {
                         trackStarted = false
                         applyPitch(it)
@@ -569,7 +571,7 @@ class RadioPlayer(private val probe: Boolean = false) {
                 .setPitch(2.0.pow(semi / 12.0).toFloat())
             android.util.Log.i("8DRadio", "params speed=${track.playbackParams.speed} pitch=${track.playbackParams.pitch} semi=$semi")
         } catch (e: Exception) {
-            main.post { onError?.invoke("电台变声设置失败：${e.message}") }
+            main.post { onError?.invoke("${t("radio.pitch.failed")}: ${e.message}") }
         }
     }
 
@@ -586,7 +588,7 @@ class RadioPlayer(private val probe: Boolean = false) {
             val profile = ((adts[2].toInt() ushr 6) and 3) + 1
             val frequency = (adts[2].toInt() ushr 2) and 0x0f
             val channels = ((adts[2].toInt() and 1) shl 2) or ((adts[3].toInt() ushr 6) and 3)
-            require(frequency < 13 && channels > 0) { "无效 AAC 配置" }
+            require(frequency < 13 && channels > 0) { "Invalid AAC configuration" }
             val config = (profile shl 11) or (frequency shl 7) or (channels shl 3)
             val base = byteArrayOf((config ushr 8).toByte(), config.toByte())
             if (profile != 2) return base

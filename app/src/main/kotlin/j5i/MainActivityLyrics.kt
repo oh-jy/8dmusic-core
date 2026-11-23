@@ -55,19 +55,19 @@ internal fun MainActivity.pushLyricsToVisualizer() {
     /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
 
 internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
-        if (providerStore.list().none { it.enabled }) { toast("请先启用在线来源"); return }
+        if (providerStore.list().none { it.enabled }) { toast(t("lyrics.enable_source")); return }
         if (lyricsDialog?.isShowing == true) return
         val title = Lyrics.searchTitle(item.name, item.artist)
         val artist = item.artist
         val duration = item.duration / 1000.0
-        val sheet = ThemeUi.showSheet(this, palette, "修正歌词", "选择正确歌词或重新搜索", fullHeight = true) {
-            val titleInput = ThemeUi.input(this@showLyricsCandidates, palette, "歌名").apply { setText(title) }
-            val artistInput = ThemeUi.input(this@showLyricsCandidates, palette, "歌手（可选）").apply {
+        val sheet = ThemeUi.showSheet(this, palette, t("lyrics.correct"), t("lyrics.correct.hint"), fullHeight = true) {
+            val titleInput = ThemeUi.input(this@showLyricsCandidates, palette, t("lyrics.title")).apply { setText(title) }
+            val artistInput = ThemeUi.input(this@showLyricsCandidates, palette, t("lyrics.artist.optional")).apply {
                 setText(artist.takeUnless { it.equals("未知歌手", ignoreCase = true) } ?: "")
             }
             addView(titleInput)
             addView(artistInput)
-            addView(ThemeUi.text(this@showLyricsCandidates, "或从以下候选中选择：", 12f, palette, role = ThemeUi.ROLE_SUB))
+            addView(ThemeUi.text(this@showLyricsCandidates, t("lyrics.choose"), 12f, palette, role = ThemeUi.ROLE_SUB))
 
             // 候选按来源分组，可切换 tab 只看某一源。LRCLIB 自带完整 LRC，通常最可靠。
             val sourceOrder = listOf("LRCLIB", "QQ", "酷狗")
@@ -77,7 +77,7 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             }
-            val status = ThemeUi.text(this@showLyricsCandidates, "正在检索候选…", 12f, palette, role = ThemeUi.ROLE_SUB)
+            val status = ThemeUi.text(this@showLyricsCandidates, t("lyrics.searching"), 12f, palette, role = ThemeUi.ROLE_SUB)
             val tabRow = LinearLayout(this@showLyricsCandidates).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -90,10 +90,10 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
                 list.removeAllViews()
                 val items = bySource[activeSource].orEmpty()
                 if (items.isEmpty()) {
-                    if (bySource.isNotEmpty()) status.text = "该源暂无候选"
+                    if (bySource.isNotEmpty()) status.text = t("lyrics.no_candidates")
                     return
                 }
-                status.text = "$activeSource · ${items.size} 个候选"
+                status.text = t("lyrics.candidates").format(activeSource, items.size)
                 items.take(20).forEach { candidate ->
                     list.addView(LyricsCandidateRow(this@showLyricsCandidates, candidate, duration) { applyLyricsCandidate(item, candidate) })
                 }
@@ -121,7 +121,7 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
                 val a = artistInput.text.toString().trim()
                 bySource = emptyMap()
                 list.removeAllViews()
-                status.text = "正在检索候选…"
+                status.text = t("lyrics.searching")
                 renderTabs()
                 lyrics.candidates(q, a, duration, { result ->
                     result.onSuccess { all ->
@@ -130,10 +130,10 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
                         activeSource = sourceOrder.firstOrNull { !bySource[it].isNullOrEmpty() } ?: "LRCLIB"
                         renderTabs()
                         renderList()
-                    }.onFailure { status.text = it.message ?: "检索失败" }
+                    }.onFailure { status.text = it.message ?: t("lyrics.search_failed") }
                 }, { stage -> status.text = stage })
             }
-            addView(ThemeUi.button(this@showLyricsCandidates, palette, "搜索候选", ThemeUi.ROLE_ACCENT) { runSearch() })
+            addView(ThemeUi.button(this@showLyricsCandidates, palette, t("lyrics.search"), ThemeUi.ROLE_ACCENT) { runSearch() })
             titleInput.setOnEditorActionListener { _, actionId, _ ->
                 if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { runSearch(); true } else false
             }
@@ -160,7 +160,7 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
                 setPadding(ThemeUi.dp(this@applyLyricsCandidate, 18f), ThemeUi.dp(this@applyLyricsCandidate, 20f),
                     ThemeUi.dp(this@applyLyricsCandidate, 18f), ThemeUi.dp(this@applyLyricsCandidate, 10f))
                 background = ThemeUi.bgDrawable(this@applyLyricsCandidate, palette.surface, 14f)
-                addView(ThemeUi.text(this@applyLyricsCandidate, "预览歌词", 16f, palette, bold = true))
+                addView(ThemeUi.text(this@applyLyricsCandidate, t("lyrics.preview"), 16f, palette, bold = true))
                 val subtitle = ThemeUi.text(this@applyLyricsCandidate,
                     "${candidate.trackName} · ${candidate.artistName}", 12f, palette, role = ThemeUi.ROLE_SUB)
                 subtitleView = subtitle
@@ -175,12 +175,12 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
                 previewView = previewLines
                 addView(previewLines)
                 addView(ThemeUi.row(this@applyLyricsCandidate, gravity = Gravity.END).apply {
-                    addView(ThemeUi.text(this@applyLyricsCandidate, "取消", 13f, palette, role = ThemeUi.ROLE_SUB).apply {
+                    addView(ThemeUi.text(this@applyLyricsCandidate, t("cancel"), 13f, palette, role = ThemeUi.ROLE_SUB).apply {
                         setPadding(ThemeUi.dp(this@applyLyricsCandidate, 12f), ThemeUi.dp(this@applyLyricsCandidate, 10f),
                             ThemeUi.dp(this@applyLyricsCandidate, 12f), ThemeUi.dp(this@applyLyricsCandidate, 10f))
                         setOnClickListener { dismiss() }
                     })
-                    addView(ThemeUi.text(this@applyLyricsCandidate, "使用此歌词", 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                    addView(ThemeUi.text(this@applyLyricsCandidate, t("lyrics.use"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                         setPadding(ThemeUi.dp(this@applyLyricsCandidate, 12f), ThemeUi.dp(this@applyLyricsCandidate, 10f),
                             ThemeUi.dp(this@applyLyricsCandidate, 12f), ThemeUi.dp(this@applyLyricsCandidate, 10f))
                         setOnClickListener {
@@ -195,7 +195,7 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
                                     updateDriving()
                                     pushLyricsToVisualizer()
                                 }
-                                    .onFailure { toast(it.message ?: "歌词获取失败") }
+                                    .onFailure { toast(it.message ?: t("lyrics.fetch_failed")) }
                             })
                         }
                     })
@@ -208,20 +208,20 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
             setOnShowListener { window?.setLayout(ThemeUi.dp(this@applyLyricsCandidate, 320f), ViewGroup.LayoutParams.WRAP_CONTENT) }
         }
         preview.show()
-        previewView?.text = "正在获取歌词预览…"
+        previewView?.text = t("lyrics.preview.loading")
         lyrics.previewCandidate(title, artist, duration, candidate, { result ->
             result.onSuccess { previewResult ->
                 previewView?.text = if (previewResult.lines.isNotEmpty())
                     previewResult.lines.take(12).joinToString("\n") { it.text }
-                else previewResult.plainLyrics.ifBlank { "暂无歌词内容" }
+                else previewResult.plainLyrics.ifBlank { t("lyrics.preview.empty") }
                 // 预览阶段拿到了真实 LRC，补上时长对比，帮助用户判断是否对得上原曲。
                 val lrcDuration = previewResult.lines.lastOrNull()?.let { it.timeMs / 1000.0 } ?: 0.0
                 val parts = mutableListOf("${candidate.trackName} · ${candidate.artistName}")
-                if (duration > 0) parts += "当前 ${time(duration)}"
+                if (duration > 0) parts += t("lyrics.current").format(time(duration))
                 if (lrcDuration > 0) parts += "LRC ${time(lrcDuration)}"
                 subtitleView?.text = parts.joinToString("  ·  ")
             }.onFailure {
-                previewView?.text = "预览失败：${it.message}"
+                previewView?.text = "${t("lyrics.preview.failed")}: ${it.message}"
             }
         })
     }
@@ -250,10 +250,10 @@ private class LyricsCandidateRow(
 
             // 副行：同步标记 + 当前曲目时长 vs 歌词/LRC 时长。
             val parts = mutableListOf<String>()
-            parts += if (candidate.synced) "同步歌词" else "纯文本"
-            if (trackDurationSeconds > 0) parts += "当前 ${activity.time(trackDurationSeconds)}"
+            parts += activity.t(if (candidate.synced) "lyrics.synced" else "lyrics.plain")
+            if (trackDurationSeconds > 0) parts += activity.t("lyrics.current").format(activity.time(trackDurationSeconds))
             if (candidate.lrcDurationSeconds > 0) parts += "LRC ${activity.time(candidate.lrcDurationSeconds)}"
-            else if (candidate.durationSeconds > 0) parts += "时长 ${activity.time(candidate.durationSeconds)}"
+            else if (candidate.durationSeconds > 0) parts += activity.t("lyrics.duration").format(activity.time(candidate.durationSeconds))
             addView(ThemeUi.text(activity, parts.joinToString("  ·  "),
                 11f, activity.palette, role = ThemeUi.ROLE_SUB))
         }

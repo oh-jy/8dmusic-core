@@ -89,7 +89,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     /** 0=深色 1=浅色 2=跟随系统。dark 字段始终是"当前生效"的结果，由 themeMode 派生。 */
     internal var themeMode = 0
     private var displayedLanguage = ""
-    internal var playbackStatus = "就绪"
+    internal var playbackStatus = ""
     internal var transform = TransformParams()
     internal var reverse = false
     internal val main = Handler(Looper.getMainLooper())
@@ -217,7 +217,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal val offlineAsrLazy = lazy {
         OfflineAsr(this,
             onText = { text -> main.post { asrTranscript = text; refreshPlayback() } },
-            onError = { error -> main.post { offlineAsrEnabled = false; playbackStatus = "离线识别失败：$error"; refreshPlayback() } },
+            onError = { error -> main.post { offlineAsrEnabled = false; playbackStatus = "${t("main.asr.failed")}: $error"; refreshPlayback() } },
         )
     }
     internal val offlineAsr get() = offlineAsrLazy.value
@@ -225,12 +225,12 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var offlineAsrEnabled = false
 
     internal fun toggleOfflineAsr() {
-        if (!BuildConfig.WITH_ASR) { toast("当前安装包不含离线识别功能"); return }
+        if (!BuildConfig.WITH_ASR) { toast(t("main.asr.unavailable")); return }
         offlineAsrEnabled = !offlineAsrEnabled
         asrTranscript = ""
         if (offlineAsrEnabled) offlineAsr.start() else offlineAsr.stop()
         refreshPlayback()
-        sourceStatusView?.text = if (offlineAsrEnabled) "离线识别已开启" else "离线识别已关闭"
+        sourceStatusView?.text = t(if (offlineAsrEnabled) "main.asr.enabled" else "main.asr.disabled")
     }
     internal lateinit var liveTimeline: LinearLayout
     internal lateinit var recordingLabel: TextView
@@ -267,14 +267,14 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             service?.onReverseUnavailable = { main.post {
                 reverse = false
                 if (::reverseSwitch.isInitialized) reverseSwitch.isChecked = false
-                toast("超长歌曲暂不支持倒放")
+                toast(t("main.reverse.too_long"))
             } }
             installPcmRenderer()
             service?.radio?.onReady = { main.post {
-                playbackStatus = "电台播放中 · ${currentItem?.name ?: "自定义电台"}"
+                playbackStatus = t("main.radio.playing").format(currentItem?.name ?: t("main.radio.custom"))
                 refreshPlayback()
             } }
-            service?.radio?.onEnd = { main.post { playbackStatus = "电台已断开"; refreshPlayback() } }
+            service?.radio?.onEnd = { main.post { playbackStatus = t("main.radio.disconnected"); refreshPlayback() } }
             service?.radio?.onError = { main.post { playbackStatus = it; refreshPlayback() } }
             bound = true
             if (pendingExternalIntent == null) adoptOrRestorePlayback()
@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         if (uri != null) {
             runCatching { contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
                 .onSuccess { visualizerView.setCreativeBackground(uri.toString()) }
-                .onFailure { toast("无法保存图片访问权限，请重新选择") }
+                .onFailure { toast(t("main.image.permission")) }
         }
     }
     internal val openSandImages = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -306,6 +306,12 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     }
     internal val saveMp3 = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mpeg")) { uri ->
         if (uri != null) exportMp3(uri)
+    }
+    internal var pendingMvAudio: Uri? = null
+    internal val saveMvAudio = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/mp4")) { uri ->
+        val source = pendingMvAudio
+        pendingMvAudio = null
+        if (uri != null && source != null) exportMvAudio(source, uri, false)
     }
     internal var exportVideoLandscape = false
     internal var exportVideoResolution = 720
@@ -320,10 +326,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             gif = true, smoothGifLoop = exportVideoSmoothGifLoop)
     }
     internal val requestAudio = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        if (it) scanMusic() else toast("未授予音乐库权限，仍可通过“添加音频”选择文件")
+        if (it) scanMusic() else toast(t("main.audio.permission"))
     }
     internal val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startMicRecording() else toast("没有麦克风录音权限，请到系统设置开启")
+        if (granted) startMicRecording() else toast(t("main.mic.permission"))
     }
     internal val providerStore by lazy { j5i.spatial8d.provider.ProviderStore(this) }
     internal val pluginStore by lazy { j5i.spatial8d.provider.ProviderPluginStore(this) }
@@ -438,6 +444,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
+        window.decorView.post { playlistDialog?.relayout() }
         if (AppLanguage.current(this) == AppLanguage.SYSTEM && AppLanguage.resolved(this) != displayedLanguage) {
             recreate()
             return
@@ -464,7 +471,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             playlistDialog?.refreshContent()
             return
         }
-        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音"); return }
+        if (recordingKind.isNotEmpty()) { toast(t("record.stop_current")); return }
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             startMicRecording()
         } else {
@@ -474,18 +481,18 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
 
     override fun pruneOnlineReferences() {
         val leftovers = songs.filter { it.uri.startsWith("online://") }
-        if (leftovers.isEmpty()) { toast("本地歌曲中没有在线记录"); return }
-        android.app.AlertDialog.Builder(this).setTitle("清理在线记录")
-            .setMessage("本地歌曲中残留 ${leftovers.size} 首在线歌曲记录，批量移出本地库？不会删除任何音频文件，歌单中的引用按歌单规则保留。")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("清理") { _, _ ->
+        if (leftovers.isEmpty()) { toast(t("main.online.none")); return }
+        android.app.AlertDialog.Builder(this).setTitle(t("main.online.clean.title"))
+            .setMessage(t("main.online.clean.confirm").format(leftovers.size))
+            .setNegativeButton(t("cancel"), null)
+            .setPositiveButton(t("main.online.clean")) { _, _ ->
                 leftovers.forEach { musicStore.removePermanently(it) }
                 songs = musicStore.cached().toMutableList()
                 queue = musicStore.view(songs)
                 currentQueue = queue
                 service?.syncQueue(queue, currentUri)
                 playlistDialog?.refreshContent()
-                toast("已清理 ${leftovers.size} 首在线记录")
+                toast(t("main.online.cleaned").format(leftovers.size))
             }.show()
     }
 
@@ -496,7 +503,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             withUsageGuide("audio") { requestAudio.launch(audioPermission()) }
             return
         }
-        playbackStatus = "正在扫描音乐库…"
+        playbackStatus = t("main.library.scanning")
         loading = true
         Thread {
             val result = musicStore.mergeScan(musicStore.scan())
@@ -505,7 +512,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
                 loading = false
                 songs = result.toMutableList()
                 queue = musicStore.view(songs)
-                playbackStatus = "音乐库 ${songs.size} 首"
+                playbackStatus = t("main.library.count").format(songs.size)
                 scheduleLyricsPrefetch()
                 refreshPlayback()
             }
@@ -525,7 +532,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         // 后台播放时立刻补一条通知，保持服务存活。
         service?.let { s ->
             val playing = s.player.isPlaying || s.radio.isPlaying
-            if (playing) s.updateMedia(s.currentTrack?.name ?: "8D 空间音频", s.currentTrack?.artist ?: "", true,
+            if (playing) s.updateMedia(s.currentTrack?.name ?: t("app.name"), s.currentTrack?.artist ?: "", true,
                 s.player.position, s.player.duration)
         }
         main.removeCallbacks(ticker)
@@ -543,7 +550,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         // 回到前台立即撤掉播放通知，不打扰使用。
         service?.let { s ->
             val playing = s.player.isPlaying || s.radio.isPlaying
-            s.updateMedia(s.currentTrack?.name ?: "8D 空间音频", s.currentTrack?.artist ?: "", playing,
+            s.updateMedia(s.currentTrack?.name ?: t("app.name"), s.currentTrack?.artist ?: "", playing,
                 s.player.position, s.player.duration)
         }
         tint(root, palette.text)
@@ -570,12 +577,12 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal fun togglePlayback() {
         if (isLive) {
             val radio = service?.radio ?: return
-            if (radio.isPlaying) { radio.pause(); playbackStatus = "电台已暂停" }
+            if (radio.isPlaying) { radio.pause(); playbackStatus = t("main.radio.paused") }
             else if (radioSources.isNotEmpty()) {
                 // FM 暂停后点播放即重新连接当前线路，兼作原来的刷新按钮。
                 tryRadioSource(radioSourceIndex.coerceAtLeast(0))
-                playbackStatus = "正在重新连接电台…"
-            } else playbackStatus = "电台线路不可用"
+                playbackStatus = t("main.radio.reconnecting")
+            } else playbackStatus = t("main.radio.unavailable")
             refreshPlayback()
             return
         }

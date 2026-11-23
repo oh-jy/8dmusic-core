@@ -19,7 +19,7 @@ internal data class RadioProgram(val name: String, val start: String, val end: S
 
 internal fun MainActivity.openCurrentRadioSchedule() {
     val station = importedStations().firstOrNull { it.id == currentStationId }
-    if (station != null) showRadioSchedule(station) else toast("该电台暂无可用节目单")
+    if (station != null) showRadioSchedule(station) else toast(t("schedule.empty"))
 }
 
 internal fun isRadioProgramCurrent(program: RadioProgram, time: String): Boolean =
@@ -68,15 +68,15 @@ internal fun MainActivity.showRadioSchedule(station: RadioStation) {
     val sources = radioScheduleSources(station.sources.map { it.url })
     lateinit var dialog: Dialog
     lateinit var content: LinearLayout
-    dialog = ThemeUi.showSheet(this, palette, "${station.name} · 节目单", fullHeight = true, scrollable = false) {
+    dialog = ThemeUi.showSheet(this, palette, "${station.name} · ${t("source.radio.schedule")}", fullHeight = true, scrollable = false) {
         content = this
     }
     dialog.show()
     if (sources.isEmpty()) {
-        content.addView(ThemeUi.text(this, "该电台暂无可用节目单", 13f, palette, role = ThemeUi.ROLE_SUB))
+        content.addView(ThemeUi.text(this, t("schedule.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
         return
     }
-    val status = ThemeUi.text(this, "正在加载节目单…", 13f, palette, role = ThemeUi.ROLE_SUB)
+    val status = ThemeUi.text(this, t("schedule.loading"), 13f, palette, role = ThemeUi.ROLE_SUB)
     content.addView(status)
     Thread {
         val client = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS).build()
@@ -97,11 +97,11 @@ internal fun MainActivity.showRadioSchedule(station: RadioStation) {
             if (!dialog.isShowing || isFinishing || isDestroyed) return@runOnUiThread
             content.removeAllViews()
             if (result == null) {
-                content.addView(ThemeUi.text(this, "节目单暂不可用，请稍后重试", 13f, palette, role = ThemeUi.ROLE_SUB))
+                content.addView(ThemeUi.text(this, t("schedule.failed"), 13f, palette, role = ThemeUi.ROLE_SUB))
                 return@runOnUiThread
             }
             val (source, days) = result
-            content.addView(ThemeUi.text(this, "数据来源：${source.provider}", 11f, palette, role = ThemeUi.ROLE_SUB))
+            content.addView(ThemeUi.text(this, t("schedule.source").format(source.provider), 11f, palette, role = ThemeUi.ROLE_SUB))
             val tabs = ThemeUi.row(this)
             content.addView(tabs)
             val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -109,7 +109,7 @@ internal fun MainActivity.showRadioSchedule(station: RadioStation) {
             content.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
             fun render(day: Int) {
                 tabs.removeAllViews()
-                listOf("昨天", "今天", "明天").forEachIndexed { index, label ->
+                listOf(t("schedule.yesterday"), t("schedule.today"), t("schedule.tomorrow")).forEachIndexed { index, label ->
                     tabs.addView(ThemeUi.button(this, palette, label, if (index == day) ThemeUi.ROLE_ACCENT_FILL else ThemeUi.ROLE_CONTROL) { render(index) }, LinearLayout.LayoutParams(0, ThemeUi.dp(this, 40f), 1f))
                 }
                 rows.removeAllViews()
@@ -122,13 +122,13 @@ internal fun MainActivity.showRadioSchedule(station: RadioStation) {
                         orientation = LinearLayout.VERTICAL
                         setPadding(ThemeUi.dp(this@showRadioSchedule, 8f), ThemeUi.dp(this@showRadioSchedule, 8f), ThemeUi.dp(this@showRadioSchedule, 8f), ThemeUi.dp(this@showRadioSchedule, 8f))
                         if (current) background = ThemeUi.bgDrawable(this@showRadioSchedule, palette.surfaceAlt, 8f)
-                        addView(ThemeUi.text(this@showRadioSchedule, "${if (current) "▶ 直播中 · " else ""}${program.name}", 13f, palette, role = if (current) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
+                        addView(ThemeUi.text(this@showRadioSchedule, "${if (current) "▶ ${t("schedule.live")} · " else ""}${program.name}", 13f, palette, role = if (current) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
                         addView(ThemeUi.text(this@showRadioSchedule, "${program.start} - ${program.end}${if (program.hosts.isNotBlank()) " · ${program.hosts}" else ""}", 11f, palette, role = ThemeUi.ROLE_SUB))
                     }
                     rows.addView(row)
                     if (current) active = row
                 }
-                if (days[day].isEmpty()) rows.addView(ThemeUi.text(this, "暂无节目", 13f, palette, role = ThemeUi.ROLE_SUB))
+                if (days[day].isEmpty()) rows.addView(ThemeUi.text(this, t("schedule.no_programs"), 13f, palette, role = ThemeUi.ROLE_SUB))
                 scroll.post { scroll.scrollTo(0, active?.top ?: 0) }
             }
             render(1)

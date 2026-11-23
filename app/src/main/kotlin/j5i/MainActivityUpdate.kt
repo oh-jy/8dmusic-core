@@ -41,7 +41,7 @@ internal fun updateDownloadSources(apkUrl: String): List<String> {
     val uri = java.net.URI(apkUrl)
     require(uri.scheme == "https" && uri.host == "github.com" &&
         uri.path.startsWith("/oh-jy/8dmusic-core/releases/download/") && uri.userInfo == null && uri.port == -1 &&
-        uri.query == null && uri.fragment == null) { "更新下载地址无效" }
+        uri.query == null && uri.fragment == null) { "update.error.url" }
     return listOf(apkUrl, "https://ghfast.top/$apkUrl", "https://gh-proxy.com/$apkUrl")
 }
 
@@ -49,9 +49,9 @@ internal fun parseAppRelease(json: String, withAsr: Boolean): AppRelease {
     val release = JSONObject(json)
     val versionPattern = Regex("(?:^|[^0-9])(\\d+\\.\\d+\\.\\d+)$")
     val tag = release.getString("tag_name")
-    require(tag != "beta-latest" || release.optBoolean("prerelease")) { "测试渠道必须是预发布版本" }
+    require(tag != "beta-latest" || release.optBoolean("prerelease")) { "update.error.beta" }
     val versionSource = if (tag == "beta-latest") release.optString("name") else tag
-    val version = versionPattern.find(versionSource)?.groupValues?.get(1) ?: error("发布版本号格式无效")
+    val version = versionPattern.find(versionSource)?.groupValues?.get(1) ?: error("update.error.release_version")
     val assetName = if (withAsr) "app-release-asr.apk" else "app-release-no-asr.apk"
     val assets = release.getJSONArray("assets")
     for (index in 0 until assets.length()) {
@@ -60,16 +60,16 @@ internal fun parseAppRelease(json: String, withAsr: Boolean): AppRelease {
         val url = asset.getString("browser_download_url")
         updateDownloadSources(url)
         val digest = asset.optString("digest").removePrefix("sha256:")
-        require(digest.matches(Regex("[a-fA-F0-9]{64}"))) { "更新包缺少 SHA-256 校验值" }
-        return AppRelease(version, release.optString("body").ifBlank { "暂无更新说明" }, url, digest.lowercase())
+        require(digest.matches(Regex("[a-fA-F0-9]{64}"))) { "update.error.hash" }
+        return AppRelease(version, release.optString("body"), url, digest.lowercase())
     }
-    return AppRelease(version, release.optString("body").ifBlank { "暂无更新说明" }, null, null)
+    return AppRelease(version, release.optString("body"), null, null)
 }
 
 internal fun isNewerRelease(latest: String, current: String): Boolean {
     val pattern = Regex("^(\\d+)\\.(\\d+)\\.(\\d+)$")
-    val left = pattern.matchEntire(latest) ?: error("最新版本号格式无效")
-    val right = pattern.matchEntire(current) ?: error("当前版本号格式无效")
+    val left = pattern.matchEntire(latest) ?: error("update.error.latest_version")
+    val right = pattern.matchEntire(current) ?: error("update.error.current_version")
     for (index in 1..3) {
         val comparison = left.groupValues[index].toLong().compareTo(right.groupValues[index].toLong())
         if (comparison != 0) return comparison > 0
@@ -78,6 +78,9 @@ internal fun isNewerRelease(latest: String, current: String): Boolean {
 }
 
 internal fun MainActivity.updateChannel(): String = preferences.getString("updateChannel", "stable") ?: "stable"
+
+private fun MainActivity.updateError(error: Throwable, fallback: String): String =
+    error.message?.let { if (it.startsWith("update.error.")) t(it) else it } ?: fallback
 
 private fun MainActivity.activeWifi(): Network? {
     val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -140,14 +143,14 @@ private fun MainActivity.updateCacheFile(release: AppRelease): File =
 
 internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
     if (!updateBusy.compareAndSet(false, true)) {
-        if (!automatic) showUpdateMessage("检查更新", "更新检查或下载正在进行。")
+        if (!automatic) showUpdateMessage(t("update.check"), t("update.busy"))
         return
     }
     val channel = updateChannel()
     val wifi = activeWifi()
     var status: TextView? = null
-    val dialog = if (automatic) null else ThemeUi.showSheet(this, palette, "检查更新", compactPicker = true) {
-        status = ThemeUi.text(this@checkAppUpdate, "正在检查 GitHub 最新版本…", 14f, palette)
+    val dialog = if (automatic) null else ThemeUi.showSheet(this, palette, t("update.check"), compactPicker = true) {
+        status = ThemeUi.text(this@checkAppUpdate, t("update.checking"), 14f, palette)
         addView(status)
     }
     dialog?.show()
@@ -156,8 +159,8 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
             val client = if (wifi == null) updateClient else clientForWifi(wifi)
             client.newCall(Request.Builder().url(if (channel == "beta") BETA_UPDATE_URL else UPDATE_URL).header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "8dmusic-android").build()).execute().use { response ->
-                check(response.isSuccessful) { "GitHub 返回 ${response.code}" }
-                val release = parseAppRelease(response.body?.string() ?: error("更新信息为空"), BuildConfig.WITH_ASR)
+                check(response.isSuccessful) { t("update.github").format(response.code) }
+                val release = parseAppRelease(response.body?.string() ?: error(t("update.empty")), BuildConfig.WITH_ASR)
                 val file = if (release.sha256 != null) updateCacheFile(release) else null
                 release to file?.takeIf { validUpdateCache(it, release.sha256!!) }
             }
@@ -170,7 +173,7 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
                 val newer = runCatching { isNewerRelease(release.version, BuildConfig.VERSION_NAME) }
                 val currentWifi = activeWifi()
                 if (newer.isFailure) {
-                    if (!automatic) showUpdateMessage("检查失败", newer.exceptionOrNull()?.message ?: "版本号无效")
+                    if (!automatic) showUpdateMessage(t("update.check_failed"), newer.exceptionOrNull()?.let { updateError(it, t("update.version.invalid")) } ?: t("update.version.invalid"))
                 } else if (newer.getOrDefault(false) && cached != null) {
                     recordUpdateCheck()
                     offerInstall(cached, release)
@@ -180,7 +183,7 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
                     recordUpdateCheck()
                     if (!automatic || newer.getOrDefault(false)) showRelease(release, newer.getOrDefault(false))
                 }
-            }, onFailure = { status?.text = if (channel == "beta" && it.message?.contains("404") == true) "测试版暂未发布。" else "检查失败：${it.message ?: "网络不可用"}，请稍后重试。" })
+            }, onFailure = { status?.text = if (channel == "beta" && it.message?.contains("404") == true) t("update.beta.unpublished") else t("update.check_failed.detail").format(updateError(it, t("update.network"))) })
         }
     }
 }
@@ -193,15 +196,15 @@ private fun MainActivity.showUpdateMessage(title: String, message: String) {
 
 private fun MainActivity.showRelease(release: AppRelease, newer: Boolean) {
     lateinit var dialog: android.app.Dialog
-    dialog = ThemeUi.showSheet(this, palette, if (newer) "发现新版本" else "已是最新版本", compactPicker = true) {
-        addView(ThemeUi.text(this@showRelease, "当前 ${BuildConfig.VERSION_NAME}  ·  最新 ${release.version}", 14f, palette, bold = true))
-        addView(ThemeUi.text(this@showRelease, release.notes, 13f, palette).apply {
+    dialog = ThemeUi.showSheet(this, palette, t(if (newer) "update.new" else "update.current"), compactPicker = true) {
+        addView(ThemeUi.text(this@showRelease, t("update.versions").format(BuildConfig.VERSION_NAME, release.version), 14f, palette, bold = true))
+        addView(ThemeUi.text(this@showRelease, release.notes.ifBlank { t("update.notes.empty") }, 13f, palette).apply {
             setPadding(0, ThemeUi.dp(this@showRelease, 10f), 0, ThemeUi.dp(this@showRelease, 10f))
         })
         if (newer && release.apkUrl == null) {
-            addView(ThemeUi.text(this@showRelease, "当前版本对应的安装包尚未发布，请稍后再试。", 13f, palette))
+            addView(ThemeUi.text(this@showRelease, t("update.asset.missing"), 13f, palette))
         } else if (newer) {
-            addView(ThemeUi.button(this@showRelease, palette, "下载并安装") {
+            addView(ThemeUi.button(this@showRelease, palette, t("update.download_install")) {
                 dialog.dismiss()
                 downloadAppUpdate(release)
             })
@@ -217,8 +220,8 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
     val file = updateCacheFile(release)
     val partial = File(directory, "download-${System.nanoTime()}.part")
     var status: TextView? = null
-    val dialog = if (silent) null else ThemeUi.showSheet(this, palette, "下载更新", compactPicker = true) {
-        status = ThemeUi.text(this@downloadAppUpdate, "正在下载…", 14f, palette)
+    val dialog = if (silent) null else ThemeUi.showSheet(this, palette, t("update.download"), compactPicker = true) {
+        status = ThemeUi.text(this@downloadAppUpdate, t("update.downloading"), 14f, palette)
         addView(status, LinearLayout.LayoutParams(-1, -2))
     }
     dialog?.show()
@@ -231,13 +234,13 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
             var completed = false
             for ((index, source) in sources.withIndex()) {
                 try {
-                    check(wifi == null || activeWifi() == wifi) { "Wi-Fi 已断开，下载已停止" }
+                    check(wifi == null || activeWifi() == wifi) { t("update.wifi.lost") }
                     if (index > 0) Thread.sleep(500L * index)
                     client.newCall(Request.Builder().url(source).build()).execute().use { response ->
-                check(response.isSuccessful) { "下载失败 (${response.code})" }
-                val body = response.body ?: error("下载内容为空")
+                check(response.isSuccessful) { t("update.download.failed_code").format(response.code) }
+                val body = response.body ?: error(t("update.download.empty"))
                 val length = body.contentLength()
-                require(length <= MAX_APK_BYTES) { "更新包过大" }
+                require(length <= MAX_APK_BYTES) { t("update.too_large") }
                 val digest = MessageDigest.getInstance("SHA-256")
                 var total = 0L
                 var lastPercent = -1
@@ -245,27 +248,27 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                     partial.outputStream().use { output ->
                         val buffer = ByteArray(64 * 1024)
                         while (true) {
-                            check(wifi == null || activeWifi() == wifi) { "Wi-Fi 已断开，下载已停止" }
+                            check(wifi == null || activeWifi() == wifi) { t("update.wifi.lost") }
                             val count = input.read(buffer)
                             if (count < 0) break
                             total += count
-                            require(total <= MAX_APK_BYTES) { "更新包过大" }
+                            require(total <= MAX_APK_BYTES) { t("update.too_large") }
                             digest.update(buffer, 0, count)
                             output.write(buffer, 0, count)
                             if (length > 0) {
                                 val percent = (total * 100 / length).toInt().coerceAtMost(100)
                                 if (percent != lastPercent) {
                                     lastPercent = percent
-                                    runOnUiThread { if (dialog?.isShowing == true) status?.text = "正在下载：$percent%" }
+                                    runOnUiThread { if (dialog?.isShowing == true) status?.text = t("update.download.percent").format(percent) }
                                 }
                             }
                         }
                     }
                 }
                 val actual = digest.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
-                check(actual == release.sha256) { "更新包校验失败" }
-                if (file.exists()) check(file.delete()) { "无法替换无效缓存" }
-                check(partial.renameTo(file)) { "无法保存更新包" }
+                check(actual == release.sha256) { t("update.hash.failed") }
+                if (file.exists()) check(file.delete()) { t("update.cache.replace_failed") }
+                check(partial.renameTo(file)) { t("update.save_failed") }
                     }
                     completed = true
                     break
@@ -279,7 +282,7 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                     lastError = error
                 }
             }
-            if (!completed) throw lastError ?: IllegalStateException("所有下载源均不可用")
+            if (!completed) throw lastError ?: IllegalStateException(t("update.sources.unavailable"))
         }
         runOnUiThread {
             updateBusy.set(false)
@@ -293,7 +296,7 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
                 offerInstall(file, release)
             }, onFailure = {
                 partial.delete()
-                if (!automatic) showUpdateMessage("下载失败", it.message ?: "请检查网络后重试")
+                if (!automatic) showUpdateMessage(t("update.download.failed"), updateError(it, t("update.network.retry")))
             })
         }
     }
@@ -302,24 +305,24 @@ private fun MainActivity.downloadAppUpdate(release: AppRelease, silent: Boolean 
 private fun MainActivity.offerInstall(file: File, release: AppRelease) {
     lateinit var dialog: android.app.Dialog
     val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()
-    dialog = ThemeUi.showSheet(this, palette, "发现新版本 ${release.version}", compactPicker = true) {
-        addView(ThemeUi.text(this@offerInstall, release.notes, 13f, palette).apply {
+    dialog = ThemeUi.showSheet(this, palette, "${t("update.new")} ${release.version}", compactPicker = true) {
+        addView(ThemeUi.text(this@offerInstall, release.notes.ifBlank { t("update.notes.empty") }, 13f, palette).apply {
             setPadding(0, 0, 0, ThemeUi.dp(this@offerInstall, 10f))
         })
-        addView(ThemeUi.text(this@offerInstall, if (needsPermission) "请先允许本应用安装未知应用，返回后点击安装。" else "系统将校验签名并确认安装。", 13f, palette))
-        if (needsPermission) addView(ThemeUi.button(this@offerInstall, palette, "允许安装") {
+        addView(ThemeUi.text(this@offerInstall, t(if (needsPermission) "update.install.permission_hint" else "update.install.signature"), 13f, palette))
+        if (needsPermission) addView(ThemeUi.button(this@offerInstall, palette, t("update.install.allow")) {
             startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
         })
-        addView(ThemeUi.button(this@offerInstall, palette, "安装更新") {
+        addView(ThemeUi.button(this@offerInstall, palette, t("update.install")) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
-                showUpdateMessage("需要安装权限", "请先允许本应用安装未知应用。")
+                showUpdateMessage(t("update.install.permission"), t("update.install.permission_message"))
             } else {
                 val uri = FileProvider.getUriForFile(this@offerInstall, "$packageName.updates", file)
                 runCatching {
                     startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
                     dialog.dismiss()
-                }.onFailure { showUpdateMessage("无法打开安装器", it.message ?: "请稍后重试") }
+                }.onFailure { showUpdateMessage(t("update.installer.failed"), it.message ?: t("update.retry")) }
             }
         })
     }

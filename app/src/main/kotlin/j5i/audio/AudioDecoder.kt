@@ -9,10 +9,15 @@ import android.net.Uri
 import com.j5i.spatial8d.HttpMediaDataSource
 
 import j5i.spatial8d.core.PcmBuffer
+import j5i.spatial8d.ui.AppLanguage
 import java.io.File
 import java.nio.ByteOrder
 
+internal class DecodeCancelledException : IllegalStateException()
+private class AudioRequestException(message: String, cause: Throwable) : IllegalStateException(message, cause)
+
 class AudioDecoder(private val context: Context) {
+    private fun t(key: String) = AppLanguage.text(context, key)
     /**
      * MediaExtractor + MediaCodec 顺序解码，调用方必须在后台线程执行。
      * 首个有效 PCM 输出就回调 onHead，后续继续抬高同一 PCM 缓冲的水位；
@@ -33,7 +38,7 @@ class AudioDecoder(private val context: Context) {
                 try {
                     source.readAt(0, ByteArray(1), 0, 1)
                 } catch (e: java.io.IOException) {
-                    throw IllegalStateException("音频请求失败: ${e.message ?: "连接错误"}", e)
+                    throw AudioRequestException("${t("decoder.request.failed")}: ${e.message ?: t("decoder.connection.failed")}", e)
                 }
             }
             extractor.setDataSource(source)
@@ -56,11 +61,11 @@ class AudioDecoder(private val context: Context) {
             val track = (0 until extractor.trackCount).firstOrNull { index ->
                 extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)
                     ?.startsWith("audio/") == true
-            } ?: error("没有音频轨")
+            } ?: error(t("decoder.no_track"))
             extractor.selectTrack(track)
             if (startUs > 0L) extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val format = extractor.getTrackFormat(track)
-            val mime = format.getString(MediaFormat.KEY_MIME) ?: error("音频格式不可识别")
+            val mime = format.getString(MediaFormat.KEY_MIME) ?: error(t("radio.invalid_format"))
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION))
                 format.getLong(MediaFormat.KEY_DURATION) else 0L
             codec = MediaCodec.createDecoderByType(mime)
@@ -74,7 +79,7 @@ class AudioDecoder(private val context: Context) {
             var inputDone = false
             var outputDone = false
             while (!outputDone) {
-                if (!isActive()) error("已取消旧音频解码")
+                if (!isActive()) throw DecodeCancelledException()
                 if (!inputDone) {
                     val index = codec.dequeueInputBuffer(10_000)
                     if (index >= 0) {
@@ -116,7 +121,7 @@ class AudioDecoder(private val context: Context) {
                             buffer.get(bytes)
                             // 窗口写满时保留 codec output buffer，等播放线程释放旧 PCM 后重试同一块。
                             while (output?.append(bytes) == false) {
-                                if (!isActive()) error("已取消旧音频解码")
+                                if (!isActive()) throw DecodeCancelledException()
                                 Thread.sleep(16)
                             }
                             if (!headPublished && output != null && output!!.frames > 0) {
@@ -133,14 +138,14 @@ class AudioDecoder(private val context: Context) {
                 sampleRate = codec.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                 channels = codec.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             }
-            check(channels in 1..8 && sampleRate > 0) { "不支持的音频声道或采样率" }
+            check(channels in 1..8 && sampleRate > 0) { t("decoder.unsupported") }
             reportProgress(100)
             // 水位置完成前不能把播完或导出当成安全操作。
-            return (output ?: error("音频没有 PCM 输出")).also { it.decodeDone = true }
+            return (output ?: error(t("decoder.no_pcm"))).also { it.decodeDone = true }
         } catch (e: Exception) {
             output?.close()
-            if (e is IllegalStateException && e.message?.startsWith("音频请求失败:") == true) throw e
-            throw IllegalStateException("解码失败: ${e.message ?: e.javaClass.simpleName}", e)
+            if (e is DecodeCancelledException || e is AudioRequestException) throw e
+            throw IllegalStateException("${t("decoder.failed")}: ${e.message ?: e.javaClass.simpleName}", e)
         } finally {
             try { codec?.stop() } catch (_: Exception) {}
             try { codec?.release() } catch (_: Exception) {}

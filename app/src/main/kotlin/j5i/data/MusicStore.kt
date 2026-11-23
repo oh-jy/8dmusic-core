@@ -30,9 +30,10 @@ class MusicStore(private val context: Context) {
 
     fun scan(): List<MusicItem> {
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val folderColumn = if (android.os.Build.VERSION.SDK_INT >= 29) MediaStore.Audio.Media.RELATIVE_PATH else MediaStore.Audio.Media.DATA
         val projection = arrayOf(
             "_id", "_display_name", "_size", "duration", "artist", "album",
-            MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.DATE_MODIFIED
+            MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.DATE_MODIFIED, folderColumn
         )
         val result = mutableListOf<MusicItem>()
         context.contentResolver.query(
@@ -51,7 +52,8 @@ class MusicStore(private val context: Context) {
                     cursor.getString(4)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知歌手",
                     cursor.getString(5)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知专辑",
                     cursor.getLong(6) * 1000L,
-                    cursor.getLong(7) * 1000L
+                    cursor.getLong(7) * 1000L,
+                    cursor.getString(8)?.let { if (android.os.Build.VERSION.SDK_INT >= 29) it.trimEnd('/') else File(it).parent.orEmpty() }.orEmpty()
                 ))
             }
         }
@@ -282,6 +284,7 @@ class MusicStore(private val context: Context) {
                     when (sort) {
                         "artist" -> "${it.artist} ${it.name}"
                         "album" -> "${it.album} ${it.name}"
+                        "folder" -> "${it.folder} ${it.name}"
                         else -> it.name
                     }
                 })
@@ -435,7 +438,7 @@ class MusicStore(private val context: Context) {
                     item.getString("uri"), item.optLong("size"),
                     item.optLong("duration"), item.optString("artist", "未知歌手"),
                     item.optString("album", "未知专辑"), item.optLong("addedAt"),
-                    item.optLong("modifiedAt")
+                    item.optLong("modifiedAt"), item.optString("folder")
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -451,14 +454,14 @@ class MusicStore(private val context: Context) {
         fun songJson(song: MusicItem) = JSONObject().apply {
             put("id", song.id); put("name", song.name); put("uri", song.uri); put("size", song.size)
             put("duration", song.duration); put("artist", song.artist); put("album", song.album)
-            put("addedAt", song.addedAt); put("modifiedAt", song.modifiedAt)
+            put("addedAt", song.addedAt); put("modifiedAt", song.modifiedAt); put("folder", song.folder)
         }
         fun jsonSongs(text: String?): List<MusicItem> = try {
             val array = JSONArray(text ?: "[]")
             (0 until array.length()).map { array.getJSONObject(it) }.filter { it.optLong("id") != 0L && it.optString("uri").isNotBlank() }.map {
                 MusicItem(it.getLong("id"), it.getString("name"), it.getString("uri"), it.optLong("size"),
                     it.optLong("duration"), it.optString("artist", "未知歌手"), it.optString("album", "未知专辑"),
-                    it.optLong("addedAt"), it.optLong("modifiedAt"))
+                    it.optLong("addedAt"), it.optLong("modifiedAt"), it.optString("folder"))
             }
         } catch (_: Exception) { emptyList() }
         private fun jsonPlaylists(text: String?): List<Playlist> = try {

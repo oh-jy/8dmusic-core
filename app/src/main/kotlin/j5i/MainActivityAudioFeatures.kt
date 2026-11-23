@@ -19,7 +19,7 @@ internal fun MainActivity.updateExportProgress(message: String) {
 
 internal fun MainActivity.showExportProgress() {
     if (exportProgressDialog?.isShowing == true) return
-    val dialog = ThemeUi.showSheet(this, palette, "导出进度", subtitle = "可关闭此窗口，导出会继续") {
+    val dialog = ThemeUi.showSheet(this, palette, t("export.progress.title"), subtitle = t("export.progress.hint")) {
         addView(ThemeUi.text(this@showExportProgress, playbackStatus, 15f, palette).also { exportProgressText = it })
     }
     exportProgressDialog = dialog
@@ -38,10 +38,10 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
     val video = File.createTempFile("8d-export-", if (gif) ".gif" else ".mp4", cacheDir)
     exporting = true
     exportStartedAt = SystemClock.elapsedRealtime()
-    var phase = "准备音频，等待解码完成"
+    var phase = t("export.preparing")
     fun displayProgress() {
         val elapsed = (SystemClock.elapsedRealtime() - exportStartedAt) / 1000
-        updateExportProgress("$phase · 已用时 ${elapsed} 秒")
+        updateExportProgress(t("export.elapsed").format(phase, elapsed))
     }
     val heartbeat = object : Runnable {
         override fun run() {
@@ -55,7 +55,7 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
     showExportProgress()
     player.export(wav.outputStream(), onProgress = { value -> main.post {
         if (exporting) {
-            phase = if (value == 10) "正在预处理音频" else "正在渲染空间音频"
+            phase = t(if (value == 10) "export.preprocess" else "export.render")
             displayProgress()
         }
     } }, onDone = { ok, message ->
@@ -72,7 +72,7 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
                         previousProgress = value
                         main.post {
                             if (exporting) {
-                                phase = "编码${if (gif) "GIF" else "视频"} $value%"
+                                phase = t("export.encoding").format(if (gif) "GIF" else t("video.title"), value)
                                 displayProgress()
                             }
                         }
@@ -84,21 +84,21 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
                     if (preview && previewTailSeconds == 0) state.copy(creative = state.creative.copy(outroText = "")) else state,
                     lyrics, landscape, resolution, speed, reversed, startSeconds, durationSeconds, previewTailSeconds, report)
                 if (!preview) {
-                    main.post { if (exporting) { phase = "正在保存文件"; displayProgress() } }
-                    val stream = contentResolver.openOutputStream(uri ?: error("缺少导出位置")) ?: error("无法创建导出文件")
+                    main.post { if (exporting) { phase = t("export.saving"); displayProgress() } }
+                    val stream = contentResolver.openOutputStream(uri ?: error(t("export.no_destination"))) ?: error(t("mv.export.create_failed"))
                     stream.use { output -> video.inputStream().use { it.copyTo(output) } }
                 }
             } catch (exception: Exception) {
                 android.util.Log.e("8DExport", "video export failed", exception)
-                error = exception.message ?: "未知错误"
+                error = errorDetail(exception).ifBlank { t("export.unknown_error") }
             } finally { wav.delete(); if (!preview || error != null) video.delete() }
             main.post {
                 var saved = false
                 try {
                     if (error == null) { onComplete(); saved = true } else if (uri != null) discardPending(uri)
-                    playbackStatus = if (error == null) if (preview) "预览已生成" else "${if (gif) "GIF" else "MP4"} 导出完成" else "导出失败: $error"
+                    playbackStatus = if (error == null) if (preview) t("export.preview.ready") else t("export.complete.format").format(if (gif) "GIF" else "MP4") else "${t("export.failed")}: $error"
                 } catch (exception: Exception) {
-                    if (uri != null) discardPending(uri); video.delete(); playbackStatus = "MP4 保存失败: ${exception.message}"
+                    if (uri != null) discardPending(uri); video.delete(); playbackStatus = "${t("export.save_failed").format("MP4")}: ${errorDetail(exception)}"
                 }
                 exporting = false; main.removeCallbacks(heartbeat); exportProgressDialog?.dismiss(); refreshPlayback(); toast(playbackStatus)
                 if (saved) {
@@ -112,7 +112,7 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
 
 internal fun MainActivity.showVideoPreview(file: File) {
     lateinit var player: android.widget.VideoView
-    val dialog = ThemeUi.showSheet(this, palette, "导出预览") {
+    val dialog = ThemeUi.showSheet(this, palette, t("export.preview.title")) {
         player = android.widget.VideoView(this@showVideoPreview)
         addView(android.widget.FrameLayout(this@showVideoPreview).apply {
             addView(player, android.widget.FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER))
@@ -131,7 +131,7 @@ internal fun MainActivity.showVideoPreview(file: File) {
         }
         media.isLooping = true; player.start()
     }
-    player.setOnErrorListener { _, _, _ -> toast("无法播放预览"); dialog.dismiss(); true }
+    player.setOnErrorListener { _, _, _ -> toast(t("export.preview.failed")); dialog.dismiss(); true }
     dialog.show()
 }
 
@@ -158,37 +158,37 @@ internal fun MainActivity.exportPublicVideo(name: String, landscape: Boolean, re
 }
 
 internal fun MainActivity.showExportedVideoActions(uri: Uri, mime: String) {
-    ThemeUi.showSheet(this, palette, "导出完成") {
-        addView(ThemeUi.button(this@showExportedVideoActions, palette, "预览", ThemeUi.ROLE_SURFACE) {
+    ThemeUi.showSheet(this, palette, t("export.complete")) {
+        addView(ThemeUi.button(this@showExportedVideoActions, palette, t("export.preview"), ThemeUi.ROLE_SURFACE) {
             runCatching {
                 startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW).setDataAndType(uri, mime)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION))
-            }.onFailure { toast("没有可用的视频播放器") }
+            }.onFailure { toast(t("export.no_player")) }
         })
-        addView(ThemeUi.button(this@showExportedVideoActions, palette, "分享", ThemeUi.ROLE_ACCENT_FILL) {
+        addView(ThemeUi.button(this@showExportedVideoActions, palette, t("export.share"), ThemeUi.ROLE_ACCENT_FILL) {
             val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType(mime)
                 .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                 .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
             intent.clipData = android.content.ClipData.newRawUri("export", uri)
-            runCatching { startActivity(android.content.Intent.createChooser(intent, "分享作品")) }
-                .onFailure { toast("没有可用的分享应用") }
+            runCatching { startActivity(android.content.Intent.createChooser(intent, t("export.share.title"))) }
+                .onFailure { toast(t("export.no_share")) }
         })
     }.show()
 }
 
 internal fun MainActivity.exportWav(uri: Uri, onComplete: () -> Unit = {}) {
-        if (exporting) { toast("已有导出任务，请等待完成"); return }
+        if (exporting) { toast(t("mv.export.busy")); return }
         val player = service?.player ?: return
         exporting = true
         val stream = contentResolver.openOutputStream(uri) ?: run {
             exporting = false
-            toast("无法创建导出文件")
+            toast(t("mv.export.create_failed"))
             return
         }
-        playbackStatus = "正在导出 WAV…"
+        playbackStatus = t("export.format.progress").format("WAV")
         var published = false
         player.export(stream, mp3 = false,
-            onProgress = { percent -> main.post { playbackStatus = "导出 $percent%"; refreshPlayback() } },
+            onProgress = { percent -> main.post { playbackStatus = t("export.percent").format(percent); refreshPlayback() } },
             onDone = { ok, message ->
                 exporting = false
                 if (ok) { onComplete(); published = true }
@@ -198,18 +198,18 @@ internal fun MainActivity.exportWav(uri: Uri, onComplete: () -> Unit = {}) {
     }
 
 internal fun MainActivity.exportMp3(uri: Uri, onComplete: () -> Unit = {}) {
-        if (exporting) { toast("已有导出任务，请等待完成"); return }
+        if (exporting) { toast(t("mv.export.busy")); return }
         val player = service?.player ?: return
         exporting = true
         val mp3 = java.io.File(cacheDir, "8d-export.mp3")
-        playbackStatus = "正在导出 MP3…"
+        playbackStatus = t("export.format.progress").format("MP3")
         val stream = contentResolver.openOutputStream(uri) ?: run {
             exporting = false
-            toast("无法创建导出文件")
+            toast(t("mv.export.create_failed"))
             return
         }
         player.export(stream, mp3 = true, mp3Path = mp3.absolutePath,
-            onProgress = { percent -> main.post { playbackStatus = "导出 $percent%"; refreshPlayback() } },
+            onProgress = { percent -> main.post { playbackStatus = t("export.percent").format(percent); refreshPlayback() } },
             onDone = { ok, message ->
                 mp3.delete()
                 if (ok) {
@@ -217,7 +217,7 @@ internal fun MainActivity.exportMp3(uri: Uri, onComplete: () -> Unit = {}) {
                         playbackStatus = message
                         onComplete()
                     } catch (e: Exception) {
-                        playbackStatus = "MP3 保存失败: ${e.message}"
+                        playbackStatus = "${t("export.save_failed").format("MP3")}: ${errorDetail(e)}"
                         discardPending(uri)
                     }
                 } else { playbackStatus = message; discardPending(uri) }
@@ -228,7 +228,7 @@ internal fun MainActivity.exportMp3(uri: Uri, onComplete: () -> Unit = {}) {
     }
 
 internal fun MainActivity.exportPublic(name: String, mp3: Boolean) {
-        if (exporting) { toast("已有导出任务，请等待完成"); return }
+        if (exporting) { toast(t("mv.export.busy")); return }
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, "$name-8D.${if (mp3) "mp3" else "wav"}")
             put(MediaStore.Audio.Media.MIME_TYPE, if (mp3) "audio/mpeg" else "audio/wav")
@@ -253,20 +253,20 @@ internal fun MainActivity.discardPending(uri: Uri) {
 internal fun MainActivity.togglePlaybackRecording(statusView: TextView) {
         if (recordingKind == "playback") {
             service?.player?.stopRecording(); service?.radio?.stopRecording()
-            finishRecording("播放录音", statusView)
+            finishRecording(t("record.playback"), statusView)
             return
         }
-        if (recordingKind.isNotEmpty()) { toast("请先停止麦克风录音"); return }
+        if (recordingKind.isNotEmpty()) { toast(t("record.stop_mic")); return }
         val playing = if (isLive) service?.radio?.isPlaying == true else service?.player?.isPlaying == true
-        if (!playing) { statusView.text = "先播放本地音乐或电台，再开始录制最终输出"; return }
+        if (!playing) { statusView.text = t("record.play_first"); return }
         val path = java.io.File(cacheDir, "rec_${System.currentTimeMillis()}.wav").absolutePath
         val started = if (isLive) service?.radio?.startRecording(path) == true else service?.player?.startRecording(path) == true
-        if (!started) { statusView.text = "录音启动失败，请稍后重试"; return }
+        if (!started) { statusView.text = t("record.start_failed"); return }
         beginRecording("playback", path, statusView)
     }
 
 internal fun MainActivity.startMicRecording() {
-        if (recordingKind.isNotEmpty()) { toast("请先停止当前录音"); return }
+        if (recordingKind.isNotEmpty()) { toast(t("record.stop_current")); return }
         service?.player?.pause(); service?.radio?.pause()
         val path = java.io.File(cacheDir, "mic_${System.currentTimeMillis()}.wav").absolutePath
         Thread {
@@ -275,7 +275,7 @@ internal fun MainActivity.startMicRecording() {
                 if (offlineAsrEnabled) offlineAsr.acceptPcm(data, length, 44100, 1)
             }
             if (!recorder.start(path, 44100, 1)) {
-                main.post { toast("麦克风初始化失败，可能被其它应用占用") }
+                main.post { toast(t("record.mic_failed")) }
                 return@Thread
             }
             micRecorder = recorder
@@ -286,7 +286,7 @@ internal fun MainActivity.startMicRecording() {
 
 internal fun MainActivity.beginRecording(kind: String, path: String, statusView: TextView) {
         recordingKind = kind; recordingPath = path; recordingStartedAt = SystemClock.elapsedRealtime()
-        statusView.text = "${if (kind == "mic") "麦克风" else "播放"}录音已开始"
+        statusView.text = t("record.started").format(t(if (kind == "mic") "record.mic" else "record.playback"))
         dismissSource()
         refreshPlayback()
     playlistDialog?.refreshContent()
@@ -298,6 +298,6 @@ internal fun MainActivity.finishMicRecording(statusView: TextView) {
         Thread {
             recorder.stop()
             recorder.setListener(null)
-            main.post { finishRecording("麦克风录音", statusView) }
+            main.post { finishRecording(t("record.mic"), statusView) }
         }.start()
     }

@@ -1,8 +1,15 @@
 package j5i.spatial8d.ui
 
 import android.annotation.SuppressLint
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Typeface
+import android.graphics.drawable.InsetDrawable
+import android.icu.text.BreakIterator
+import android.text.Spannable
+import android.text.style.ForegroundColorSpan
+import android.text.TextPaint
+import android.text.style.CharacterStyle
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -12,8 +19,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.graphics.ColorUtils
 import j5i.spatial8d.audio.LyricsResult
 import kotlin.math.abs
+
+internal fun lyricLineProgress(startMs: Long, endMs: Long?, positionMs: Long): Float? {
+    if (endMs == null || endMs <= startMs) return null
+    return ((positionMs - startMs).toDouble() / (endMs - startMs)).coerceIn(0.0, 1.0).toFloat()
+}
 
 /**
  * 可嵌入空间曲线同尺寸面板的歌词视图。进度单位是毫秒，主线程周期性调用 setPosition。
@@ -49,6 +62,8 @@ class LyricsView(context: Context) : FrameLayout(context) {
     private val rows = mutableListOf<TextView>()
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
+    private var focusPositionMs = 0L
+    private var focusAnimator: ValueAnimator? = null
     private var activeIndex = -2
     private var touching = false
     private var liveCaption = ""
@@ -153,6 +168,8 @@ class LyricsView(context: Context) : FrameLayout(context) {
         liveCaption = ""
         lyrics = value
         if (positionMs < 0) positionMs = 0
+        focusAnimator?.cancel()
+        focusPositionMs = positionMs
         activeIndex = -2
         resetPreview()
         content.removeAllViews()
@@ -200,12 +217,28 @@ class LyricsView(context: Context) : FrameLayout(context) {
 
     /** 外部播放器仍是唯一进度来源；force 仅用于切歌或用户返回当前行。 */
     fun setPosition(positionMs: Long, force: Boolean = false) {
+        val previous = this.positionMs
         this.positionMs = positionMs.coerceAtLeast(0)
         val lines = lyrics?.lines ?: return
         val index = lines.indexOfLast { it.timeMs <= this.positionMs }
         if (index != activeIndex) {
             activeIndex = index
             applyColors()
+        }
+        focusAnimator?.cancel()
+        if (!force && this.positionMs > previous && this.positionMs - previous <= 500) {
+            focusAnimator = ValueAnimator.ofFloat(focusPositionMs.toFloat(), this.positionMs.toFloat()).apply {
+                duration = 200
+                interpolator = android.view.animation.LinearInterpolator()
+                addUpdateListener {
+                    focusPositionMs = (it.animatedValue as Float).toLong()
+                    updateFocus()
+                }
+                start()
+            }
+        } else {
+            focusPositionMs = this.positionMs
+            updateFocus()
         }
         if (force || (!touching && !browsing)) {
             if (force) resetPreview()
@@ -286,6 +319,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     }
 
     override fun onDetachedFromWindow() {
+        focusAnimator?.cancel()
         touching = false
         resetPreview()
         super.onDetachedFromWindow()
@@ -314,7 +348,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
         val p = palette
         setBackgroundColor(p.surface)
         timeLabel.setTextColor(p.darkInk)
-        timeLabel.background = ThemeUi.bgDrawable(context, p.accent, 12f)
+        timeLabel.background = InsetDrawable(ThemeUi.bgDrawable(context, p.accent, 12f), 0, dp(8f), 0, dp(8f))
         rows.forEachIndexed { index, row ->
             val current = index == activeIndex
             val selected = browsing && index == previewIndex
@@ -326,10 +360,44 @@ class LyricsView(context: Context) : FrameLayout(context) {
             })
             row.typeface = if (current || selected) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             row.alpha = if (current || selected) 1f else if (played) 0.85f else 0.72f
+            (row.text as? Spannable)?.let { text ->
+                text.getSpans(0, text.length, ForegroundColorSpan::class.java).forEach(text::removeSpan)
+                text.getSpans(0, text.length, LyricGlowSpan::class.java).forEach(text::removeSpan)
+            }
         }
         if (rows.isEmpty()) {
             (content.getChildAt(0) as? TextView)?.setTextColor(p.sub)
         }
+    }
+
+    private fun updateFocus() {
+        val lines = lyrics?.lines ?: return
+        val row = rows.getOrNull(activeIndex) ?: return
+        val line = lines.getOrNull(activeIndex) ?: return
+        val progress = lyricLineProgress(line.timeMs, lines.getOrNull(activeIndex + 1)?.timeMs, focusPositionMs) ?: return
+        if (liveCaption.isNotEmpty() || line.text.isEmpty()) return
+        if (row.text !is Spannable) row.setText(line.text, TextView.BufferType.SPANNABLE)
+        val text = row.text as Spannable
+        text.getSpans(0, text.length, ForegroundColorSpan::class.java).forEach(text::removeSpan)
+        text.getSpans(0, text.length, LyricGlowSpan::class.java).forEach(text::removeSpan)
+        val iterator = BreakIterator.getCharacterInstance().apply { setText(line.text) }
+        val ranges = mutableListOf<Pair<Int, Int>>()
+        var start = iterator.first()
+        var end = iterator.next()
+        while (end != BreakIterator.DONE) {
+            ranges += start to end
+            start = end
+            end = iterator.next()
+        }
+        val center = progress * ranges.size
+        ranges.forEachIndexed { index, (from, to) ->
+            val distance = abs(index + 0.5f - center)
+            val amount = (1f - distance / 1.5f).coerceIn(0f, 1f)
+            val base = if (index + 0.5f < center) palette.accent else ColorUtils.blendARGB(palette.accent, palette.sub, 0.55f)
+            text.setSpan(ForegroundColorSpan(ColorUtils.blendARGB(base, palette.text, amount)), from, to, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (amount > 0f) text.setSpan(LyricGlowSpan(palette.accent, dp(5f) * amount), from, to, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        row.invalidate()
     }
 
     private fun updatePadding() {
@@ -348,4 +416,10 @@ class LyricsView(context: Context) : FrameLayout(context) {
     }
 
     private fun dp(value: Float) = ThemeUi.dp(context, value)
+}
+
+private class LyricGlowSpan(private val color: Int, private val radius: Float) : CharacterStyle() {
+    override fun updateDrawState(paint: TextPaint) {
+        paint.setShadowLayer(radius.coerceAtLeast(0.01f), 0f, 0f, color)
+    }
 }

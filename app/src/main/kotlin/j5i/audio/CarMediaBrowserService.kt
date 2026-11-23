@@ -89,7 +89,7 @@ class CarMediaBrowserService : MediaBrowserService() {
     override fun onLoadChildren(parentId: String, result: Result<List<MediaBrowser.MediaItem>>) {
         result.sendResult(when (parentId) {
             ROOT_ID -> listOf(MediaBrowser.MediaItem(
-                MediaDescription.Builder().setMediaId(LIBRARY_ID).setTitle("本地音乐").build(),
+                MediaDescription.Builder().setMediaId(LIBRARY_ID).setTitle(j5i.spatial8d.ui.AppLanguage.text(this, "media.local_music")).build(),
                 MediaBrowser.MediaItem.FLAG_BROWSABLE))
             LIBRARY_ID -> mediaItems()
             else -> emptyList()
@@ -111,7 +111,7 @@ class CarMediaBrowserService : MediaBrowserService() {
                 MediaDescription.Builder()
                     .setMediaId(item.uri)
                     .setTitle(title)
-                    .setSubtitle(item.artist)
+                    .setSubtitle(j5i.spatial8d.ui.AppLanguage.artist(this, item.artist))
                     .setMediaUri(Uri.parse(item.uri))
                     .build(),
                 MediaBrowser.MediaItem.FLAG_PLAYABLE)
@@ -127,8 +127,8 @@ class CarMediaBrowserService : MediaBrowserService() {
         val durationMs = (service.player.duration * 1000.0).toLong().coerceAtLeast(0L)
         val positionMs = (service.player.position * 1000.0).toLong().coerceAtLeast(0L)
         session.setMetadata(MediaMetadata.Builder()
-            .putString(MediaMetadata.METADATA_KEY_TITLE, item?.name?.substringBeforeLast('.') ?: "8D 空间音频")
-            .putString(MediaMetadata.METADATA_KEY_ARTIST, item?.artist.orEmpty())
+            .putString(MediaMetadata.METADATA_KEY_TITLE, item?.name?.substringBeforeLast('.') ?: j5i.spatial8d.ui.AppLanguage.text(this, "app.name"))
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, j5i.spatial8d.ui.AppLanguage.artist(this, item?.artist.orEmpty()))
             .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs)
             .build())
         session.setPlaybackState(PlaybackState.Builder()
