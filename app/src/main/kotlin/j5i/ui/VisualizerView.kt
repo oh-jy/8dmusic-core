@@ -915,7 +915,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> drawParticles(c)
                     3 -> drawTravel(c)
                     34 -> drawDream(c)
-                    in 35..38 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
+                    in 35..38, 40 -> proceduralVisuals.draw(c, width.toFloat(), height.toFloat(), mode, effectTime,
                         delayedSpectrum, beatPulse(), resources.displayMetrics.density, dark, creative.density / 100f, creative.intensity / 100f,
                         AppLanguage.resolved(context))
                     5 -> drawSpectrumTerrain(c)
@@ -977,7 +977,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     2 -> "visual.particles"
                     3 -> "visual.travel"
                     34 -> "visual.dream"
-                    in 35..38 -> exclusiveVisualModes.first { it.second == mode }.first
+                    in 35..38, 40 -> exclusiveVisualModes.first { it.second == mode }.first
                     5 -> "visual.3d.title"
                     6 -> "visual.water.title"
                     7 -> "visual.strings.title"

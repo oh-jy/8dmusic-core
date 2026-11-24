@@ -7,6 +7,10 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun gourdCountVariesWithinBounds() {
+        val counts = (0L..200L).map(::gourdCount)
+        assertEquals(setOf(3, 4, 5, 6, 7, 8, 9), counts.toSet())
+    }
     @Test fun sandShadowsKeepStrongContrast() {
         val pixels = intArrayOf(0xffffffff.toInt(), 0xff808080.toInt(), 0xff000000.toInt())
         val density = sandDensity(pixels, 3, 1)
@@ -153,8 +157,8 @@ class VisualEffectsTest {
         assertEquals(0.0, simple.position(firstEnd).second)
     }
     @Test fun rainAndFollowingEffectsComeImmediatelyAfterTravel() {
-        assertEquals(listOf(3, 34, 38, 35, 36, 37, 13, 14, 15, 16, 17, 5),
-            exclusiveVisualModes.map { it.second }.drop(3).take(12))
+        assertEquals(listOf(3, 34, 38, 40, 35, 36, 37, 13, 14, 15, 16, 17, 5),
+            exclusiveVisualModes.map { it.second }.drop(3).take(13))
     }
     @Test fun dreamScenesChangeSmoothlyOverTime() {
         assertEquals(0f, dreamBlend(0.0))
@@ -279,7 +283,7 @@ class VisualEffectsTest {
 
     @Test fun drivingCyclesThroughEveryEffectInBothDirections() {
         val modes = exclusiveVisualModes.map { it.second }
-        assertEquals((1..39).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
+        assertEquals((1..40).filter { it != 9 && it != 24 }.toSet(), modes.toSet())
         assertEquals(modes.toSet(), visualModeGroups.flatMap { it.second }.toSet())
         assertEquals(modes.size, visualModeGroups.sumOf { it.second.size })
         var current = 3

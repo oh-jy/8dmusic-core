@@ -52,6 +52,10 @@ private fun MainActivity.videoIcon(res: Int, description: String, action: () -> 
 internal fun MainActivity.openExternalMedia(intent: Intent) {
     val uri = intent.data ?: return
     val live = intent.getBooleanExtra("j5i.live", false)
+    val liveStreams = intent.getStringArrayListExtra("j5i.liveStreams").orEmpty().filter {
+        runCatching { java.net.URI(it).let { address -> address.scheme in listOf("http", "https") && address.host != null && address.rawUserInfo == null && address.fragment == null } }.getOrDefault(false)
+    }.distinct()
+    var liveStreamIndex = 0
     val resumeKey = if (live) "live" else intent.getStringExtra("j5i.providerMv") ?: uri.toString()
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
@@ -451,6 +455,19 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         }
     }
     externalVideoDialog = dialog
+    var liveTimeout: Runnable? = null
+    fun nextLiveStream(): Boolean {
+        if (!dialog.isShowing || liveStreamIndex + 1 >= liveStreams.size) return false
+        liveTimeout?.let(main::removeCallbacks)
+        liveStreamIndex++
+        loading.text = t("live.switching")
+        loading.visibility = View.VISIBLE
+        player.stopPlayback()
+        player.setVideoURI(android.net.Uri.parse(liveStreams[liveStreamIndex]))
+        liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
+        main.postDelayed(liveTimeout!!, 12000)
+        return true
+    }
     val update = object : Runnable {
         override fun run() {
             if (!dialog.isShowing) return
@@ -470,6 +487,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     var cacheThread: Thread? = null
     dialog.setOnDismissListener {
         qualityRequest++
+        liveTimeout?.let(main::removeCallbacks)
         main.removeCallbacks(update); main.removeCallbacks(hide); cacheThread?.interrupt()
         if (!live && !completed && player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
         player.stopPlayback(); prepared = null
@@ -477,6 +495,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         if (externalVideo === player) externalVideo = null; if (externalVideoDialog === dialog) externalVideoDialog = null
     }
     player.setOnPreparedListener {
+        liveTimeout?.let(main::removeCallbacks)
         prepared = it
         if (!live) rememberVideo(uri, intent)
         it.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)
@@ -493,14 +512,48 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         overlay.post { applyScaleMode() }; showControls()
     }
     player.setOnCompletionListener { completed = true; if (!live) preferences.edit().remove("video-position:$resumeKey").apply() }
+    player.setOnInfoListener { _, what, _ ->
+        if (liveStreams.isNotEmpty()) {
+            if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+                liveTimeout?.let(main::removeCallbacks)
+                liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
+                main.postDelayed(liveTimeout!!, 15000)
+            } else if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END) liveTimeout?.let(main::removeCallbacks)
+        }
+        false
+    }
     player.setOnErrorListener { _, _, _ ->
+        if (live && nextLiveStream()) return@setOnErrorListener true
         dialog.dismiss()
         val web = intent.getStringExtra("j5i.liveWeb")
-        if (live && web != null && android.net.Uri.parse(web).scheme in listOf("http", "https")) openWebVideo(web, live = true)
+        val fallbackWeb = intent.getStringExtra("j5i.liveFallbackWeb")?.takeIf {
+            runCatching {
+                val address = java.net.URI(it)
+                address.scheme in listOf("http", "https") && address.host != null && address.rawUserInfo == null && address.fragment == null
+            }.getOrDefault(false)
+        }
+        if (live && fallbackWeb != null) {
+            lateinit var failure: android.app.Dialog
+            failure = ThemeUi.showSheet(this, palette, t("live.line_failed")) {
+                addView(ThemeUi.button(this@openExternalMedia, palette, t("live.official")) {
+                    failure.dismiss(); openWebVideo(fallbackWeb, live = true)
+                })
+                if (web != null && android.net.Uri.parse(web).scheme in listOf("http", "https")) {
+                    addView(ThemeUi.button(this@openExternalMedia, palette, t("live.web")) {
+                        failure.dismiss(); openWebVideo(web, live = true)
+                    })
+                }
+            }
+            failure.show()
+        } else if (live && web != null && android.net.Uri.parse(web).scheme in listOf("http", "https")) openWebVideo(web, live = true)
         else toast(t("video.play_failed"))
         true
     }
     dialog.show(); main.post(update)
+    if (liveStreams.isNotEmpty()) {
+        liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
+        main.postDelayed(liveTimeout!!, 12000)
+    }
     val cached = if (!live && isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
     fun startVideo(source: android.net.Uri) {
         loading.visibility = View.GONE

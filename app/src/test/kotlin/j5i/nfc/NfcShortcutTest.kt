@@ -75,6 +75,17 @@ class NfcShortcutTest {
         assertEquals(first, firstLocalSongByName(listOf(first, second), "夜曲"))
     }
 
+    @Test fun songNamesOmitFileExtensionsAndPreferExactMatches() {
+        val target = NfcShortcut.LocalSong(123)
+        assertEquals("夜曲", NfcShortcut.parseShortcut(NfcShortcut.create(target, "夜曲.mp3")).name)
+        val partial = MusicItem(1, "周杰伦 - 夜曲.flac", "content://media/external/audio/media/1")
+        val exact = MusicItem(2, "夜曲.mp3", "content://media/external/audio/media/2")
+        assertEquals(exact, firstLocalSongByName(listOf(partial, exact), "夜曲"))
+        assertEquals(partial, firstLocalSongByName(listOf(partial), "夜曲.mp3"))
+        assertEquals(partial, firstLocalSongByName(listOf(partial), "周杰伦 - 夜曲 现场版"))
+        assertEquals(null, firstLocalSongByName(listOf(partial), ".mp3"))
+    }
+
     @Test fun fmNameIsOptionalWhileSongNamesArePreserved() {
         val target = NfcShortcut.Fm("radio", "station")
         val named = NfcShortcut.create(target, "重庆 FM & 音乐")

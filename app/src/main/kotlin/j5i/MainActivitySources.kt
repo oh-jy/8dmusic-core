@@ -131,7 +131,7 @@ internal fun MainActivity.dismissSource() { fmDialog?.dismiss(); onlineDialog?.d
 
 internal fun MainActivity.playRadio(station: RadioStation) {
         val entry = providerStore.list().firstOrNull { it.enabled && station.id.startsWith(it.definition.id + "/") }
-        val plugin = if (entry == null) pluginStore.list().firstOrNull { it.enabled && "live" in it.descriptor.capabilities && station.id.startsWith(it.descriptor.id + "/") } else null
+        val plugin = if (entry == null) pluginStore.list().firstOrNull { it.enabled && it.descriptor.id != "platform.guangbomi" && "live" in it.descriptor.capabilities && station.id.startsWith(it.descriptor.id + "/") } else null
         if (entry == null && plugin == null) { toast(t("playback.source.missing")); return }
         radioAllowHttp = entry?.definition?.usesHttp ?: true
         if (recordingKind.isNotEmpty()) { toast(t("radio.stop_recording")); return }

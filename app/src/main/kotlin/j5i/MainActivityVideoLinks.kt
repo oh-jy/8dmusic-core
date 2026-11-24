@@ -83,11 +83,11 @@ private fun MainActivity.manageVideoHistory() {
                 .setPositiveButton(t("delete")) { _, _ ->
                     removeVideoHistory(selected)
                     dialog.dismiss()
-                    showVideoLinks()
+                    showVideoLibrary()
                 }.show()
         })
     }
-    dialog.setOnCancelListener { showVideoLinks() }
+    dialog.setOnCancelListener { showVideoLibrary() }
     dialog.show()
 }
 
@@ -119,11 +119,11 @@ private fun MainActivity.renameVideoHistory(entry: VideoHistoryEntry) {
                 val titles = videoTitles().put(entry.uri, title)
                 getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
                 saveVideoHistory(videoHistory().map { if (it.uri == entry.uri) it.copy(title = title) else it })
-                dialog.dismiss(); showVideoLinks()
+                dialog.dismiss(); showVideoLibrary()
             }
         })
     }
-    dialog.setOnCancelListener { showVideoLinks() }
+    dialog.setOnCancelListener { showVideoLibrary() }
     dialog.show()
 }
 
@@ -148,15 +148,32 @@ internal fun MainActivity.toggleVideoFavorite(url: String) {
 }
 
 internal fun MainActivity.showVideoLinks() {
+    val dialog = ThemeUi.showSheet(this, palette, t("video.links")) {
+        val input = ThemeUi.input(this@showVideoLinks, palette, t("video.url.hint"))
+        addView(input)
+        addView(ThemeUi.button(this@showVideoLinks, palette, t("video.open"), ThemeUi.ROLE_ACCENT_FILL) {
+            val url = input.text.toString().trim()
+            val parsed = Uri.parse(url)
+            if (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrEmpty() || parsed.userInfo != null) {
+                toast(t("video.url.invalid"))
+            } else {
+                openVideoLink(url)
+            }
+        })
+    }
+    dialog.show()
+}
+
+internal fun MainActivity.showVideoLibrary() {
     lateinit var sheet: Dialog
-    sheet = ThemeUi.showSheet(this, palette, t("video.links"), fullHeight = true) {
-        val favoriteRows = LinearLayout(this@showVideoLinks).apply { orientation = LinearLayout.VERTICAL }
+    sheet = ThemeUi.showSheet(this, palette, t("video.library"), fullHeight = true) {
+        val favoriteRows = LinearLayout(this@showVideoLibrary).apply { orientation = LinearLayout.VERTICAL }
         var draggedUrl: String? = null
-        fun row(entry: VideoHistoryEntry, favorite: Boolean): LinearLayout = LinearLayout(this@showVideoLinks).apply {
+        fun row(entry: VideoHistoryEntry, favorite: Boolean): LinearLayout = LinearLayout(this@showVideoLibrary).apply {
             gravity = Gravity.CENTER_VERTICAL
-            background = ThemeUi.bgDrawable(this@showVideoLinks, palette.control, 8f)
+            background = ThemeUi.bgDrawable(this@showVideoLibrary, palette.control, 8f)
             if (favorite) {
-                addView(ThemeUi.text(this@showVideoLinks, "☰", 14f, palette, role = ThemeUi.ROLE_FAINT).apply {
+                addView(ThemeUi.text(this@showVideoLibrary, "☰", 14f, palette, role = ThemeUi.ROLE_FAINT).apply {
                     gravity = Gravity.CENTER
                     contentDescription = "${t("video.drag")} ${videoTitle(entry.uri, entry.title)}"
                     setOnTouchListener { view, event ->
@@ -165,7 +182,7 @@ internal fun MainActivity.showVideoLinks() {
                             view.startDragAndDrop(ClipData.newPlainText("video favorite", ""), View.DragShadowBuilder(this@apply), entry.uri, 0)
                         } else false
                     }
-                }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 36f), ThemeUi.dp(this@showVideoLinks, 40f)))
+                }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLibrary, 36f), ThemeUi.dp(this@showVideoLibrary, 40f)))
                 setOnDragListener { view, event ->
                     when (event.action) {
                         DragEvent.ACTION_DRAG_STARTED -> draggedUrl != null
@@ -180,7 +197,7 @@ internal fun MainActivity.showVideoLinks() {
                                 val scrollLocation = IntArray(2)
                                 scroll.getLocationOnScreen(scrollLocation)
                                 val y = location[1] + event.y - scrollLocation[1]
-                                val edge = ThemeUi.dp(this@showVideoLinks, 48f)
+                                val edge = ThemeUi.dp(this@showVideoLibrary, 48f)
                                 if (y < edge) scroll.smoothScrollBy(0, -edge)
                                 else if (y > scroll.height - edge) scroll.smoothScrollBy(0, edge)
                             }
@@ -194,7 +211,7 @@ internal fun MainActivity.showVideoLinks() {
                             if (from >= 0 && to >= 0 && from != to) {
                                 updated.add(to, updated.removeAt(from))
                                 getPreferences(Context.MODE_PRIVATE).edit().putString("video_favorites", JSONArray(updated).toString()).apply()
-                                sheet.dismiss(); showVideoLinks()
+                                sheet.dismiss(); showVideoLibrary()
                             }
                             draggedUrl = null
                             true
@@ -204,23 +221,23 @@ internal fun MainActivity.showVideoLinks() {
                 }
             }
             val displayTitle = videoTitle(entry.uri, entry.title) + entry.artist.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
-            val title = ThemeUi.text(this@showVideoLinks, displayTitle, 13f, palette).apply {
+            val title = ThemeUi.text(this@showVideoLibrary, displayTitle, 13f, palette).apply {
                 isSingleLine = true
                 ellipsize = TextUtils.TruncateAt.END
-                setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, 0, 0)
+                setPadding(ThemeUi.dp(this@showVideoLibrary, 10f), 0, 0, 0)
             }
-            addView(title, LinearLayout.LayoutParams(0, ThemeUi.dp(this@showVideoLinks, 40f), 1f))
+            addView(title, LinearLayout.LayoutParams(0, ThemeUi.dp(this@showVideoLibrary, 40f), 1f))
             title.gravity = Gravity.CENTER_VERTICAL
             val position = preferences.getInt("video-position:${entry.uri}", 0).coerceAtLeast(0)
-            addView(ThemeUi.text(this@showVideoLinks, videoTime(position), 12f, palette, role = ThemeUi.ROLE_SUB).apply {
+            addView(ThemeUi.text(this@showVideoLibrary, videoTime(position), 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                 gravity = Gravity.CENTER
                 isSingleLine = true
-            }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 84f), ThemeUi.dp(this@showVideoLinks, 40f)))
-            val more = ThemeUi.text(this@showVideoLinks, "⋯", 20f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            }, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLibrary, 84f), ThemeUi.dp(this@showVideoLibrary, 40f)))
+            val more = ThemeUi.text(this@showVideoLibrary, "⋯", 20f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 gravity = Gravity.CENTER
                 contentDescription = t("video.more")
             }
-            addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 48f), ThemeUi.dp(this@showVideoLinks, 40f)))
+            addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLibrary, 48f), ThemeUi.dp(this@showVideoLibrary, 40f)))
             setOnClickListener {
                 val mvItem = if (favorite) null else (onlineQueue + musicStore.onlineCached()).firstOrNull {
                     it.uri.startsWith("online://plugin/") && Uri.parse(it.uri).getQueryParameter("mv") == entry.uri
@@ -232,86 +249,60 @@ internal fun MainActivity.showVideoLinks() {
                 }
             }
             more.setOnClickListener {
-                val options = LinearLayout(this@showVideoLinks).apply {
+                val options = LinearLayout(this@showVideoLibrary).apply {
                     orientation = LinearLayout.VERTICAL
-                    background = ThemeUi.bgDrawable(this@showVideoLinks, palette.surface, 8f)
+                    background = ThemeUi.bgDrawable(this@showVideoLibrary, palette.surface, 8f)
                 }
-                val popup = PopupWindow(options, ThemeUi.dp(this@showVideoLinks, 120f), -2, true).apply {
+                val popup = PopupWindow(options, ThemeUi.dp(this@showVideoLibrary, 120f), -2, true).apply {
                     setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
                     isOutsideTouchable = true
-                    elevation = ThemeUi.dp(this@showVideoLinks, 8f).toFloat()
+                    elevation = ThemeUi.dp(this@showVideoLibrary, 8f).toFloat()
                 }
                 fun option(label: String, action: () -> Unit) {
-                    options.addView(ThemeUi.text(this@showVideoLinks, label, 13f, palette).apply {
+                    options.addView(ThemeUi.text(this@showVideoLibrary, label, 13f, palette).apply {
                         gravity = Gravity.CENTER
                         setOnClickListener { popup.dismiss(); action() }
-                    }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoLinks, 44f)))
+                    }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showVideoLibrary, 44f)))
                 }
                 option(t("video.rename.action")) { sheet.dismiss(); renameVideoHistory(entry.copy(title = videoTitle(entry.uri, entry.title))) }
                 option(t("delete")) {
                     if (favorite) toggleVideoFavorite(entry.uri) else {
                         removeVideoHistory(setOf(entry.uri))
                     }
-                    sheet.dismiss(); showVideoLinks()
+                    sheet.dismiss(); showVideoLibrary()
                 }
                 popup.showAsDropDown(more, 0, 0, Gravity.END)
             }
         }
-        val input = ThemeUi.input(this@showVideoLinks, palette, t("video.url.hint")).apply {
-            setPadding(paddingLeft, paddingTop, ThemeUi.dp(this@showVideoLinks, 64f), paddingBottom)
-        }
-        val inputHeight = ThemeUi.dp(this@showVideoLinks, 44f)
-        val inputRow = FrameLayout(this@showVideoLinks).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, inputHeight)
-        }
-        inputRow.addView(input, FrameLayout.LayoutParams(-1, inputHeight))
-        inputRow.addView(ThemeUi.text(this@showVideoLinks, t("video.open"), 13f, palette, bold = true, role = ThemeUi.ROLE_ACCENT).apply {
-            gravity = Gravity.CENTER
-            setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, ThemeUi.dp(this@showVideoLinks, 10f), 0)
-            setOnClickListener {
-            val url = input.text.toString().trim()
-            val parsed = Uri.parse(url)
-            if (parsed.scheme !in listOf("http", "https") || parsed.host.isNullOrEmpty() || parsed.userInfo != null) {
-                toast(t("video.url.invalid"))
-            } else {
-                openVideoLink(url)
-            }
-            }
-        }, FrameLayout.LayoutParams(-2, -1, Gravity.END or Gravity.CENTER_VERTICAL))
-        addView(inputRow)
-        val liveProviders = runCatching { pluginStore.list().filter { it.enabled && "live" in it.descriptor.capabilities } }.getOrDefault(emptyList())
         val history = videoHistory()
-        addView(ThemeUi.row(this@showVideoLinks).apply {
-            addView(ThemeUi.text(this@showVideoLinks, t("video.history"), 15f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
-            liveProviders.forEach { entry ->
-                addView(ThemeUi.button(this@showVideoLinks, palette, "${entry.descriptor.name} · TV") { showLiveCatalog(entry, "tv") })
-            }
-            if (history.isNotEmpty()) addView(ThemeUi.button(this@showVideoLinks, palette, t("video.history.manage")) {
+        addView(ThemeUi.row(this@showVideoLibrary).apply {
+            addView(ThemeUi.text(this@showVideoLibrary, t("video.history"), 15f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+            if (history.isNotEmpty()) addView(ThemeUi.button(this@showVideoLibrary, palette, t("video.history.manage")) {
                 sheet.dismiss(); manageVideoHistory()
             })
         })
-        val historyRows = LinearLayout(this@showVideoLinks).apply { orientation = LinearLayout.VERTICAL }
+        val historyRows = LinearLayout(this@showVideoLibrary).apply { orientation = LinearLayout.VERTICAL }
         var visibleHistoryCount = 5
         fun renderHistory() {
             historyRows.removeAllViews()
-            if (history.isEmpty()) historyRows.addView(ThemeUi.text(this@showVideoLinks, t("video.history.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
-            history.take(visibleHistoryCount).forEach { entry -> historyRows.addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) }) }
-            if (visibleHistoryCount < history.size) historyRows.addView(ThemeUi.button(this@showVideoLinks, palette, t("source.more")) {
+            if (history.isEmpty()) historyRows.addView(ThemeUi.text(this@showVideoLibrary, t("video.history.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
+            history.take(visibleHistoryCount).forEach { entry -> historyRows.addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLibrary, 4f) }) }
+            if (visibleHistoryCount < history.size) historyRows.addView(ThemeUi.button(this@showVideoLibrary, palette, t("source.more")) {
                 visibleHistoryCount += 5
                 renderHistory()
             })
         }
         renderHistory()
         addView(historyRows)
-        addView(ThemeUi.text(this@showVideoLinks, t("video.favorites"), 15f, palette, bold = true))
+        addView(ThemeUi.text(this@showVideoLibrary, t("video.favorites"), 15f, palette, bold = true))
         val favorites = videoFavorites()
-        if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, t("video.favorites.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
-        else addView(ThemeUi.text(this@showVideoLinks, t("video.drag.hint"), 11f, palette, role = ThemeUi.ROLE_SUB))
+        if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLibrary, t("video.favorites.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
+        else addView(ThemeUi.text(this@showVideoLibrary, t("video.drag.hint"), 11f, palette, role = ThemeUi.ROLE_SUB))
         favorites.forEach { url ->
             val uri = Uri.parse(url)
             val fallback = if (uri.host == "player.bilibili.com") uri.getQueryParameter("bvid").orEmpty() +
                 uri.getQueryParameter("cid")?.let { " · $it" }.orEmpty() else uri.host.orEmpty() + uri.path.orEmpty()
-            favoriteRows.addView(row(VideoHistoryEntry(url, fallback), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) })
+            favoriteRows.addView(row(VideoHistoryEntry(url, fallback), true), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLibrary, 4f) })
         }
         addView(favoriteRows)
     }

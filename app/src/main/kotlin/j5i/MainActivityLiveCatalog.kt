@@ -13,11 +13,33 @@ import j5i.spatial8d.provider.ProviderPluginRunner
 import j5i.spatial8d.provider.ProviderPluginStore
 import j5i.spatial8d.ui.ThemeUi
 import org.json.JSONObject
+import j5i.spatial8d.provider.ProviderNetwork
+import okhttp3.Request
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorCompletionService
+import java.util.concurrent.TimeUnit
 
 private fun liveUrl(value: String): Boolean = runCatching {
     val uri = java.net.URI(value)
     uri.scheme in setOf("http", "https") && uri.host != null && uri.rawUserInfo == null && uri.fragment == null
 }.getOrDefault(false)
+
+internal fun MainActivity.showTvLive() {
+    val entry = runCatching { pluginStore.list().firstOrNull {
+        it.enabled && it.descriptor.id == "platform.iyouhun" && "live-tv" in it.descriptor.capabilities
+    } }.getOrNull()
+    if (entry != null) {
+        showLiveCatalog(entry, "tv")
+    } else {
+        lateinit var dialog: android.app.Dialog
+        dialog = ThemeUi.showSheet(this, palette, t("live.tv"), subtitle = t("playback.plugin.missing"), compactPicker = true) {
+            addView(ThemeUi.button(this@showTvLive, palette, t("source.manage")) { dialog.dismiss(); showProviderManager() })
+            addView(ThemeUi.button(this@showTvLive, palette, t("video.links")) { dialog.dismiss(); showVideoLinks() })
+            addView(ThemeUi.button(this@showTvLive, palette, t("video.library")) { dialog.dismiss(); showVideoLibrary() })
+        }
+        dialog.show()
+    }
+}
 
 internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind: String) {
     val cache = getSharedPreferences("live_catalog_cache", Context.MODE_PRIVATE)
@@ -38,6 +60,7 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
         else toast(t("live.failed"))
     }
     lateinit var dialog: android.app.Dialog
+    var refreshCatalog: () -> Unit = {}
     dialog = ThemeUi.showSheet(this, palette, "${entry.descriptor.name} · ${kind.uppercase()}", fullHeight = true, scrollable = false) {
         val categoryButton = ThemeUi.button(this@showLiveCatalog, palette, t("live.category"))
         val query = ThemeUi.input(this@showLiveCatalog, palette, t("live.search"))
@@ -86,20 +109,74 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
                         val lines = response?.optJSONArray("lines") ?: return@invoke
                         if (lines.length() == 0) {
                             webOnly(url)
+                        } else if (kind == "tv" && "live-tv" in entry.descriptor.capabilities) {
+                            val streams = (0 until lines.length()).map { lines.getJSONObject(it).optString("url") }.filter(::liveUrl).distinct()
+                            if (streams.isEmpty()) { toast(t("live.failed")); return@invoke }
+                            status.text = t("live.testing")
+                            more.isEnabled = false
+                            val generation = ++requestGeneration
+                            loading = true
+                            Thread {
+                                val executor = Executors.newFixedThreadPool(6)
+                                val completion = ExecutorCompletionService<String?>(executor)
+                                val client = ProviderNetwork.client(true).newBuilder()
+                                    .callTimeout(4, TimeUnit.SECONDS).build()
+                                streams.forEach { stream -> completion.submit {
+                                    runCatching {
+                                        var current = stream
+                                        var valid = false
+                                        repeat(5) {
+                                            if (!valid) client.newCall(Request.Builder().url(current).get().build()).execute().use { response ->
+                                                if (response.isRedirect) {
+                                                    current = response.header("Location")?.let { response.request.url.resolve(it)?.toString() }
+                                                        ?: error("Invalid redirect")
+                                                } else {
+                                                    check(response.isSuccessful)
+                                                    val bytes = ByteArray(512)
+                                                    val count = response.body?.byteStream()?.read(bytes) ?: -1
+                                                    valid = count > 0 && (bytes[0] == 0x47.toByte() ||
+                                                        String(bytes, 0, count, Charsets.UTF_8).trimStart().startsWith("#EXTM3U") ||
+                                                        count >= 8 && String(bytes, 4, 4, Charsets.US_ASCII) == "ftyp")
+                                                }
+                                            }
+                                        }
+                                        if (valid) stream else null
+                                    }.getOrNull()
+                                } }
+                                var fastest: String? = null
+                                try {
+                                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
+                                    for (index in streams.indices) {
+                                        val remaining = deadline - System.nanoTime()
+                                        if (remaining <= 0) break
+                                        fastest = completion.poll(remaining, TimeUnit.NANOSECONDS)?.get()
+                                        if (fastest != null) break
+                                    }
+                                } finally { executor.shutdownNow() }
+                                runOnUiThread {
+                                    if (!dialog.isShowing || generation != requestGeneration) return@runOnUiThread
+                                    loading = false; more.isEnabled = true; status.text = ""
+                                    val first = fastest ?: streams.first()
+                                    val ordered = arrayListOf(first).apply { addAll(streams.filter { it != first }) }
+                                    openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(first), "video/*")
+                                        .putExtra(Intent.EXTRA_TITLE, title).putExtra("j5i.live", true)
+                                        .putStringArrayListExtra("j5i.liveStreams", ordered))
+                                }
+                            }.start()
                         } else {
                             val lineItems = (0 until lines.length()).map { lines.getJSONObject(it) }
                             choose(title, lineItems.map { it.optString("title") }) { index ->
                                     val lineUrl = lineItems[index].optString("url")
                                     invoke("liveLine", lineUrl) { result, _ ->
                                         if (result == null) {
-                                            webOnly(lineUrl)
+                                            toast(t("live.failed"))
                                             return@invoke
                                         }
                                         val stream = result.optString("stream")
-                                        val web = result.optString("web").takeIf(::liveUrl) ?: lineUrl
+                                        val web = result.optString("web").takeIf(::liveUrl)
+                                        val fallbackWeb = result.optString("fallbackWeb").takeIf(::liveUrl)
                                         val canPlay = liveUrl(stream)
-                                        if (!canPlay) webOnly(web) else choose(title, listOf(t("play"), t("live.web"))) { action ->
-                                            if (action == 0) {
+                                        fun play() {
                                                 if (kind == "fm") {
                                                     val station = RadioStation("${entry.descriptor.id}/${url.hashCode()}", title, entry.descriptor.name,
                                                         entry.descriptor.name, "直播", "导入", "", listOf(RadioSource(lineItems[index].optString("title"), stream,
@@ -107,10 +184,16 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
                                                     dialog.dismiss(); playRadio(station)
                                                 } else {
                                                     dialog.dismiss()
-                                                    openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(stream), "video/*").putExtra(Intent.EXTRA_TITLE, title).putExtra("j5i.live", true).putExtra("j5i.liveWeb", web))
+                                                    openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(stream), "video/*").putExtra(Intent.EXTRA_TITLE, title).putExtra("j5i.live", true).putExtra("j5i.liveWeb", web).putExtra("j5i.liveFallbackWeb", fallbackWeb))
                                                 }
-                                            } else if (liveUrl(web)) openWebVideo(web, live = true) else toast(t("live.failed"))
                                         }
+                                        val webOptions = listOfNotNull(web?.let { t("live.web") to it }, fallbackWeb?.let { t("live.official") to it })
+                                        if (canPlay && webOptions.isEmpty()) play()
+                                        else if (canPlay) choose(title, listOf(t("play")) + webOptions.map { it.first }) { action ->
+                                            if (action == 0) play() else webOnly(webOptions[action - 1].second)
+                                        }
+                                        else if (webOptions.isNotEmpty()) webOnly(webOptions.first().second)
+                                        else toast(t("live.failed"))
                                     }
                                 }
                         }
@@ -145,12 +228,36 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
                 }
         }
         more.setOnClickListener { if (!loading && next.isNotEmpty()) loadPage(next, true) }
+        refreshCatalog = {
+            if (!loading) invoke("liveRefresh", "") { result, _ ->
+                if (result != null) loadPage(selectedCategory, false)
+            }
+        }
         query.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) { render() }
         })
-        addView(categoryButton); addView(query); addView(status)
+        addView(ThemeUi.row(this@showLiveCatalog).apply {
+            categoryButton.apply {
+                setPadding(ThemeUi.dp(this@showLiveCatalog, 3f), 0, ThemeUi.dp(this@showLiveCatalog, 3f), 0)
+                isSingleLine = true
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            }
+            addView(categoryButton, LinearLayout.LayoutParams(0, -2, 1.5f))
+            if (kind == "tv" && entry.descriptor.id == "platform.iyouhun") {
+                fun action(label: String, description: String, onClick: () -> Unit) =
+                    ThemeUi.button(this@showLiveCatalog, palette, label) { onClick() }.apply {
+                        contentDescription = description
+                        setPadding(ThemeUi.dp(this@showLiveCatalog, 2f), 0, ThemeUi.dp(this@showLiveCatalog, 2f), 0)
+                        isSingleLine = true
+                        if (android.os.Build.VERSION.SDK_INT >= 26) setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1, android.util.TypedValue.COMPLEX_UNIT_SP)
+                    }
+                addView(action(t("video.links.short"), t("video.links")) { showVideoLinks() }, LinearLayout.LayoutParams(ThemeUi.dp(this@showLiveCatalog, 64f), -2))
+                addView(action(t("video.library.short"), t("video.library")) { showVideoLibrary() }, LinearLayout.LayoutParams(ThemeUi.dp(this@showLiveCatalog, 64f), -2))
+            }
+        })
+        addView(query); addView(status)
         addView(ScrollView(this@showLiveCatalog).apply { addView(rows) }, LinearLayout.LayoutParams(-1, 0, 1f))
         addView(more)
         post {
@@ -166,6 +273,28 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
                 }
             }
         }
+    }
+    if (kind == "tv" && entry.descriptor.id == "platform.iyouhun") {
+        val header = dialog.findViewById<android.view.ViewGroup>(android.R.id.content)?.findViewWithTag<android.widget.FrameLayout>("sheetHeader")
+        (header?.getChildAt(0) as? android.widget.TextView)?.setPadding(0, 0, ThemeUi.dp(this, 150f), 0)
+        header?.addView(ThemeUi.text(this, t("live.refresh.short"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            gravity = android.view.Gravity.CENTER
+            contentDescription = t("live.refresh")
+            setPadding(ThemeUi.dp(this@showLiveCatalog, 8f), ThemeUi.dp(this@showLiveCatalog, 8f), ThemeUi.dp(this@showLiveCatalog, 8f), ThemeUi.dp(this@showLiveCatalog, 8f))
+            minHeight = ThemeUi.dp(this@showLiveCatalog, 48f)
+            setOnClickListener {
+                lateinit var confirm: android.app.Dialog
+                confirm = ThemeUi.showSheet(this@showLiveCatalog, palette, t("live.refresh"), subtitle = t("live.refresh.confirm"), compactPicker = true) {
+                    addView(ThemeUi.button(this@showLiveCatalog, palette, t("live.refresh"), ThemeUi.ROLE_ACCENT_FILL) {
+                        confirm.dismiss()
+                        if (dialog.isShowing) refreshCatalog()
+                    })
+                }
+                confirm.show()
+            }
+        }, android.widget.FrameLayout.LayoutParams(-2, -2, android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL).apply {
+            rightMargin = ThemeUi.dp(this@showLiveCatalog, 70f)
+        })
     }
     dialog.show()
 }

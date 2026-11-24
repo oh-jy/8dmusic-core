@@ -236,7 +236,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     val type = if (online) ProviderDefinition.Type.MUSIC else ProviderDefinition.Type.FM
     val entries = try { providerStore.list().filter { it.enabled && it.definition.type == type } }
     catch (e: Exception) { toast("${t("source.read_failed")}: ${errorDetail(e)}"); return }
-    val plugins = try { pluginStore.list().filter { it.enabled && (if (online) "search" else "live") in it.descriptor.capabilities } }
+    val plugins = try { pluginStore.list().filter { it.enabled && it.descriptor.id != "platform.guangbomi" && (if (online) "search" else "live") in it.descriptor.capabilities } }
         catch (e: Exception) { toast("${t("plugin.read_failed")}: ${errorDetail(e)}"); return }
     fun compactButton(label: String, selected: Boolean = false, action: () -> Unit) =
         ThemeUi.button(this, palette, label, ThemeUi.ROLE_TEXT, 30f).apply {

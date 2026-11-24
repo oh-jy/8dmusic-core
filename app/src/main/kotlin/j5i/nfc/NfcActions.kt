@@ -94,13 +94,23 @@ private fun MainActivity.findLocalByName(name: String?): MusicItem? {
     return firstLocalSongByName(songs + musicStore.cached(), name)
 }
 
-internal fun firstLocalSongByName(items: Iterable<MusicItem>, name: String): MusicItem? =
-    items.distinctBy { it.uri }.firstOrNull { sameSongName(it.name, name) }
+internal fun firstLocalSongByName(items: Iterable<MusicItem>, name: String): MusicItem? {
+    val normalized = normalizedSongName(name)
+    if (normalized.isEmpty()) return null
+    val candidates = items.distinctBy { it.uri }
+    return candidates.firstOrNull { sameSongName(it.name, name) }
+        ?: candidates.firstOrNull {
+            val candidate = normalizedSongName(it.name)
+            candidate.isNotEmpty() && (candidate.contains(normalized, ignoreCase = true) ||
+                normalized.contains(candidate, ignoreCase = true))
+        }
+}
 
 private fun sameSongName(first: String, second: String): Boolean =
-    Lyrics.displayTitle(first).trim().replace(Regex("\\s+"), " ").equals(
-        Lyrics.displayTitle(second).trim().replace(Regex("\\s+"), " "), ignoreCase = true
-    )
+    normalizedSongName(first).equals(normalizedSongName(second), ignoreCase = true)
+
+private fun normalizedSongName(name: String): String =
+    Lyrics.displayTitle(name).trim().replace(Regex("\\s+"), " ")
 
 private fun MainActivity.openNfcOnlineSearch(name: String?) {
     if (name.isNullOrBlank()) {
@@ -109,8 +119,13 @@ private fun MainActivity.openNfcOnlineSearch(name: String?) {
     }
     playlistDialog?.dismiss()
     providerSelection = "@aggregate"
-    onlineQuery = name
-    pendingNfcOnlineSearch = name
+    val query = Lyrics.displayTitle(name)
+    if (query.isBlank()) {
+        toast(t("nfc.list.missing"))
+        return
+    }
+    onlineQuery = query
+    pendingNfcOnlineSearch = query
     providerResults = emptyList()
     pluginResults = emptyList()
     showPlaylist(requestedTab = 2)

@@ -3,8 +3,10 @@ package j5i.spatial8d.ui
 import android.graphics.Canvas
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Shader
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.floor
@@ -26,6 +28,42 @@ internal fun projectFlowerPoint(x: Double, height: Double, z: Double, tilt: Doub
 private fun flowerRandom(index: Int, cycle: Long, salt: Int): Double {
     val value = sin(index * 91.73 + cycle * 37.19 + salt * 53.13) * 43758.5453
     return value - floor(value)
+}
+
+internal fun gourdCount(cycle: Long): Int = 3 + (flowerRandom(0, cycle, 67) * 7).toInt()
+
+internal data class GourdPlacement(var x: Double, var y: Double, val size: Double)
+
+internal fun gourdPlacements(time: Double, width: Double, height: Double, activeCount: Int): List<GourdPlacement> {
+    val unit = min(width, height)
+    val placements = (0 until 9).map { index ->
+        val motion = flowerMotion(index + 20, time * 1.15)
+        val size = unit * (.03 + (motion.size - .22) * 1.4)
+        GourdPlacement(motion.x * width * .48, motion.y * height * .48, size)
+    }
+    val limitX = (width / 2 - unit * .04).coerceAtLeast(0.0)
+    val limitY = (height / 2 - unit * .04).coerceAtLeast(0.0)
+    repeat(6) {
+        for (first in 0 until activeCount.coerceIn(0, placements.size)) {
+            for (second in first + 1 until activeCount.coerceIn(0, placements.size)) {
+                val a = placements[first]
+                val b = placements[second]
+                val dx = b.x - a.x
+                val dy = b.y - a.y
+                val distance = kotlin.math.hypot(dx, dy).coerceAtLeast(.000001)
+                val minimum = (a.size + b.size) * .78
+                val push = ((minimum - distance) / 2).coerceAtLeast(0.0)
+                if (push == 0.0) continue
+                val directionX = if (distance < .001) 1.0 else dx / distance
+                val directionY = if (distance < .001) 0.0 else dy / distance
+                a.x = (a.x - directionX * push).coerceIn(-limitX, limitX)
+                a.y = (a.y - directionY * push).coerceIn(-limitY, limitY)
+                b.x = (b.x + directionX * push).coerceIn(-limitX, limitX)
+                b.y = (b.y + directionY * push).coerceIn(-limitY, limitY)
+            }
+        }
+    }
+    return placements
 }
 
 private fun flowerEase(value: Double): Double {
@@ -243,6 +281,55 @@ internal class ProceduralVisuals {
         canvas.translate(width / 2f, height / 2f)
         paint.strokeWidth = density * .8f
         when (mode) {
+            40 -> {
+                val cycle = floor(time / 10.0).toLong()
+                val transition = flowerEase((time / 10.0 - floor(time / 10.0)) * 4)
+                val previousCount = gourdCount(cycle - 1)
+                val currentCount = gourdCount(cycle)
+                val placements = gourdPlacements(time, width.toDouble(), height.toDouble(), maxOf(previousCount, currentCount))
+                for (index in 0 until 9) {
+                    val visibility = (if (index < previousCount) 1.0 - transition else 0.0) +
+                        (if (index < currentCount) transition else 0.0)
+                    if (visibility <= .001) continue
+                    val placement = placements[index]
+                    val size = (placement.size * (1 + energy * .08)).toFloat()
+                    val hue = (flowerRandom(index, 0, 65) * 360 + 35 * sin(time * .06 + index)).toFloat()
+                    canvas.save()
+                    canvas.translate(placement.x.toFloat(), placement.y.toFloat())
+                    canvas.rotate((time * (8 + flowerRandom(index, 0, 66) * 13) * if (index % 2 == 0) 1 else -1).toFloat())
+                    canvas.scale(size, size)
+                    path.rewind()
+                    path.moveTo(0f, -.84f)
+                    path.cubicTo(-.43f, -.84f, -.48f, -.39f, -.24f, -.19f)
+                    path.cubicTo(-.76f, .02f, -.67f, .83f, 0f, .85f)
+                    path.cubicTo(.67f, .83f, .76f, .02f, .24f, -.19f)
+                    path.cubicTo(.48f, -.39f, .43f, -.84f, 0f, -.84f)
+                    path.close()
+                    hsv[0] = (hue + 360f) % 360f
+                    hsv[1] = if (dark) .28f else .38f
+                    hsv[2] = if (dark) 1f else .78f
+                    paint.style = Paint.Style.FILL
+                    val alpha = ((if (dark) 180 else 205) * visibility).toInt()
+                    val base = Color.HSVToColor(alpha, hsv)
+                    paint.shader = LinearGradient(-.5f, -.75f, .55f, .75f,
+                        intArrayOf(Color.argb(alpha, 255, 255, 255), base,
+                            Color.HSVToColor(alpha, hsv.apply { this[1] = .48f; this[2] = if (dark) .78f else .55f })),
+                        null, Shader.TileMode.CLAMP)
+                    paint.color = Color.WHITE
+                    canvas.drawPath(path, paint)
+                    paint.shader = null
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = .025f
+                    paint.color = Color.HSVToColor((210 * visibility).toInt(), hsv.apply { this[1] = .48f; this[2] = if (dark) .95f else .55f })
+                    canvas.drawPath(path, paint)
+                    canvas.drawLine(0f, -.84f, .07f, -1.02f, paint)
+                    paint.color = Color.argb((110 * visibility).toInt(), 255, 255, 255)
+                    paint.strokeWidth = .035f
+                    canvas.drawArc(-.40f, -.70f, .14f, -.22f, 155f, 65f, false, paint)
+                    canvas.drawArc(-.52f, -.07f, .25f, .66f, 145f, 65f, false, paint)
+                    canvas.restore()
+                }
+            }
             38 -> {
                 val shapes = stardustShapes
                 val (epoch, progress) = stardustTimeline.position(time)

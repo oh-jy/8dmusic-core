@@ -162,7 +162,8 @@ internal object ProviderNetwork {
                         }
                     }
                     return JSONObject().put("status", response.code)
-                        .put("body", out.toString(parsed.responseCharset)).toString()
+                        .put("body", out.toString(parsed.responseCharset))
+                        .put("finalUrl", response.request.url.toString()).toString()
                 }
             }
         }

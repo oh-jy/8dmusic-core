@@ -1,5 +1,6 @@
 package j5i.spatial8d.nfc
 
+import j5i.spatial8d.audio.Lyrics
 import java.net.IDN
 import java.net.URI
 import java.net.URLDecoder
@@ -23,7 +24,7 @@ internal object NfcShortcut {
     fun create(target: Target, name: String? = null): String {
         val normalizedName = when (target) {
             is Fm -> name?.trim()?.takeIf { it.isNotEmpty() }
-            else -> name?.trim()?.takeIf { it.isNotEmpty() }
+            else -> name?.let(Lyrics::displayTitle)?.trim()?.takeIf { it.isNotEmpty() }
                 ?: throw IllegalArgumentException("NFC 歌曲缺少名称")
         }
         val base = when (target) {

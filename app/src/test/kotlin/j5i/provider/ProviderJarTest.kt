@@ -43,13 +43,14 @@ class ProviderJarTest {
         assertTrue(descriptor.fileSha256.length == 64)
         val combined = temporary.resolve("combined.jar").toFile()
         val first = """{"version":1,"id":"test.one","name":"One","entryClass":"example.One","domains":["one.example.com"],"capabilities":["search"]}"""
-        val second = """{"version":1,"id":"test.two","name":"Two","entryClass":"example.Two","domains":["two.example.com"],"capabilities":["resolve"]}"""
+        val second = """{"version":1,"id":"test.two","name":"Two","entryClass":"example.Two","domains":["two.example.com"],"capabilities":["live-tv"]}"""
         jar(combined, mapOf("provider.json" to """{"version":1,"providers":[$first,$second]}""", "classes.dex" to "test dex"))
         run("jarsigner", "-keystore", key, "-storepass", "testpass123", combined.absolutePath, "test")
         val descriptors = ProviderJar.inspectAll(combined)
         assertEquals(listOf("test.one", "test.two"), descriptors.map { it.id })
         assertEquals(listOf("one.example.com"), descriptors[0].domains)
         assertEquals(listOf("two.example.com"), descriptors[1].domains)
+        assertEquals(listOf("live-tv"), descriptors[1].capabilities.toList())
         assertEquals(descriptors[0].fileSha256, descriptors[1].fileSha256)
         val modified = temporary.resolve("modified.jar").toFile()
         JarFile(file).use { source -> JarOutputStream(modified.outputStream()).use { output ->

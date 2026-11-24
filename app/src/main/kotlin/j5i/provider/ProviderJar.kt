@@ -16,7 +16,7 @@ internal object ProviderJar {
     // Keep the dot in `*.` so `*.music.126.net` cannot accidentally become
     // the broader (and invalid) `*music.126.net` form.
     private val domain = Regex("(?i)(?=.{2,253}$)(?:\\*\\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}")
-    private val allowedCapabilities = setOf("search", "resolve", "login", "import-login", "referer", "http-audio", "live")
+    private val allowedCapabilities = setOf("search", "resolve", "login", "import-login", "referer", "http-audio", "live", "live-tv")
 
     data class Descriptor(val id: String, val name: String, val entryClass: String,
                           val domains: List<String>, val capabilities: List<String>,
