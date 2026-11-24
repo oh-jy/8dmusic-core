@@ -11,6 +11,12 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun isAutoScannedMusic(duration: Long, folder: String): Boolean {
+    val segments = folder.replace('\\', '/').split('/').map { it.trim().lowercase() }
+    val callRecordingFolders = setOf("call recordings", "call recording", "call_recordings", "call_rec", "callrecord", "通话录音", "電話錄音", "电话录音", "通話錄音")
+    return duration >= 30_000 && segments.none { it in callRecordingFolders }
+}
+
 /** 本机歌曲索引、手动添加歌曲、队列视图与播放列表的持久化入口。 */
 class MusicStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
@@ -38,13 +44,15 @@ class MusicStore(private val context: Context) {
         val result = mutableListOf<MusicItem>()
         context.contentResolver.query(
             collection, projection,
-            "duration > 30000", null,
+            "duration >= 30000", null,
             "${MediaStore.Audio.Media.DISPLAY_NAME} COLLATE NOCASE ASC"
         )?.use { cursor ->
             while (cursor.moveToNext() && result.size < 300) {
                 val duration = cursor.getLong(3)
                 val id = cursor.getLong(0)
+                val folder = cursor.getString(8)?.let { if (android.os.Build.VERSION.SDK_INT >= 29) it.trimEnd('/') else File(it).parent.orEmpty() }.orEmpty()
                 if ((cursor.getString(1) ?: "").startsWith("BV")) continue
+                if (!isAutoScannedMusic(duration, folder)) continue
                 result.add(MusicItem(
                     id, cursor.getString(1) ?: "track_$id",
                     ContentUris.withAppendedId(collection, id).toString(),
@@ -53,7 +61,7 @@ class MusicStore(private val context: Context) {
                     cursor.getString(5)?.takeUnless { it.isBlank() || it == "<unknown>" } ?: "未知专辑",
                     cursor.getLong(6) * 1000L,
                     cursor.getLong(7) * 1000L,
-                    cursor.getString(8)?.let { if (android.os.Build.VERSION.SDK_INT >= 29) it.trimEnd('/') else File(it).parent.orEmpty() }.orEmpty()
+                    folder
                 ))
             }
         }
@@ -210,7 +218,13 @@ class MusicStore(private val context: Context) {
         }
     }
 
-    fun cached(): List<MusicItem> = jsonSongs(preferences.getString("songs", "[]")).filterNot(::isBiliAudio)
+    fun cached(): List<MusicItem> {
+        val manuallyAdded = loadAdded().map { it.uri }.toSet()
+        return jsonSongs(preferences.getString("songs", "[]")).filter {
+            !isBiliAudio(it) && (it.uri in manuallyAdded || !it.uri.startsWith("content://media/") ||
+                isAutoScannedMusic(it.duration, it.folder))
+        }
+    }
 
     fun saveLibrary(songs: List<MusicItem>) {
         save("songs", JSONArray().apply { songs.forEach { put(songJson(it)) } }.toString())

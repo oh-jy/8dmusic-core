@@ -16,7 +16,7 @@ internal object ProviderJar {
     // Keep the dot in `*.` so `*.music.126.net` cannot accidentally become
     // the broader (and invalid) `*music.126.net` form.
     private val domain = Regex("(?i)(?=.{2,253}$)(?:\\*\\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}")
-    private val allowedCapabilities = setOf("search", "resolve", "login", "import-login", "referer", "http-audio")
+    private val allowedCapabilities = setOf("search", "resolve", "login", "import-login", "referer", "http-audio", "live")
 
     data class Descriptor(val id: String, val name: String, val entryClass: String,
                           val domains: List<String>, val capabilities: List<String>,
@@ -91,7 +91,7 @@ internal object ProviderJar {
         val domains = strings("domains", 32).map { it.lowercase() }.also { list ->
             require(list.distinct().size == list.size && list.all(domain::matches)) { "插件域名无效" }
         }
-        val capabilities = strings("capabilities", 6).also { require(it.all(allowedCapabilities::contains)) }
+        val capabilities = strings("capabilities", 7).also { require(it.all(allowedCapabilities::contains)) }
         require("login" !in capabilities || "import-login" in capabilities) { "登录插件必须支持文件导入" }
         Descriptor(id, name, entryClass, domains, capabilities, signer!!, digest)
         }

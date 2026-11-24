@@ -131,8 +131,9 @@ internal fun MainActivity.dismissSource() { fmDialog?.dismiss(); onlineDialog?.d
 
 internal fun MainActivity.playRadio(station: RadioStation) {
         val entry = providerStore.list().firstOrNull { it.enabled && station.id.startsWith(it.definition.id + "/") }
-            ?: run { toast(t("playback.source.missing")); return }
-        radioAllowHttp = entry.definition.usesHttp
+        val plugin = if (entry == null) pluginStore.list().firstOrNull { it.enabled && "live" in it.descriptor.capabilities && station.id.startsWith(it.descriptor.id + "/") } else null
+        if (entry == null && plugin == null) { toast(t("playback.source.missing")); return }
+        radioAllowHttp = entry?.definition?.usesHttp ?: true
         if (recordingKind.isNotEmpty()) { toast(t("radio.stop_recording")); return }
         if (isViewReady(this@playRadio::visualizerView)) visualizerView.pcmClock.reset()
         ++loadGeneration
@@ -179,7 +180,7 @@ internal fun MainActivity.raceRadioSources(preferred: Int, generation: Int) {
                     if (generation != radioGeneration || selected) return@post
                     selected = true
                     radioSourceIndex = index
-                    preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
+                    if (android.net.Uri.parse(source.url).encodedQuery == null) preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
                     radioProbes.forEach { it.stop() }
                     radioProbes = emptyList()
                     radioSources = listOf(source) + radioSources.filterIndexed { i, _ -> i != index }
@@ -222,7 +223,7 @@ internal fun MainActivity.tryRadioSource(index: Int, generation: Int = radioGene
         service?.radio?.denoise = transform.denoiseLevel
         service?.radio?.semi = transform.semi.roundToInt()
         service?.radio?.onReady = { main.post {
-            if (generation == radioGeneration) preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
+            if (generation == radioGeneration && android.net.Uri.parse(source.url).encodedQuery == null) preferences.edit().putString("radioSource:$currentStationId", source.url).apply()
             playbackStatus = t("radio.playing.source").format(name, sourceLabel)
             refreshPlayback()
         } }

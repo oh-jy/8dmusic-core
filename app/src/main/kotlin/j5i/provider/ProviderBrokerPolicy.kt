@@ -6,7 +6,7 @@ import java.net.URI
 /** Validate plugin request and redirect addresses against declared domains. */
 internal object ProviderBrokerPolicy {
     private val allowedHeaders = setOf("accept", "content-type", "referer", "origin", "user-agent", "cookie")
-    data class Request(val method: String, val url: String, val headers: Map<String, String>, val body: String)
+    data class Request(val method: String, val url: String, val headers: Map<String, String>, val body: String, val responseCharset: String)
 
     fun validateUrl(raw: String, domains: Collection<String>, allowHttp: Boolean = true): URI {
         require(raw.length in 1..4096) { "插件地址长度无效" }
@@ -27,7 +27,7 @@ internal object ProviderBrokerPolicy {
     fun parse(json: String, domains: Collection<String>): Request {
         require(json.toByteArray(Charsets.UTF_8).size <= 32 * 1024) { "插件请求过大" }
         val root = JSONObject(json)
-        require(root.keys().asSequence().all { it in setOf("method", "url", "headers", "body") })
+        require(root.keys().asSequence().all { it in setOf("method", "url", "headers", "body", "responseCharset") })
         val method = root.getString("method").uppercase()
         require(method in setOf("GET", "POST")) { "插件请求方法不支持" }
         val url = root.getString("url").also { validateUrl(it, domains) }
@@ -44,6 +44,8 @@ internal object ProviderBrokerPolicy {
         }
         val body = root.optString("body", "")
         require(body.toByteArray(Charsets.UTF_8).size <= 16 * 1024 && (method != "GET" || body.isEmpty()))
-        return Request(method, url, headers, body)
+        val responseCharset = root.optString("responseCharset", "UTF-8").uppercase()
+        require(responseCharset in setOf("UTF-8", "GB18030")) { "不支持的响应字符集" }
+        return Request(method, url, headers, body, responseCharset)
     }
 }

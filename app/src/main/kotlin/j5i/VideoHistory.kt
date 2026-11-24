@@ -3,7 +3,7 @@ package j5i.spatial8d
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class VideoHistoryEntry(val uri: String, val title: String)
+internal data class VideoHistoryEntry(val uri: String, val title: String, val artist: String = "")
 
 internal fun readVideoHistory(json: String): List<VideoHistoryEntry> =
     runCatching {
@@ -12,15 +12,16 @@ internal fun readVideoHistory(json: String): List<VideoHistoryEntry> =
             val entry = array.optJSONObject(index) ?: return@mapNotNull null
             val uri = entry.optString("uri")
             val title = entry.optString("title")
-            if (uri.isBlank() || title.isBlank()) null else VideoHistoryEntry(uri, title)
+            if (uri.isBlank() || title.isBlank()) null else VideoHistoryEntry(uri, title, entry.optString("artist"))
         }.distinctBy { it.uri }
     }.getOrDefault(emptyList())
 
 internal fun writeVideoHistory(entries: List<VideoHistoryEntry>): String = JSONArray().apply {
-    entries.forEach { entry -> put(JSONObject().put("uri", entry.uri).put("title", entry.title)) }
+    entries.forEach { entry -> put(JSONObject().put("uri", entry.uri).put("title", entry.title).put("artist", entry.artist)) }
 }.toString()
 
-internal fun recordVideoHistory(entries: List<VideoHistoryEntry>, uri: String, title: String): List<VideoHistoryEntry> {
+internal fun recordVideoHistory(entries: List<VideoHistoryEntry>, uri: String, title: String, artist: String = ""): List<VideoHistoryEntry> {
     val previous = entries.firstOrNull { it.uri == uri }
-    return (listOf(previous ?: VideoHistoryEntry(uri, title)) + entries.filterNot { it.uri == uri }).take(200)
+    val entry = previous?.copy(artist = artist.ifBlank { previous.artist }) ?: VideoHistoryEntry(uri, title, artist)
+    return (listOf(entry) + entries.filterNot { it.uri == uri }).take(200)
 }

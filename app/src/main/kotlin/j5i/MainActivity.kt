@@ -35,7 +35,7 @@ import j5i.spatial8d.audio.OfflineAsr
 import j5i.spatial8d.ui.LyricsView
 import j5i.spatial8d.ui.VisualizerView
 import com.j5i.spatial8d.MicWavRecorder
-import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
+import j5i.spatial8d.core.SPACE_PRESETS
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
 import j5i.spatial8d.data.MusicItem
@@ -50,6 +50,11 @@ import j5i.spatial8d.ui.AppLanguage
 import j5i.spatial8d.ui.DrivingView
 import j5i.spatial8d.ui.PlaylistMetadataHost
 import j5i.spatial8d.ui.PlaylistLibraryHost
+import j5i.spatial8d.nfc.handleNfcShortcutIntent
+import j5i.spatial8d.nfc.isNfcShortcutIntent
+import j5i.spatial8d.nfc.cancelNfcWrite
+import j5i.spatial8d.nfc.disableNfcForegroundDispatch
+import j5i.spatial8d.nfc.enableNfcForegroundDispatch
 import kotlin.reflect.KProperty0
 
 /** 页面只持有一份空间参数和队列状态；实际解码、DSP、播放统一交给 SpatialPlayer。 */
@@ -59,6 +64,13 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var service: PlaybackService? = null
     internal var bound = false
     internal var pendingExternalIntent: Intent? = null
+    internal var pendingNfcShortcutIntent: Intent? = null
+    internal var nfcWriteDialog: Dialog? = null
+    @Volatile internal var pendingNfcWriteUri: String? = null
+    internal var nfcReaderEnabled = false
+    internal val nfcHardwareSupported: Boolean by lazy {
+        packageManager.hasSystemFeature(PackageManager.FEATURE_NFC)
+    }
     internal var externalVideoDialog: Dialog? = null
     internal var externalVideo: android.widget.VideoView? = null
     internal var externalVideoPreviousOrientation: Int? = null
@@ -69,7 +81,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     /** 合集/在线结果的暂存队列，独立于本地库，切列表、重建页面后仍可上下首切换。 */
     internal var onlineQueue = listOf<MusicItem>()
     internal var onlineQueueProvider = ""
-    internal var preset = DEFAULT_SPACE_PRESET
+    internal var preset = SPACE_PRESETS[0]
     internal var customPresets = mutableListOf<SpacePreset>()
     internal var loading = false
     internal var loadGeneration = 0
@@ -179,6 +191,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var curvePanel = 1
     internal var onlinePage = 1
     internal var onlineQuery = ""
+    internal var pendingNfcOnlineSearch: String? = null
     internal var onlineAutoSource: String? = null
     internal var providerSelection: String? = null
     internal var providerResults = listOf<Pair<String, j5i.spatial8d.provider.ProviderSearch.Track>>()
@@ -277,8 +290,14 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             service?.radio?.onEnd = { main.post { playbackStatus = t("main.radio.disconnected"); refreshPlayback() } }
             service?.radio?.onError = { main.post { playbackStatus = it; refreshPlayback() } }
             bound = true
-            if (pendingExternalIntent == null) adoptOrRestorePlayback()
-            else pendingExternalIntent?.let { pendingExternalIntent = null; openExternalMedia(it) }
+            when {
+                pendingNfcShortcutIntent != null -> pendingNfcShortcutIntent?.let {
+                    pendingNfcShortcutIntent = null
+                    handleNfcShortcutIntent(it)
+                }
+                pendingExternalIntent == null -> adoptOrRestorePlayback()
+                else -> pendingExternalIntent?.let { pendingExternalIntent = null; openExternalMedia(it) }
+            }
             refreshAll()
         }
 
@@ -371,7 +390,11 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         transform = transform.copy(clarity = preferences.getInt("soundClarity", 50).coerceIn(0, 100))
         palette = ThemeUi.palette(dark)
         buildUi()
-        if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) pendingExternalIntent = intent
+        if (savedInstanceState == null && intent != null && isNfcShortcutIntent(intent)) {
+            pendingNfcShortcutIntent = intent
+        } else if (savedInstanceState == null && intent?.action == Intent.ACTION_VIEW) {
+            pendingExternalIntent = intent
+        }
         visualization.pcmClock = visualizerView.pcmClock
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -409,6 +432,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
 
     override fun onDestroy() {
         externalVideoDialog?.dismiss()
+        nfcWriteDialog?.dismiss()
+        cancelNfcWrite()
         lyricsFullscreenDialog?.dismiss()
         providerLoginDialog?.dismiss()
         providerLoginDialog = null
@@ -527,6 +552,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         externalVideo?.pause()
         // 取消而不是只 return，避免后台保留无意义的 UI 任务。
         pageActive = false
+        disableNfcForegroundDispatch()
         stopUpdateNetworkMonitor()
         service?.appInForeground = false
         // 后台播放时立刻补一条通知，保持服务存活。
@@ -560,6 +586,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
         main.post(ticker)
         scheduleLyricsPrefetch()
         main.postDelayed({ if (!isFinishing && !isDestroyed && pageActive) checkAppUpdateAutomatically() }, 4000)
+        enableNfcForegroundDispatch()
     }
 
     override fun onStop() {
@@ -570,6 +597,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (isNfcShortcutIntent(intent)) {
+            if (bound) handleNfcShortcutIntent(intent) else pendingNfcShortcutIntent = intent
+            return
+        }
         if (intent.action != Intent.ACTION_VIEW) return
         if (bound) openExternalMedia(intent) else pendingExternalIntent = intent
     }

@@ -17,6 +17,14 @@ class ProviderDefinitionTest {
         assertEquals(2, p.stations.size)
     }
 
+    @Test fun acceptsMoreThanOneThousandStations() {
+        val stations = (1..4000).joinToString(",") { """{"id":"s$it","name":"Station $it","url":"https://audio.example/$it"}""" }
+        val input = """{"version":1,"id":"fm","name":"FM","type":"fm","stations":[$stations]}"""
+        assertTrue(input.toByteArray(Charsets.UTF_8).size > 256 * 1024)
+        assertEquals(4000, parse(input).stations.size)
+        assertEquals(4000, ProviderDefinition.parse(ProviderDefinition.parseImport(input.toByteArray()).single()).stations.size)
+    }
+
     @Test fun parsesDeclarativeMusicSearch() {
         val p = parse("""{"version":1,"id":"demo","name":"Demo","type":"music","search":{"url":"https://api.example/search?q={query}&page={page}","results":"data.items","id":"id","title":"title","artist":"artist","audio":"audio.url"}}""")
         assertEquals("data.items", p.search?.resultsPath)
@@ -31,6 +39,14 @@ class ProviderDefinitionTest {
         assertEquals(2, tracks.size)
         assertEquals("Song", tracks[0].title)
         assertEquals(null, tracks[1].audioUrl)
+    }
+
+    @Test fun searchReadsOptionalDurationInMilliseconds() {
+        val p = parse("""{"version":1,"id":"demo","name":"Demo","type":"music","search":{"url":"https://api.example/search?q={query}","results":"items","id":"id","title":"name","artist":"artist","audio":"audio","duration":"durationMs"}}""")
+        val tracks = ProviderSearch.parse(p, org.json.JSONObject("""{"items":[{"id":"1","name":"Song","durationMs":123456},{"id":"2","name":"Unknown","durationMs":-1}]}"""))
+        assertEquals(123456L, tracks[0].duration)
+        assertEquals(0L, tracks[1].duration)
+        assertEquals(123456L, ProviderTrackRef.declarative("demo", tracks[0]).duration)
     }
 
     @Test fun rejectsUnsupportedOrDangerousStructure() {

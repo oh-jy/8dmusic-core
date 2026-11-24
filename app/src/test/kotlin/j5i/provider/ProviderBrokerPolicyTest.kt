@@ -36,6 +36,12 @@ class ProviderBrokerPolicyTest {
         ProviderBrokerPolicy.parse("""{"method":"POST","url":"https://example.com/api","headers":{"Origin":"https://example.com"},"body":"{}"}""", domains)
     }
 
+    @Test fun limitsRequestedResponseCharset() {
+        val domains = listOf("example.com")
+        assertEquals("GB18030", ProviderBrokerPolicy.parse("""{"method":"GET","url":"https://example.com/","responseCharset":"gb18030"}""", domains).responseCharset)
+        assertFails { ProviderBrokerPolicy.parse("""{"method":"GET","url":"https://example.com/","responseCharset":"UTF-16"}""", domains) }
+    }
+
     @Test fun credentialsStayOnInitialHost() {
         kotlin.test.assertTrue(ProviderNetwork.forwardHeader("Cookie", "example.com", "EXAMPLE.com"))
         kotlin.test.assertFalse(ProviderNetwork.forwardHeader("Cookie", "example.com", "other.example.com"))

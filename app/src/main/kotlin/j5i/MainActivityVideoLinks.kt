@@ -42,6 +42,55 @@ private fun MainActivity.saveVideoHistory(entries: List<VideoHistoryEntry>) {
     getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_HISTORY, writeVideoHistory(entries)).apply()
 }
 
+private fun MainActivity.removeVideoHistory(uris: Set<String>) {
+    val favorites = videoFavorites().toSet()
+    val titles = videoTitles()
+    val entries = videoHistory()
+    entries.filter { it.uri in uris && it.uri in favorites && !titles.has(it.uri) }
+        .forEach { titles.put(it.uri, it.title) }
+    getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
+    saveVideoHistory(entries.filterNot { it.uri in uris })
+    val editor = preferences.edit()
+    uris.filterNot { it in favorites }.forEach { editor.remove("video-position:$it") }
+    editor.apply()
+}
+
+private fun MainActivity.manageVideoHistory() {
+    val entries = videoHistory()
+    val selected = mutableSetOf<String>()
+    lateinit var dialog: Dialog
+    dialog = ThemeUi.showSheet(this, palette, t("video.history.manage"), fullHeight = true) {
+        val boxes = mutableListOf<android.widget.CheckBox>()
+        addView(ThemeUi.button(this@manageVideoHistory, palette, t("video.history.select_all")) {
+            boxes.forEach { it.isChecked = true }
+        })
+        entries.forEach { entry ->
+            val box = android.widget.CheckBox(this@manageVideoHistory).apply {
+                text = videoTitle(entry.uri, entry.title)
+                setTextColor(palette.text)
+                buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+                setOnCheckedChangeListener { _, checked ->
+                    if (checked) selected.add(entry.uri) else selected.remove(entry.uri)
+                }
+            }
+            boxes.add(box)
+            addView(box)
+        }
+        addView(ThemeUi.button(this@manageVideoHistory, palette, t("video.history.delete_selected")) {
+            if (selected.isNotEmpty()) android.app.AlertDialog.Builder(this@manageVideoHistory)
+                .setMessage(t("video.history.delete_confirm").format(selected.size))
+                .setNegativeButton(t("cancel"), null)
+                .setPositiveButton(t("delete")) { _, _ ->
+                    removeVideoHistory(selected)
+                    dialog.dismiss()
+                    showVideoLinks()
+                }.show()
+        })
+    }
+    dialog.setOnCancelListener { showVideoLinks() }
+    dialog.show()
+}
+
 internal fun MainActivity.rememberVideo(uri: Uri, intent: Intent) {
     val providerMv = intent.getStringExtra("j5i.providerMv")?.takeIf { it.isNotBlank() }
     val historyUri = providerMv ?: uri.toString()
@@ -55,7 +104,8 @@ internal fun MainActivity.rememberVideo(uri: Uri, intent: Intent) {
         ?: filename?.takeIf { it.isNotBlank() }
         ?: uri.lastPathSegment?.takeIf { it.isNotBlank() }
         ?: uri.host ?: t("video.title")
-    saveVideoHistory(recordVideoHistory(videoHistory(), historyUri, videoTitle(historyUri, title)))
+    val artist = if (providerMv != null) currentItem?.artist.orEmpty() else ""
+    saveVideoHistory(recordVideoHistory(videoHistory(), historyUri, videoTitle(historyUri, title), artist))
 }
 
 private fun MainActivity.renameVideoHistory(entry: VideoHistoryEntry) {
@@ -153,7 +203,8 @@ internal fun MainActivity.showVideoLinks() {
                     }
                 }
             }
-            val title = ThemeUi.text(this@showVideoLinks, videoTitle(entry.uri, entry.title), 13f, palette).apply {
+            val displayTitle = videoTitle(entry.uri, entry.title) + entry.artist.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            val title = ThemeUi.text(this@showVideoLinks, displayTitle, 13f, palette).apply {
                 isSingleLine = true
                 ellipsize = TextUtils.TruncateAt.END
                 setPadding(ThemeUi.dp(this@showVideoLinks, 10f), 0, 0, 0)
@@ -171,8 +222,14 @@ internal fun MainActivity.showVideoLinks() {
             }
             addView(more, LinearLayout.LayoutParams(ThemeUi.dp(this@showVideoLinks, 48f), ThemeUi.dp(this@showVideoLinks, 40f)))
             setOnClickListener {
-                if (favorite) openVideoLink(entry.uri)
-                else openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.uri), "video/*"))
+                val mvItem = if (favorite) null else (onlineQueue + musicStore.onlineCached()).firstOrNull {
+                    it.uri.startsWith("online://plugin/") && Uri.parse(it.uri).getQueryParameter("mv") == entry.uri
+                }
+                when {
+                    mvItem != null -> playProviderMv(mvItem, audioOnly = false)
+                    Uri.parse(entry.uri).scheme in listOf("http", "https") -> openVideoLink(entry.uri)
+                    else -> openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(entry.uri), "video/*"))
+                }
             }
             more.setOnClickListener {
                 val options = LinearLayout(this@showVideoLinks).apply {
@@ -193,13 +250,7 @@ internal fun MainActivity.showVideoLinks() {
                 option(t("video.rename.action")) { sheet.dismiss(); renameVideoHistory(entry.copy(title = videoTitle(entry.uri, entry.title))) }
                 option(t("delete")) {
                     if (favorite) toggleVideoFavorite(entry.uri) else {
-                        val titles = videoTitles()
-                        if (isVideoFavorite(entry.uri) && !titles.has(entry.uri)) {
-                            titles.put(entry.uri, entry.title)
-                            getPreferences(Context.MODE_PRIVATE).edit().putString(VIDEO_TITLES, titles.toString()).apply()
-                        }
-                        saveVideoHistory(videoHistory().filterNot { it.uri == entry.uri })
-                        if (!isVideoFavorite(entry.uri)) preferences.edit().remove("video-position:${entry.uri}").apply()
+                        removeVideoHistory(setOf(entry.uri))
                     }
                     sheet.dismiss(); showVideoLinks()
                 }
@@ -228,10 +279,30 @@ internal fun MainActivity.showVideoLinks() {
             }
         }, FrameLayout.LayoutParams(-2, -1, Gravity.END or Gravity.CENTER_VERTICAL))
         addView(inputRow)
-        addView(ThemeUi.text(this@showVideoLinks, t("video.history"), 15f, palette, bold = true))
+        val liveProviders = runCatching { pluginStore.list().filter { it.enabled && "live" in it.descriptor.capabilities } }.getOrDefault(emptyList())
         val history = videoHistory()
-        if (history.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, t("video.history.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
-        history.forEach { entry -> addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) }) }
+        addView(ThemeUi.row(this@showVideoLinks).apply {
+            addView(ThemeUi.text(this@showVideoLinks, t("video.history"), 15f, palette, bold = true), LinearLayout.LayoutParams(0, -2, 1f))
+            liveProviders.forEach { entry ->
+                addView(ThemeUi.button(this@showVideoLinks, palette, "${entry.descriptor.name} · TV") { showLiveCatalog(entry, "tv") })
+            }
+            if (history.isNotEmpty()) addView(ThemeUi.button(this@showVideoLinks, palette, t("video.history.manage")) {
+                sheet.dismiss(); manageVideoHistory()
+            })
+        })
+        val historyRows = LinearLayout(this@showVideoLinks).apply { orientation = LinearLayout.VERTICAL }
+        var visibleHistoryCount = 5
+        fun renderHistory() {
+            historyRows.removeAllViews()
+            if (history.isEmpty()) historyRows.addView(ThemeUi.text(this@showVideoLinks, t("video.history.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
+            history.take(visibleHistoryCount).forEach { entry -> historyRows.addView(row(entry, false), LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = ThemeUi.dp(this@showVideoLinks, 4f) }) }
+            if (visibleHistoryCount < history.size) historyRows.addView(ThemeUi.button(this@showVideoLinks, palette, t("source.more")) {
+                visibleHistoryCount += 5
+                renderHistory()
+            })
+        }
+        renderHistory()
+        addView(historyRows)
         addView(ThemeUi.text(this@showVideoLinks, t("video.favorites"), 15f, palette, bold = true))
         val favorites = videoFavorites()
         if (favorites.isEmpty()) addView(ThemeUi.text(this@showVideoLinks, t("video.favorites.empty"), 13f, palette, role = ThemeUi.ROLE_SUB))
@@ -456,14 +527,16 @@ private fun parseHtmlVideoTargets(html: String, base: java.net.URI): List<String
     }.distinct()
 }
 
-internal fun MainActivity.openWebVideo(url: String) {
+internal fun MainActivity.openWebVideo(url: String, live: Boolean = false) {
     if (recordingKind.isNotEmpty()) { toast(t("video.stop_recording")); return }
     service?.pause()
     lateinit var dialog: Dialog
     val container = FrameLayout(this)
+    val loading = ThemeUi.text(this, "", 11f, palette, role = ThemeUi.ROLE_SUB)
     val web = WebView(this).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
+        if (live) settings.mediaPlaybackRequiresUserGesture = false
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         webViewClient = object : WebViewClient() {
@@ -477,6 +550,10 @@ internal fun MainActivity.openWebVideo(url: String) {
     var fullView: View? = null
     var fullCallback: WebChromeClient.CustomViewCallback? = null
     val chrome = object : WebChromeClient() {
+        override fun onProgressChanged(view: WebView, newProgress: Int) {
+            loading.text = if (newProgress < 100) t("video.web.loading") else ""
+        }
+
         override fun onShowCustomView(view: View, callback: CustomViewCallback) {
             if (fullView != null) { callback.onCustomViewHidden(); return }
             fullView = view; fullCallback = callback
@@ -494,12 +571,16 @@ internal fun MainActivity.openWebVideo(url: String) {
         orientation = LinearLayout.VERTICAL
         val bar = LinearLayout(this@openWebVideo).apply {
             addView(ThemeUi.button(this@openWebVideo, palette, t("close")) { dialog.dismiss() })
+            addView(ThemeUi.button(this@openWebVideo, palette, "↻") { web.reload() }.apply {
+                contentDescription = t("video.refresh")
+            })
             addView(ThemeUi.button(this@openWebVideo, palette, t(if (isVideoFavorite(url)) "video.unfavorite" else "video.favorite")).apply {
                 setOnClickListener {
                     toggleVideoFavorite(url)
                     text = t(if (isVideoFavorite(url)) "video.unfavorite" else "video.favorite")
                 }
             })
+            addView(loading)
         }
         addView(bar)
         addView(web, LinearLayout.LayoutParams(-1, 0, 1f))

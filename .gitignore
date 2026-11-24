@@ -11,3 +11,4 @@ fix_structure.py
 .codex-tmp/
 .worktrees/
 docs/signing/
+.playwright-cli/

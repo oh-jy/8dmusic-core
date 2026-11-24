@@ -51,7 +51,8 @@ private fun MainActivity.videoIcon(res: Int, description: String, action: () -> 
 
 internal fun MainActivity.openExternalMedia(intent: Intent) {
     val uri = intent.data ?: return
-    val resumeKey = intent.getStringExtra("j5i.providerMv") ?: uri.toString()
+    val live = intent.getBooleanExtra("j5i.live", false)
+    val resumeKey = if (live) "live" else intent.getStringExtra("j5i.providerMv") ?: uri.toString()
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
     externalVideoDialog?.dismiss()
@@ -429,7 +430,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         override fun onStopTrackingTouch(bar: SeekBar) {
             completed = false
             player.seekTo(bar.progress)
-            preferences.edit().putInt("video-position:$resumeKey", bar.progress).apply()
+            if (!live) preferences.edit().putInt("video-position:$resumeKey", bar.progress).apply()
             dragging = false
             showControls()
         }
@@ -458,7 +459,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
                 seek.progress = player.currentPosition.coerceAtLeast(0)
                 time.text = "${videoTime(player.currentPosition)} / ${videoTime(player.duration)}"
             }
-            if (!completed && player.duration > 0 && player.currentPosition > 0) {
+            if (!live && !completed && player.duration > 0 && player.currentPosition > 0) {
                 preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
             }
             centerPlay.setImageResource(if (player.isPlaying) R.drawable.video_pause else R.drawable.video_play)
@@ -470,19 +471,19 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     dialog.setOnDismissListener {
         qualityRequest++
         main.removeCallbacks(update); main.removeCallbacks(hide); cacheThread?.interrupt()
-        if (!completed && player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
+        if (!live && !completed && player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
         player.stopPlayback(); prepared = null
         externalVideoPreviousOrientation?.let { requestedOrientation = it }; externalVideoPreviousOrientation = null
         if (externalVideo === player) externalVideo = null; if (externalVideoDialog === dialog) externalVideoDialog = null
     }
     player.setOnPreparedListener {
         prepared = it
-        rememberVideo(uri, intent)
+        if (!live) rememberVideo(uri, intent)
         it.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)
         requestedOrientation = if (it.videoWidth > it.videoHeight) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
             else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         if (android.os.Build.VERSION.SDK_INT >= 23) it.setPlaybackParams(it.playbackParams.setSpeed(speed))
-        val saved = qualityResume?.first ?: preferences.getInt("video-position:$resumeKey", 0)
+        val saved = if (live) 0 else qualityResume?.first ?: preferences.getInt("video-position:$resumeKey", 0)
         val resume = videoResumePosition(saved, it.duration)
         if (resume > 0) it.seekTo(resume)
         loading.visibility = View.GONE
@@ -491,10 +492,16 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         if (shouldPlay) it.start() else player.pause()
         overlay.post { applyScaleMode() }; showControls()
     }
-    player.setOnCompletionListener { completed = true; preferences.edit().remove("video-position:$resumeKey").apply() }
-    player.setOnErrorListener { _, _, _ -> toast(t("video.play_failed")); dialog.dismiss(); true }
+    player.setOnCompletionListener { completed = true; if (!live) preferences.edit().remove("video-position:$resumeKey").apply() }
+    player.setOnErrorListener { _, _, _ ->
+        dialog.dismiss()
+        val web = intent.getStringExtra("j5i.liveWeb")
+        if (live && web != null && android.net.Uri.parse(web).scheme in listOf("http", "https")) openWebVideo(web, live = true)
+        else toast(t("video.play_failed"))
+        true
+    }
     dialog.show(); main.post(update)
-    val cached = if (isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
+    val cached = if (!live && isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
     fun startVideo(source: android.net.Uri) {
         loading.visibility = View.GONE
         player.setVideoURI(source)
@@ -502,7 +509,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     if (cached != null) {
         PlaybackCacheMetadata.put(this, cached, intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty(), uri.host.orEmpty())
         startVideo(android.net.Uri.fromFile(cached))
-    } else if (isCacheableVideo(uri, mime)) {
+    } else if (!live && isCacheableVideo(uri, mime)) {
         loading.visibility = View.VISIBLE
         val target = videoCacheFile(this, uri.toString())
         if (!PlaybackCacheMetadata.tryBegin(target)) {

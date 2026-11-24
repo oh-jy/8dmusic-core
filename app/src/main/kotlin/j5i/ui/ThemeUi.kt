@@ -463,9 +463,8 @@ object ThemeUi {
             setLayerInset(0, inset, inset, inset, inset)
         }
         // SeekBar clips thumbs at its content bounds; preserve room at both ends.
-        val horizontalInset = size / 2 + inset
+        val horizontalInset = size + inset
         bar.setPadding(horizontalInset, bar.paddingTop, horizontalInset, bar.paddingBottom)
-        bar.thumbOffset = 0
     }
 
     fun configureSpinner(spinner: Spinner, p: Palette) {

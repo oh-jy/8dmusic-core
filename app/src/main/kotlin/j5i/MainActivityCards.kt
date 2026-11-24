@@ -31,6 +31,64 @@ import kotlin.math.pow
 
 internal fun MainActivity.card(block: LinearLayout.() -> Unit): LinearLayout = ThemeUi.card(this, palette, block)
 
+internal fun sliderTickCenter(width: Int, leftPadding: Int, rightPadding: Int, thumbWidth: Int, thumbOffset: Int, fraction: Float): Float =
+    leftPadding - thumbOffset + thumbWidth / 2f +
+        (width - leftPadding - rightPadding - thumbWidth + 2 * thumbOffset) * fraction
+
+internal val speedPresets = listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+internal const val SPEED_SLIDER_MAX = 100
+
+internal fun speedForProgress(progress: Int): Double {
+    val position = progress.coerceIn(0, SPEED_SLIDER_MAX) * (speedPresets.lastIndex.toDouble() / SPEED_SLIDER_MAX)
+    val index = position.toInt().coerceAtMost(speedPresets.lastIndex - 1)
+    val speed = speedPresets[index] + (speedPresets[index + 1] - speedPresets[index]) * (position - index)
+    return (speed * 20).roundToInt() / 20.0
+}
+
+internal fun progressForSpeed(speed: Double): Int {
+    val value = speed.coerceIn(speedPresets.first(), speedPresets.last())
+    val index = speedPresets.indexOfLast { it <= value }.coerceAtMost(speedPresets.lastIndex - 1)
+    val fraction = (value - speedPresets[index]) / (speedPresets[index + 1] - speedPresets[index])
+    return ((index + fraction) * SPEED_SLIDER_MAX / speedPresets.lastIndex).roundToInt()
+}
+
+internal fun MainActivity.sliderTicks(slider: SeekBar, fractions: List<Float>, labels: List<String>, onClick: (Int) -> Unit): Pair<FrameLayout, List<Button>> {
+    val row = FrameLayout(this)
+    val buttons = labels.mapIndexed { index, label ->
+        val cell = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(View(this@sliderTicks).apply {
+                setBackgroundColor(palette.faint)
+                layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@sliderTicks, 2f), ThemeUi.dp(this@sliderTicks, 3f))
+            })
+        }
+        val button = ThemeUi.button(this, palette, label, role = ThemeUi.ROLE_TEXT) { onClick(index) }.apply {
+            textSize = 9f
+            minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
+            setPadding(0, 0, 0, 0)
+        }
+        cell.addView(button)
+        row.addView(cell, FrameLayout.LayoutParams(ThemeUi.dp(this, 36f), ThemeUi.dp(this, 28f), Gravity.LEFT))
+        button
+    }
+    val positionTicks = {
+        buttons.forEachIndexed { index, button ->
+            val cell = button.parent as View
+            val fraction = if (slider.layoutDirection == View.LAYOUT_DIRECTION_RTL) 1f - fractions[index] else fractions[index]
+            val center = sliderTickCenter(slider.width, slider.paddingLeft, slider.paddingRight,
+                slider.thumb.intrinsicWidth, slider.thumbOffset, fraction)
+            cell.translationX = center - cell.width / 2f
+        }
+    }
+    row.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionTicks() }
+    slider.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> positionTicks() }
+    row.layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this, 28f)).apply {
+        topMargin = -ThemeUi.dp(this@sliderTicks, 8f)
+    }
+    return row to buttons
+}
+
 internal fun MainActivity.spaceSettingsCard(): LinearLayout {
         val card = card {
             val header = FrameLayout(this@spaceSettingsCard).apply {
@@ -260,27 +318,10 @@ internal fun MainActivity.transformCard(): LinearLayout {
                     }
                 })
             }
-            transformBody.addView(pitchSlider)
-            val tickRow = ThemeUi.row(this@transformCard)
-            val pitchTickButtons = mutableListOf<Button>()
-            listOf(-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0).forEach { semi ->
-                tickRow.addView(LinearLayout(this@transformCard).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    addView(View(this@transformCard).apply {
-                        setBackgroundColor(palette.faint)
-                        layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@transformCard, 2f), ThemeUi.dp(this@transformCard, 3f))
-                    })
-                    addView(ThemeUi.button(this@transformCard, palette, semiName(semi), role = ThemeUi.ROLE_TEXT) {
-                        transform = transform.copy(semi = semi); applyTransform(); refreshAll()
-                    }.apply {
-                        textSize = 9f
-                        minHeight = 0; minimumHeight = 0
-                        setPadding(0, 0, 0, 0)
-                        pitchTickButtons.add(this)
-                    })
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 28f), 1f)
-                })
+            transformBody.addView(pitchSlider, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@transformCard, 48f)))
+            val pitchValues = listOf(-12.0, -8.0, -4.0, 0.0, 4.0, 8.0, 12.0)
+            val (tickRow, pitchTickButtons) = sliderTicks(pitchSlider, pitchValues.map { ((it + 12.0) / 24.0).toFloat() }, pitchValues.map { semiName(it) }) { index ->
+                transform = transform.copy(semi = pitchValues[index]); applyTransform(); refreshAll()
             }
             transformBody.addView(tickRow)
             pitchTicks = pitchTickButtons
@@ -298,13 +339,13 @@ internal fun MainActivity.transformCard(): LinearLayout {
             speedSlider = SeekBar(this@transformCard).apply {
                 ThemeUi.configureSeekBar(this, palette)
                 contentDescription = t("speed")
-                max = 30
-                progress = ((transform.speed - 0.5) / 0.05).roundToInt()
+                max = SPEED_SLIDER_MAX
+                progress = progressForSpeed(transform.speed)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                     override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                         if (fromUser) {
-                            val speed = 0.5 + progress * 0.05
-                            transform = transform.copy(speed = speed.toDouble())
+                            val speed = speedForProgress(progress)
+                            transform = transform.copy(speed = speed)
                             applyTransform(syncControls = false)
                             speedLabel.text = String.format(Locale.US, "%.2f×", speed)
                         }
@@ -314,29 +355,11 @@ internal fun MainActivity.transformCard(): LinearLayout {
                 })
             }
             speedSlider.tag = "localOnly"
-            transformBody.addView(speedSlider)
-            val chips = ThemeUi.row(this@transformCard)
-            val speedButtons = mutableListOf<Button>()
-            listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEach { value ->
-                chips.addView(LinearLayout(this@transformCard).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    addView(View(this@transformCard).apply {
-                        setBackgroundColor(palette.faint)
-                        layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@transformCard, 2f), ThemeUi.dp(this@transformCard, 3f))
-                    })
-                    addView(ThemeUi.button(this@transformCard, palette, "${formatSpeedShort(value)}×", role = ThemeUi.ROLE_TEXT) {
-                        transform = transform.copy(speed = value)
-                        applyTransform()
-                        refreshAll()
-                    }.apply {
-                        textSize = 9f
-                        minHeight = 0; minimumHeight = 0
-                        setPadding(0, 0, 0, 0)
-                        speedButtons.add(this)
-                    })
-                    layoutParams = LinearLayout.LayoutParams(0, ThemeUi.dp(this@transformCard, 28f), 1f)
-                })
+            transformBody.addView(speedSlider, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@transformCard, 48f)))
+            val (chips, speedButtons) = sliderTicks(speedSlider, speedPresets.indices.map { it.toFloat() / speedPresets.lastIndex }, speedPresets.map { "${formatSpeedShort(it)}×" }) { index ->
+                transform = transform.copy(speed = speedPresets[index])
+                applyTransform()
+                refreshAll()
             }
             speedChipButtons = speedButtons
             chips.tag = "localOnly"

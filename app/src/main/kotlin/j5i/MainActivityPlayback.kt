@@ -9,7 +9,6 @@ import j5i.spatial8d.audio.AudioDecoder
 import j5i.spatial8d.audio.Lyrics
 import com.j5i.spatial8d.HttpMediaDataSource
 import com.j5i.spatial8d.TsAdtsMediaDataSource
-import j5i.spatial8d.core.DEFAULT_SPACE_PRESET
 import j5i.spatial8d.core.SPACE_PRESETS
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
@@ -248,11 +247,9 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
         val online = item.isOnlineAudio()
         val previous = currentItem
         val previousOnline = previous != null && previous.isOnlineAudio()
-        // 规则：FM/在线一律直通；从 FM 或在线切回本地才恢复默认；
-        // 本地切本地（含首次手动选歌）保持用户当前选择，不自动还原。
         val targetPreset = when {
             online -> SPACE_PRESETS[0]
-            isLive || previousOnline -> DEFAULT_SPACE_PRESET
+            isLive || previousOnline -> SPACE_PRESETS[0]
             else -> null
         }
         if (autoplay && targetPreset != null && targetPreset.name != preset.name) {
@@ -433,7 +430,7 @@ internal fun MainActivity.restorePlaybackState() {
                     restored.wet, restored.rt60, restored.phase, restored.direction, restored.width, restored.raw, restored.trajectory, restored.sourceDistance)
                 all.firstOrNull { it.name == name } ?: restored
             } catch (_: Exception) {
-                DEFAULT_SPACE_PRESET
+                SPACE_PRESETS[0]
             }
             reverse = state.getBoolean("reverse")
             transform = TransformParams(state.getDouble("speed"), state.getDouble("semi"),

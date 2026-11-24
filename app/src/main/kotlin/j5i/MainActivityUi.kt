@@ -229,12 +229,12 @@ internal fun MainActivity.refreshAll() {
             }
             pitchSlider.progress = (transform.semi.roundToInt() + 12).coerceIn(0, 24)
                 speedLabel.text = String.format(Locale.US, "%.2f×", transform.speed)
-            speedSlider.progress = ((transform.speed - 0.5) / 0.05).roundToInt()
+            speedSlider.progress = progressForSpeed(transform.speed)
             reverseSwitch.isChecked = reverse
             tapeSwitch.isChecked = transform.tape
         }
         if (speedChipButtons.isNotEmpty()) {
-            listOf(0.5, 0.75, 1.0, 1.25, 1.5, 2.0).forEachIndexed { i, v ->
+            speedPresets.forEachIndexed { i, v ->
                 val btn = speedChipButtons[i]
                 btn.text = "${formatSpeedShort(v)}×"
                 btn.gravity = Gravity.CENTER
@@ -452,7 +452,8 @@ internal fun MainActivity.refreshPlayback() {
             visualizerView.setPosition(lyricPositionMs)
         }
         popupVisualizer?.setPosition(lyricPositionMs)
-        songTitle.text = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
+        val titleText = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
+        if (!android.text.TextUtils.equals(songTitle.text, titleText)) songTitle.text = titleText
         refreshTrackTechnicalInfo()
         position.visibility = View.GONE
         currentTime.text = time(player?.position ?: 0.0)
@@ -483,14 +484,21 @@ internal fun MainActivity.refreshPlayback() {
             else currentLine ?: effectiveStatus
         val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.let { subtitle ->
-            subtitle.text = if (isLive) SpannableString(statusLine).apply {
+            val newText = if (isLive) SpannableString(statusLine).apply {
                 setSpan(ForegroundColorSpan(if (dark) 0xff66d990.toInt() else 0xff168345.toInt()), 0, "● LIVE".length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             } else if (playing && currentLine == null)
                 playbackStatusWithInfo(statusLine, trackTechnicalInfo, album) else statusLine
+            val oldColor = (subtitle.text as? Spanned)?.getSpans(0, subtitle.text.length, ForegroundColorSpan::class.java)?.firstOrNull()?.foregroundColor
+            val newColor = (newText as? Spanned)?.getSpans(0, newText.length, ForegroundColorSpan::class.java)?.firstOrNull()?.foregroundColor
+            if (!android.text.TextUtils.equals(subtitle.text, newText) || oldColor != newColor) subtitle.text = newText
             val showingCaption = isLive && asrTranscript.isNotBlank()
-            subtitle.textSize = if (showingCaption) 12f else 11f
-            subtitle.maxLines = if (showingCaption) 2 else 1
-            subtitle.ellipsize = if (showingCaption) null else android.text.TextUtils.TruncateAt.END
+            val lines = if (showingCaption) 2 else 1
+            if (subtitle.maxLines != lines) {
+                subtitle.textSize = if (showingCaption) 12f else 11f
+                subtitle.isSingleLine = !showingCaption
+                subtitle.maxLines = lines
+                subtitle.ellipsize = if (showingCaption) null else android.text.TextUtils.TruncateAt.MARQUEE
+            }
         }
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
         recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
@@ -908,7 +916,10 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         disc.setOnClickListener { showPlaylist() }
         meta.addView(disc)
         songTitle = ThemeUi.text(this, t("ui.audio.unloaded"), 14f, palette, bold = true).apply {
-            ThemeUi.hideOverflow(this)
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
             accessibilityDelegate = object : View.AccessibilityDelegate() {
                 override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
                     super.onInitializeAccessibilityNodeInfo(host, info)
@@ -937,7 +948,10 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
         val statusTxt = ThemeUi.text(this, status.text.toString(), 11f, palette, role = ThemeUi.ROLE_SUB).apply {
             tag = "playerStatus"
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            ThemeUi.hideOverflow(this)
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.MARQUEE
+            marqueeRepeatLimit = -1
+            isSelected = true
             setOnClickListener { openLyricsTab() }
         }
         meta.addView(LinearLayout(this).apply {

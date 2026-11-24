@@ -17,8 +17,14 @@ internal object ProviderTrackRef {
 
     fun declarative(id: String, track: ProviderSearch.Track) = MusicItem(
         (id + ":" + track.id).hashCode().toLong(), track.title,
-        uri("provider", id, track.id, "", track.audioUrl.orEmpty()), artist = track.artist,
+        uri("provider", id, track.id, "", track.audioUrl.orEmpty()), duration = track.duration, artist = track.artist,
         album = "provider:${if (track.audioUrl?.startsWith("http://", true) == true) "http" else "https"}:$id")
+
+    fun shortcut(id: String, trackId: String, title: String, artist: String) = MusicItem(
+        (id + ":" + trackId).hashCode().toLong(), title,
+        uri("plugin", id, trackId, "", mv = ""), artist = artist,
+        album = "plugin:https:$id"
+    )
 
     fun isOnline(item: MusicItem) = item.uri.startsWith("online://plugin/") || item.uri.startsWith("online://provider/")
 

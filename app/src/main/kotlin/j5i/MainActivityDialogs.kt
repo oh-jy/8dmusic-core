@@ -20,6 +20,7 @@ import j5i.spatial8d.core.PARAM_INFO
 import j5i.spatial8d.ui.ThemeUi
 import j5i.spatial8d.ui.AppLanguage
 import j5i.spatial8d.ui.DrivingView
+import j5i.spatial8d.nfc.showNfcWriteSheet
 
 internal fun MainActivity.showSettingsSheet() {
         lateinit var dialog: Dialog
@@ -30,7 +31,7 @@ internal fun MainActivity.showSettingsSheet() {
                 layoutParams = LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showSettingsSheet, 52f)).apply {
                     topMargin = ThemeUi.dp(this@showSettingsSheet, 6f)
                 }
-                addView(ThemeUi.text(this@showSettingsSheet, icon, 17f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+                addView(ThemeUi.text(this@showSettingsSheet, icon, if (icon == "NFC") 10f else 17f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                     gravity = Gravity.CENTER
                     layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@showSettingsSheet, 40f), -1)
                 })
@@ -60,6 +61,9 @@ internal fun MainActivity.showSettingsSheet() {
             })
             addView(settingRow("⚒", t("tools"), "") {
                 dialog.dismiss(); showToolsSheet()
+            })
+            if (nfcHardwareSupported) addView(settingRow("NFC", t("nfc.write.title"), "") {
+                dialog.dismiss(); showNfcWriteSheet()
             })
             addView(settingRow("◫", t("cache.title"), "") {
                 dialog.dismiss(); showPlaybackCacheManager()

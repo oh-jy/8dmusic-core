@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Typeface
-import android.graphics.drawable.InsetDrawable
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Color
 import android.icu.text.BreakIterator
 import android.text.Spannable
 import android.text.style.ForegroundColorSpan
@@ -22,11 +24,17 @@ import android.widget.TextView
 import androidx.core.graphics.ColorUtils
 import j5i.spatial8d.audio.LyricsResult
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.cos
+import kotlin.math.sin
 
 internal fun lyricLineProgress(startMs: Long, endMs: Long?, positionMs: Long): Float? {
     if (endMs == null || endMs <= startMs) return null
     return ((positionMs - startMs).toDouble() / (endMs - startMs)).coerceIn(0.0, 1.0).toFloat()
 }
+
+internal fun lyricRipplePhase(progress: Float, count: Int): Float =
+    if (count <= 0) 0f else (progress.coerceIn(0f, 0.999999f) * count).let { it - floor(it) }
 
 /**
  * 可嵌入空间曲线同尺寸面板的歌词视图。进度单位是毫秒，主线程周期性调用 setPosition。
@@ -57,6 +65,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     private val content = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
+        clipChildren = false
     }
     private fun t(key: String) = AppLanguage.text(context, key)
     private val rows = mutableListOf<TextView>()
@@ -129,6 +138,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     }.apply {
         isFillViewport = true
         isVerticalScrollBarEnabled = false
+        clipChildren = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         clipToPadding = false
         addView(content, ViewGroup.LayoutParams(-1, -2))
@@ -137,7 +147,8 @@ class LyricsView(context: Context) : FrameLayout(context) {
         textSize = 13f
         typeface = Typeface.DEFAULT_BOLD
         gravity = Gravity.CENTER
-        setPadding(dp(12f), 0, dp(12f), 0)
+        setPadding(dp(16f), 0, dp(16f), 0)
+        minWidth = dp(80f)
         visibility = GONE
         setOnClickListener {
             lyrics?.lines?.getOrNull(previewIndex)?.timeMs?.let { target ->
@@ -178,7 +189,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
             value == null -> message(t("no.lyrics"))
             value.instrumental -> message(t("instrumental"), allowCorrection = true)
             value.synchronized -> value.lines.forEach { line ->
-                val row = TextView(context).apply {
+                val row = RippleLyricText(context).apply {
                     text = line.text
                     textSize = if (fullScreen) 22f else 15f
                     gravity = Gravity.CENTER
@@ -347,9 +358,12 @@ class LyricsView(context: Context) : FrameLayout(context) {
     private fun applyColors() {
         val p = palette
         setBackgroundColor(p.surface)
-        timeLabel.setTextColor(p.darkInk)
-        timeLabel.background = InsetDrawable(ThemeUi.bgDrawable(context, p.accent, 12f), 0, dp(8f), 0, dp(8f))
+        timeLabel.background = null
+        timeLabel.setPadding(dp(16f), 0, dp(16f), 0)
+        timeLabel.setTextColor(p.accent)
+        timeLabel.setShadowLayer(dp(3f).toFloat(), 0f, 0f, p.surface)
         rows.forEachIndexed { index, row ->
+            (row as? RippleLyricText)?.clearRipple()
             val current = index == activeIndex
             val selected = browsing && index == previewIndex
             val played = index < activeIndex
@@ -390,6 +404,8 @@ class LyricsView(context: Context) : FrameLayout(context) {
             end = iterator.next()
         }
         val center = progress * ranges.size
+        val focused = floor(center).toInt().coerceIn(0, ranges.lastIndex)
+        (row as? RippleLyricText)?.showRipple(ranges, focused, lyricRipplePhase(progress, ranges.size), palette.accent)
         ranges.forEachIndexed { index, (from, to) ->
             val distance = abs(index + 0.5f - center)
             val amount = (1f - distance / 1.5f).coerceIn(0f, 1f)
@@ -421,5 +437,59 @@ class LyricsView(context: Context) : FrameLayout(context) {
 private class LyricGlowSpan(private val color: Int, private val radius: Float) : CharacterStyle() {
     override fun updateDrawState(paint: TextPaint) {
         paint.setShadowLayer(radius.coerceAtLeast(0.01f), 0f, 0f, color)
+    }
+}
+
+private class RippleLyricText(context: Context) : TextView(context) {
+    private val ripplePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+    private var ranges: List<Pair<Int, Int>> = emptyList()
+    private var focused = -1
+    private var ripplePhase = 0f
+    private var rippleColor = Color.TRANSPARENT
+
+    fun showRipple(ranges: List<Pair<Int, Int>>, focused: Int, phase: Float, color: Int) {
+        this.ranges = ranges
+        this.focused = focused
+        ripplePhase = phase
+        rippleColor = color
+        invalidate()
+    }
+
+    fun clearRipple() {
+        focused = -1
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val textLayout = layout
+        if (focused >= 0 && textLayout != null) {
+            for (character in (focused - 1).coerceAtLeast(0)..focused) {
+                val (start, end) = ranges.getOrNull(character) ?: continue
+                if (end > text.length) continue
+                val line = textLayout.getLineForOffset(start)
+                if (line >= maxLines || textLayout.getLineForOffset((end - 1).coerceAtLeast(start)) != line) continue
+                val x = compoundPaddingLeft + (textLayout.getPrimaryHorizontal(start) + textLayout.getPrimaryHorizontal(end)) / 2f
+                val y = extendedPaddingTop + (textLayout.getLineTop(line) + textLayout.getLineBottom(line)) / 2f
+                val density = resources.displayMetrics.density
+                val age = ((focused - character + ripplePhase) / 1.5f).coerceIn(0f, 1f)
+                val radius = (4f + 16f * age) * density
+                ripplePaint.color = rippleColor
+                ripplePaint.style = Paint.Style.STROKE
+                ripplePaint.strokeWidth = (1.5f - age * 0.6f) * density
+                ripplePaint.alpha = ((1f - age) * 135).toInt()
+                canvas.drawCircle(x, y, radius * 0.75f, ripplePaint)
+                ripplePaint.style = Paint.Style.FILL
+                repeat(12) { index ->
+                    val seed = (character + 1) * 31 + index * 71
+                    val angle = seed * 2.3999632297
+                    val distance = radius * (0.45f + (seed % 11) / 12f)
+                    val size = (1f + (seed % 7) * 0.32f) * (1f - age) * density
+                    ripplePaint.alpha = ((1f - age) * (140 + seed % 100)).toInt().coerceIn(0, 255)
+                    canvas.drawCircle(x + cos(angle).toFloat() * distance,
+                        y + sin(angle).toFloat() * distance, size, ripplePaint)
+                }
+            }
+        }
+        super.onDraw(canvas)
     }
 }

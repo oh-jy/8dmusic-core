@@ -201,7 +201,7 @@ class PlaybackService : Service() {
         transitioning = false
         val previous = currentItem
         if (autoplay && previous != null && previous.isOnlineAudio() != item.isOnlineAudio()) {
-            controlsPreset = if (item.isOnlineAudio()) j5i.spatial8d.core.SPACE_PRESETS[0] else j5i.spatial8d.core.DEFAULT_SPACE_PRESET
+            controlsPreset = j5i.spatial8d.core.SPACE_PRESETS[0]
         }
         this.queue = queue.ifEmpty { listOf(item) }
         currentItem = item

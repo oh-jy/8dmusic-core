@@ -15,18 +15,19 @@ internal data class ProviderDefinition(
 ) {
     enum class Type { MUSIC, FM }
     data class Search(val url: String, val resultsPath: String, val idPath: String,
-                      val titlePath: String, val artistPath: String, val audioPath: String)
+                      val titlePath: String, val artistPath: String, val audioPath: String, val durationPath: String? = null)
     data class Station(val id: String, val name: String, val url: String, val alternateUrls: List<String> = emptyList(),
                        val region: String = "", val city: String = "", val category: String = "",
                        val level: String = "", val note: String = "")
 
     companion object {
-        const val MAX_BYTES = 256 * 1024
+        const val MAX_BYTES = 2 * 1024 * 1024
+        const val MAX_STATIONS = 10000
         private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
         private val path = Regex("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")
 
         fun parse(bytes: ByteArray): ProviderDefinition {
-            require(bytes.size in 1..MAX_BYTES) { "配置文件为空或超过 256 KB" }
+            require(bytes.size in 1..MAX_BYTES) { "配置文件为空或超过 2 MB" }
             val text = bytes.toString(Charsets.UTF_8)
             val root = JSONObject(text)
             requireKeys(root, setOf("version", "id", "name", "type", "search", "stations"))
@@ -59,14 +60,15 @@ internal data class ProviderDefinition(
             val search = if (type == Type.MUSIC) {
                 require(!root.has("stations")) { "歌曲来源不能包含电台" }
                 val obj = root.getJSONObject("search")
-                requireKeys(obj, setOf("url", "results", "id", "title", "artist", "audio"))
+                requireKeys(obj, setOf("url", "results", "id", "title", "artist", "audio", "duration"))
                 Search(url(obj.getString("url"), true), field(obj, "results"), field(obj, "id"),
-                    field(obj, "title"), field(obj, "artist"), field(obj, "audio"))
+                    field(obj, "title"), field(obj, "artist"), field(obj, "audio"),
+                    if (obj.has("duration")) field(obj, "duration") else null)
             } else null
             val stations = if (type == Type.FM) {
                 require(!root.has("search")) { "FM 来源不能包含歌曲搜索" }
                 val list = root.getJSONArray("stations")
-                require(list.length() in 1..1000) { "电台数量无效" }
+                require(list.length() in 1..MAX_STATIONS) { "电台数量无效" }
                 (0 until list.length()).map { index ->
                     val obj = list.getJSONObject(index)
                     requireKeys(obj, setOf("id", "name", "url", "alternateUrls", "region", "city", "category", "level", "note"))
@@ -88,7 +90,7 @@ internal data class ProviderDefinition(
         }
 
         fun parseImport(bytes: ByteArray): List<ByteArray> {
-            require(bytes.size in 1..MAX_BYTES) { "配置文件为空或超过 256 KB" }
+            require(bytes.size in 1..MAX_BYTES) { "配置文件为空或超过 2 MB" }
             val root = JSONObject(bytes.toString(Charsets.UTF_8))
             val items = if (root.has("providers")) {
                 requireKeys(root, setOf("version", "providers"))

@@ -236,8 +236,8 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     val type = if (online) ProviderDefinition.Type.MUSIC else ProviderDefinition.Type.FM
     val entries = try { providerStore.list().filter { it.enabled && it.definition.type == type } }
     catch (e: Exception) { toast("${t("source.read_failed")}: ${errorDetail(e)}"); return }
-    val plugins = if (online) try { pluginStore.list().filter { it.enabled && "search" in it.descriptor.capabilities } }
-        catch (e: Exception) { toast("${t("plugin.read_failed")}: ${errorDetail(e)}"); return } else emptyList()
+    val plugins = try { pluginStore.list().filter { it.enabled && (if (online) "search" else "live") in it.descriptor.capabilities } }
+        catch (e: Exception) { toast("${t("plugin.read_failed")}: ${errorDetail(e)}"); return }
     fun compactButton(label: String, selected: Boolean = false, action: () -> Unit) =
         ThemeUi.button(this, palette, label, ThemeUi.ROLE_TEXT, 30f).apply {
             setTextColor(if (selected) palette.accent else palette.sub)
@@ -251,6 +251,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         gravity = android.view.Gravity.CENTER_VERTICAL
         addView(ThemeUi.text(this@populateSourceSheet, t(if (online) "source.music.title" else "source.radio.title"), 12f, palette, role = ThemeUi.ROLE_SUB),
             LinearLayout.LayoutParams(0, -2, 1f))
+        if (!online) plugins.forEach { entry ->
+            addView(compactButton(entry.descriptor.name) { showLiveCatalog(entry, "fm") })
+        }
         addView(compactButton(t("source.manage")) { showProviderManager() })
     }
     body.addView(sourceHeader)
@@ -279,6 +282,7 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         val pinnedArray = runCatching { JSONArray(preferences.getString("pinnedRadioStations", "[]")) }.getOrDefault(JSONArray())
         val pinnedStations = (0 until pinnedArray.length()).mapNotNull { pinnedArray.optString(it).takeIf(String::isNotEmpty) }.toMutableList()
         var activeStation: android.view.View? = null
+        var visibleStationCount = 50
         fun filterRow(label: String, values: List<String>, selected: String, choose: (String) -> Unit) {
             val line = ThemeUi.row(this).apply {
                 layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
@@ -327,7 +331,8 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 (text.isEmpty() || "${it.name} ${it.region} ${it.city} ${it.type} ${it.note}".contains(text, true)) }
             val unfiltered = sourceRegion == "全部" && sourceCity == "全部" && sourceType == "全部" && text.isEmpty()
             val byId = filtered.associateBy { it.id }
-            orderedRadioStationIds(filtered.map { it.id }, pinnedStations, unfiltered).mapNotNull(byId::get).forEach { station ->
+            val ordered = orderedRadioStationIds(filtered.map { it.id }, pinnedStations, unfiltered).mapNotNull(byId::get)
+            ordered.take(visibleStationCount).forEach { station ->
                 rows.addView(ThemeUi.row(this).apply {
                     val active = isLive && currentStationId == station.id
                     if (active) activeStation = this
@@ -367,11 +372,15 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                     setOnClickListener { playRadio(station) }
                 })
             }
+            if (visibleStationCount < ordered.size) rows.addView(ThemeUi.button(this, palette, t("source.more")) {
+                visibleStationCount += 50
+                renderStations()
+            })
         }
         query.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-            override fun afterTextChanged(s: android.text.Editable?) { renderStations() }
+            override fun afterTextChanged(s: android.text.Editable?) { visibleStationCount = 50; renderStations() }
         })
         renderFilters()
         body.addView(filters)
@@ -447,6 +456,16 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     query.setOnEditorActionListener { _, action, _ ->
         if (action == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { runSearch(); true } else false
     }
+    if (pendingNfcOnlineSearch == onlineQuery && onlineQuery.isNotBlank()) {
+        val request = providerRequest
+        body.post {
+            if (!isDestroyed && request == providerRequest && body.tag == "online" &&
+                sourceSheetBody === body && providerSelection == selected.first && pendingNfcOnlineSearch == onlineQuery) {
+                pendingNfcOnlineSearch = null
+                runSearch()
+            }
+        }
+    }
     if (onlineQuery.isBlank() && providerResults.isEmpty() && pluginResults.isEmpty() && onlineAutoSource != selected.first) {
         onlineAutoSource = selected.first
         val request = providerRequest
@@ -481,7 +500,8 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                 val label = if (badge.isEmpty()) title else "$badge $title"
                 addView(ThemeUi.text(this@populateSourceSheet, (if (active) "▶ " else "") + label,
                     13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
-                addView(ThemeUi.text(this@populateSourceSheet, "$artist · ${sources.firstOrNull { it.first == sourceId }?.second ?: sourceId}", 11f, palette, role = ThemeUi.ROLE_SUB))
+                val duration = if (item.duration > 0) " · ${item.duration / 60000}:${"%02d".format(item.duration / 1000 % 60)}" else ""
+                addView(ThemeUi.text(this@populateSourceSheet, "$artist · ${sources.firstOrNull { it.first == sourceId }?.second ?: sourceId}$duration", 11f, palette, role = ThemeUi.ROLE_SUB))
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 contentDescription = "$title, ${t("playlist.more")}"

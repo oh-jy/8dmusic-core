@@ -162,7 +162,7 @@ internal object ProviderNetwork {
                         }
                     }
                     return JSONObject().put("status", response.code)
-                        .put("body", out.toString(Charsets.UTF_8.name())).toString()
+                        .put("body", out.toString(parsed.responseCharset)).toString()
                 }
             }
         }
