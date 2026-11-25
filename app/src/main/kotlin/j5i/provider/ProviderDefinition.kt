@@ -2,6 +2,7 @@ package j5i.spatial8d.provider
 
 import org.json.JSONObject
 import java.net.URI
+import java.util.Base64
 
 /** Declarative data only. Parsing this definition never executes a request. */
 internal data class ProviderDefinition(
@@ -22,6 +23,7 @@ internal data class ProviderDefinition(
 
     companion object {
         const val MAX_BYTES = 2 * 1024 * 1024
+        const val MAX_ENCODED_BYTES = MAX_BYTES * 2
         const val MAX_STATIONS = 10000
         private val identifier = Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
         private val path = Regex("[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*")
@@ -90,15 +92,19 @@ internal data class ProviderDefinition(
         }
 
         fun parseImport(bytes: ByteArray): List<ByteArray> {
-            require(bytes.size in 1..MAX_BYTES) { "配置文件为空或超过 2 MB" }
-            val root = JSONObject(bytes.toString(Charsets.UTF_8))
+            require(bytes.size in 1..MAX_ENCODED_BYTES) { "配置文件为空或过大" }
+            val text = bytes.toString(Charsets.UTF_8).trim()
+            val decoded = if (text.startsWith("{")) bytes else
+                Base64.getDecoder().decode(text.replace(Regex("[\\t\\n\\r ]"), ""))
+            require(decoded.size in 1..MAX_BYTES) { "配置文件为空或超过 2 MB" }
+            val root = JSONObject(decoded.toString(Charsets.UTF_8))
             val items = if (root.has("providers")) {
                 requireKeys(root, setOf("version", "providers"))
                 require(root.optInt("version", -1) == 1) { "不支持的来源包版本" }
                 val providers = root.getJSONArray("providers")
                 require(providers.length() in 1..100) { "来源数量无效" }
                 (0 until providers.length()).map { providers.getJSONObject(it).toString().toByteArray(Charsets.UTF_8) }
-            } else listOf(bytes)
+            } else listOf(decoded)
             val definitions = items.map(::parse)
             require(definitions.map { it.id }.distinct().size == definitions.size) { "来源 ID 重复" }
             return items

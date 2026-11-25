@@ -158,16 +158,12 @@ internal fun MainActivity.importProviderFile(uri: Uri) {
 
 internal fun MainActivity.importProviderQr(contents: String) {
     val text = contents.trim()
-    if (text.startsWith("{")) {
+    if (!text.startsWith("https://", ignoreCase = true)) {
         previewProvider(text.toByteArray(Charsets.UTF_8))
         return
     }
-    if (!text.startsWith("https://", ignoreCase = true)) {
-        toast(t("source.qr.invalid"))
-        return
-    }
     Thread {
-        val result = runCatching { ProviderNetwork.get(text, false, ProviderDefinition.MAX_BYTES) }
+        val result = runCatching { ProviderNetwork.get(text, false, ProviderDefinition.MAX_ENCODED_BYTES) }
         runOnUiThread { result.onSuccess(::previewProvider).onFailure { toast("${t("source.read_failed")}: ${errorDetail(it)}") } }
     }.start()
 }

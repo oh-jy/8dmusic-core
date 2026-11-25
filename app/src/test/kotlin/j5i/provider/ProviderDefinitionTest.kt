@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFails
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import java.util.Base64
 
 class ProviderDefinitionTest {
     private fun parse(value: String) = ProviderDefinition.parse(value.toByteArray(Charsets.UTF_8))
@@ -15,6 +16,15 @@ class ProviderDefinitionTest {
         assertEquals(setOf("audio.example", "other.example"), p.domains)
         assertTrue(p.usesHttp)
         assertEquals(2, p.stations.size)
+    }
+
+    @Test fun importsPlainAndBase64Fm() {
+        val json = """{"version":1,"id":"fm.example","name":"电台","type":"fm","stations":[{"id":"a","name":"A","url":"https://audio.example/live"}]}""".toByteArray(Charsets.UTF_8)
+        val encoded = Base64.getMimeEncoder(76, "\r\n".toByteArray()).encode(json)
+        assertEquals(ProviderDefinition.parse(json), ProviderDefinition.parse(ProviderDefinition.parseImport(encoded).single()))
+        assertEquals(ProviderDefinition.parse(json), ProviderDefinition.parse(ProviderDefinition.parseImport(json).single()))
+        assertFails { ProviderDefinition.parseImport("not-base64!".toByteArray()) }
+        assertFails { ProviderDefinition.parseImport(Base64.getEncoder().encode(ByteArray(ProviderDefinition.MAX_BYTES + 1))) }
     }
 
     @Test fun acceptsMoreThanOneThousandStations() {
