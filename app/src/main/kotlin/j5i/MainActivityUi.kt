@@ -65,6 +65,7 @@ internal fun MainActivity.buildUi() {
             setPadding(ThemeUi.dp(this@buildUi, 10f), ThemeUi.dp(this@buildUi, 6f),
                 ThemeUi.dp(this@buildUi, 10f), 0)
             fun openPanel(view: View, title: String) {
+                if (service?.dualTracks != null) { toast(dualText("disabled")); return }
                 (view.parent as? ViewGroup)?.removeView(view)
                 val dialog = ThemeUi.showSheet(this@buildUi, palette, title, fullHeight = true) {
                     addView(view)
@@ -97,7 +98,7 @@ internal fun MainActivity.buildUi() {
                     openPanel(spaceCard, t("space.style"))
                 }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
                 homePresetButton = ThemeUi.button(this@buildUi, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
-                    presetPicker.performClick()
+                    if (service?.dualTracks != null) toast(dualText("disabled")) else presetPicker.performClick()
                 }
                 homePresetButton.maxLines = 1
                 homePresetButton.ellipsize = android.text.TextUtils.TruncateAt.END
@@ -111,7 +112,7 @@ internal fun MainActivity.buildUi() {
                     openPanel(effectsCard, t("transform"))
                 }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
                 homePitchButton = ThemeUi.button(this@buildUi, palette, t("pitch"), ThemeUi.ROLE_HOME_CONTROL) {
-                    pitchPicker.performClick()
+                    if (service?.dualTracks != null) toast(dualText("disabled")) else pitchPicker.performClick()
                 }
                 homePitchButton.maxLines = 1
                 homePitchButton.ellipsize = android.text.TextUtils.TruncateAt.END
@@ -423,8 +424,14 @@ internal fun MainActivity.tint(view: View, color: Int) {
 internal fun MainActivity.refreshPlayback() {
         val player = service?.player
         val radio = service?.radio
+        val dual = service?.dualTracks
+        if (dual != displayedDualTracks) {
+            displayedDualTracks = dual
+            if (dual == null) clearDualLyrics() else loadDualLyrics(dual.first, dual.second)
+        }
+        if (dual != null) refreshDualLyrics()
         // 自动续播的真实曲目以服务为准；即使首块通知丢失，也不能让标题和歌词停留在旧曲。
-        service?.currentTrack?.let { active ->
+        service?.currentTrack?.takeIf { dual == null }?.let { active ->
             if (!isLive && currentUri != active.uri) adoptServiceTrack(active)
         }
         val playing = if (isLive) radio?.isPlaying == true else player?.isPlaying == true
@@ -452,18 +459,27 @@ internal fun MainActivity.refreshPlayback() {
             visualizerView.setPosition(lyricPositionMs)
         }
         popupVisualizer?.setPosition(lyricPositionMs)
-        val titleText = currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
+        val titleText = dual?.let { "${Lyrics.displayTitle(it.first.name)} / ${Lyrics.displayTitle(it.second.name)}" }
+            ?: currentItem?.name?.let(Lyrics::displayTitle) ?: t("no.song")
         if (!android.text.TextUtils.equals(songTitle.text, titleText)) songTitle.text = titleText
         refreshTrackTechnicalInfo()
         position.visibility = View.GONE
-        currentTime.text = time(player?.position ?: 0.0)
-        durationTime.text = time(player?.duration ?: 0.0)
+        val currentTimeText = time(player?.position ?: 0.0)
+        if (currentTime.text != currentTimeText) currentTime.text = currentTimeText
+        val durationTimeText = time(player?.duration ?: 0.0)
+        if (durationTime.text != durationTimeText) durationTime.text = durationTimeText
         val station = if (isLive) importedStations().firstOrNull { it.id == currentStationId } else null
-        modeTextView.text = station?.let {
+        val radioLabel = station?.let {
             Regex("(?:FM|AM)\\s?\\d+(?:\\.\\d+)?", RegexOption.IGNORE_CASE).find("${it.name} ${it.note}")?.value
                 ?: t(if (it.type == "网络台") "ui.radio.network" else "ui.radio.live")
         }.orEmpty()
-        modeTextView.visibility = if (isLive) View.VISIBLE else View.GONE
+        playerBar.findViewWithTag<TextView>("radioMode")?.let {
+            if (it.text != radioLabel) it.text = radioLabel
+            it.visibility = if (isLive) View.VISIBLE else View.GONE
+        }
+        val dualLabel = dualText(if (dual == null) "title" else "active")
+        if (modeTextView.text != dualLabel) modeTextView.text = dualLabel
+        modeTextView.visibility = if (isLive) View.GONE else View.VISIBLE
         playerBar.findViewWithTag<View>("radioSchedule")?.visibility = if (isLive) View.VISIBLE else View.GONE
         val effectiveStatus = when {
             playing -> t("status.playing")
@@ -481,7 +497,19 @@ internal fun MainActivity.refreshPlayback() {
             }?.takeIf { it.isNotBlank() }
         } else null
         val statusLine = if (isLive) "● LIVE · ${asrTranscript.takeIf { it.isNotBlank() } ?: "${t("ui.radio.processing")} · $effectiveStatus"}"
-            else currentLine ?: effectiveStatus
+            else if (dual != null) {
+                val leftDuration = player?.dualLeftDuration?.takeIf { it > 0 } ?: dual.first.duration / 1000.0
+                val rightDuration = player?.dualOtherDuration?.takeIf { it > 0 } ?: dual.second.duration / 1000.0
+                val current = player?.position ?: 0.0
+                val remaining = when {
+                    leftDuration > 0 && leftDuration < rightDuration && current >= leftDuration -> dual.second
+                    rightDuration > 0 && rightDuration < leftDuration && current >= rightDuration -> dual.first
+                    else -> null
+                }
+                val left = remaining ?: if (player?.dualSwapped == true) dual.second else dual.first
+                val right = remaining ?: if (player?.dualSwapped == true) dual.first else dual.second
+                "${dualText("left")} · ${Lyrics.displayTitle(left.name)}  |  ${dualText("right")} · ${Lyrics.displayTitle(right.name)}"
+            } else currentLine ?: effectiveStatus
         val album = currentItem?.album?.takeUnless { it.isBlank() || it in listOf("未知专辑", "<unknown>") }.orEmpty()
         (playerBar.findViewWithTag<TextView>("playerStatus"))?.let { subtitle ->
             val newText = if (isLive) SpannableString(statusLine).apply {
@@ -501,7 +529,8 @@ internal fun MainActivity.refreshPlayback() {
             }
         }
         recordingLabel.visibility = if (recordingKind.isEmpty()) View.GONE else View.VISIBLE
-        recordingLabel.text = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
+        val recordingText = if (recordingKind.isEmpty()) "" else "● REC ${time((SystemClock.elapsedRealtime() - recordingStartedAt) / 1000.0)}"
+        if (recordingLabel.text != recordingText) recordingLabel.text = recordingText
         recordingLabel.setTextColor(0xffff5d5d.toInt())
         if (isViewReady(this@refreshPlayback::liveTimeline)) {
             seek.visibility = if (isLive) View.GONE else View.VISIBLE
@@ -516,7 +545,6 @@ internal fun MainActivity.refreshPlayback() {
         }
         if (isViewReady(this@refreshPlayback::favoriteButton)) {
             favoriteButton.background = null
-            favoriteButton.tag = "favoriteButton"
             favoriteButton.imageTintList = null
             val item = currentItem
             val canFavorite = !isLive && item != null && item.uri.isNotBlank()
@@ -524,7 +552,11 @@ internal fun MainActivity.refreshPlayback() {
             if (canFavorite && item != null) {
                 val favorite = musicStore.isFavorite(item.id)
                 val color = if (favorite) 0xffff5c7a.toInt() else palette.controlText
-                favoriteButton.setImageDrawable(j5i.spatial8d.ui.HeartDrawable(favorite, color))
+                val appearance = favorite to color
+                if (favoriteButton.tag != appearance) {
+                    favoriteButton.setImageDrawable(j5i.spatial8d.ui.HeartDrawable(favorite, color))
+                    favoriteButton.tag = appearance
+                }
                 favoriteButton.contentDescription = t(if (favorite) "ui.favorite.remove" else "ui.favorite.add")
             }
         }
@@ -907,19 +939,25 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
                 }
             }
             setOnClickListener {
-                if (isLive) openCurrentRadioSchedule() else showMetadataEditor()
+                if (isLive) openCurrentRadioSchedule()
+                else if (service?.dualTracks != null) showDualMode()
+                else showMetadataEditor()
             }
         }
         val sub = ThemeUi.row(this)
         position = ThemeUi.text(this, "00:00 / 00:00", 11f, palette, role = ThemeUi.ROLE_SUB)
         position.layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this, 76f), ViewGroup.LayoutParams.WRAP_CONTENT)
-        modeTextView = ThemeUi.text(this, "", 11f, palette, role = ThemeUi.ROLE_SUB)
+        modeTextView = ThemeUi.text(this, "", 11f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            gravity = Gravity.CENTER
+            setOnClickListener { showDualMode() }
+        }
         recordingLabel = ThemeUi.text(this, "", 10f, palette).apply {
             setTextColor(0xffff5d5d.toInt()); visibility = View.GONE
             setPadding(ThemeUi.dp(this@nowPlayingBar, 6f), 0, 0, 0)
         }
         sub.addView(position)
-        sub.addView(modeTextView.apply {
+        sub.addView(ThemeUi.text(this, "", 11f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            tag = "radioMode"
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         })
         sub.addView(recordingLabel)
@@ -967,8 +1005,9 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
                 if (playlistDialog?.isShowing() == true) playlistDialog?.refreshContent()
             }
         }
-        meta.addView(favoriteButton)
-        meta.addView(ThemeUi.text(this, t("source.radio.schedule"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+        val actions = ThemeUi.row(this)
+        actions.addView(favoriteButton)
+        actions.addView(ThemeUi.text(this, t("source.radio.schedule"), 12f, palette, role = ThemeUi.ROLE_ACCENT).apply {
             tag = "radioSchedule"
             gravity = Gravity.CENTER
             contentDescription = t("ui.schedule.open")
@@ -985,7 +1024,13 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
                 else showExportSheet()
             }
         }
-        meta.addView(exportButton)
+        actions.addView(exportButton)
+        meta.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(modeTextView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@nowPlayingBar, 24f)))
+            addView(actions)
+        })
         bar.addView(meta)
         val timeline = ThemeUi.row(this)
         currentTime = ThemeUi.text(this, "00:00", 11f, palette, role = ThemeUi.ROLE_SUB)

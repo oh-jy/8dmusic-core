@@ -7,8 +7,126 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import j5i.spatial8d.audio.Lyrics
 import j5i.spatial8d.audio.LyricsCandidate
+import j5i.spatial8d.audio.LyricsResult
 import j5i.spatial8d.data.MusicItem
 import j5i.spatial8d.ui.ThemeUi
+import java.util.WeakHashMap
+
+private data class DualLyricsState(
+    val leftItem: MusicItem, val rightItem: MusicItem,
+    var left: LyricsResult? = null, var right: LyricsResult? = null,
+    var lastSwap: Boolean? = null, var lastEnded: Int? = null
+)
+private val dualLyricsStates = WeakHashMap<MainActivity, DualLyricsState>()
+
+internal fun MainActivity.dualLyricsSnapshot(): Pair<LyricsResult?, LyricsResult?>? =
+    dualLyricsStates[this]?.let { it.left to it.right }
+
+internal fun MainActivity.loadDualLyrics(left: MusicItem, right: MusicItem) {
+    ++lyricsGeneration
+    val state = DualLyricsState(left, right)
+    dualLyricsStates[this] = state
+    fun load(item: MusicItem, isLeft: Boolean) {
+        lyrics.load(Lyrics.searchTitle(item.name, item.artist), item.artist, item.duration / 1000.0, { result ->
+            if (dualLyricsStates[this] !== state) return@load
+            result.onSuccess { if (isLeft) state.left = it else state.right = it }
+            state.lastSwap = null
+            refreshDualLyrics()
+        }, allowNetwork = providerStore.list().any { it.enabled })
+    }
+    load(left, true)
+    load(right, false)
+    refreshDualLyrics()
+}
+
+internal fun MainActivity.refreshDualLyrics() {
+    val state = dualLyricsStates[this] ?: return
+    if (!isViewReady(this::lyricsView)) return
+    val swapped = service?.player?.dualSwapped ?: false
+    val player = service?.player
+    val position = player?.position ?: 0.0
+    val leftDuration = player?.dualLeftDuration?.takeIf { it > 0 } ?: state.leftItem.duration / 1000.0
+    val rightDuration = player?.dualOtherDuration?.takeIf { it > 0 } ?: state.rightItem.duration / 1000.0
+    val ended = when {
+        leftDuration > 0 && leftDuration < rightDuration && position >= leftDuration -> 1
+        rightDuration > 0 && rightDuration < leftDuration && position >= rightDuration -> 2
+        else -> 0
+    }
+    if (state.lastSwap != swapped || state.lastEnded != ended) {
+        val leftItem = when (ended) { 1 -> state.rightItem; 2 -> state.leftItem; else -> if (swapped) state.rightItem else state.leftItem }
+        val rightItem = when (ended) { 1 -> state.rightItem; 2 -> state.leftItem; else -> if (swapped) state.leftItem else state.rightItem }
+        val leftResult = if (leftItem === state.leftItem) state.left else state.right
+        val rightResult = if (rightItem === state.leftItem) state.left else state.right
+        fun edit(item: MusicItem, result: LyricsResult?) = showLyricsActions(item, result) { updated ->
+            if (dualLyricsStates[this] !== state) return@showLyricsActions
+            if (item.uri == state.leftItem.uri) state.left = updated
+            if (item.uri == state.rightItem.uri) state.right = updated
+            state.lastSwap = null
+            refreshDualLyrics()
+        }
+        lyricsView.setDualLyrics(leftResult, rightResult, { edit(leftItem, leftResult) }, { edit(rightItem, rightResult) })
+        if (isViewReady(this::visualizerView)) visualizerView.setDualLyrics(leftResult, rightResult)
+        popupVisualizer?.setDualLyrics(leftResult, rightResult)
+        state.lastSwap = swapped
+        state.lastEnded = ended
+    }
+    lyricsView.setPosition(((service?.player?.position ?: 0.0) * 1000).toLong())
+}
+
+internal fun MainActivity.clearDualLyrics() {
+    dualLyricsStates.remove(this)
+    if (isViewReady(this::lyricsView)) {
+        lyricsView.clearDualLyrics()
+        lyricsView.onManual = { currentItem?.let { showLyricsActions(it, currentLyrics) } }
+        lyricsView.setLyrics(currentLyrics)
+        pushLyricsToVisualizer()
+    }
+}
+
+internal fun MainActivity.showLyricsActions(item: MusicItem, result: LyricsResult?, onSaved: (LyricsResult) -> Unit = {
+    currentLyrics = it
+    lyricsView.setLyrics(it)
+    pushLyricsToVisualizer()
+}) {
+    pickOption(t("lyrics.correct"), listOf(t("lyrics.search.action"), t("lyrics.edit.content")), -1) { choice ->
+        if (choice == 0) showLyricsCandidates(item, onSaved) else showLyricsEditor(item, result, onSaved)
+    }
+}
+
+internal fun MainActivity.showLyricsEditor(item: MusicItem, result: LyricsResult?, onSaved: (LyricsResult) -> Unit) {
+    val original = result ?: LyricsResult(Lyrics.searchTitle(item.name, item.artist), item.artist, emptyList())
+    val timed = original.lines.isNotEmpty()
+    val initial = if (timed) original.lines.joinToString("\n") { line ->
+        "[%02d:%02d.%03d]%s".format(java.util.Locale.US, line.timeMs / 60000,
+            line.timeMs / 1000 % 60, line.timeMs % 1000, line.text)
+    } else original.plainLyrics
+    lateinit var dialog: Dialog
+    dialog = ThemeUi.showSheet(this, palette, t("lyrics.edit.content"), t("lyrics.edit.hint"), fullHeight = true) {
+        val input = ThemeUi.input(this@showLyricsEditor, palette, "").apply {
+            setSingleLine(false)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            gravity = Gravity.TOP or Gravity.START
+            setText(initial)
+            minLines = 12
+        }
+        addView(input, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@showLyricsEditor, 360f)))
+        addView(ThemeUi.button(this@showLyricsEditor, palette, t("save"), ThemeUi.ROLE_ACCENT) {
+            val value = input.text.toString().trim()
+            val lines = Lyrics.parseLrc(value)
+            if (timed && (lines.isEmpty() || value.lineSequence().count { it.isNotBlank() } != lines.size)) {
+                toast(t("lyrics.edit.invalid"))
+            } else {
+                val updated = original.copy(lines = lines, plainLyrics = if (lines.isEmpty()) value else "", instrumental = false)
+                try {
+                    lyrics.saveEdited(Lyrics.searchTitle(item.name, item.artist), item.artist, item.duration / 1000.0, updated)
+                    onSaved(updated)
+                    dialog.dismiss()
+                } catch (error: Exception) { toast("${t("lyrics.edit.failed")}: ${error.message}") }
+            }
+        })
+    }
+    dialog.show()
+}
 
 internal fun MainActivity.scheduleLyricsPrefetch() {
         main.removeCallbacks(prefetchLyrics)
@@ -54,7 +172,13 @@ internal fun MainActivity.pushLyricsToVisualizer() {
 
     /** 长按歌词触发手动修正：允许搜索更新，或从多路候选里选择并预览。 */
 
-internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
+internal fun MainActivity.showLyricsCandidates(item: MusicItem, onSaved: (LyricsResult) -> Unit = {
+    if (currentItem?.uri == item.uri) {
+        currentLyrics = it
+        lyricsView.setLyrics(it)
+        pushLyricsToVisualizer()
+    }
+}) {
         if (providerStore.list().none { it.enabled }) { toast(t("lyrics.enable_source")); return }
         if (lyricsDialog?.isShowing == true) return
         val title = Lyrics.searchTitle(item.name, item.artist)
@@ -95,7 +219,7 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
                 }
                 status.text = t("lyrics.candidates").format(activeSource, items.size)
                 items.take(20).forEach { candidate ->
-                    list.addView(LyricsCandidateRow(this@showLyricsCandidates, candidate, duration) { applyLyricsCandidate(item, candidate) })
+                    list.addView(LyricsCandidateRow(this@showLyricsCandidates, candidate, duration) { applyLyricsCandidate(item, candidate, onSaved) })
                 }
             }
 
@@ -148,7 +272,7 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem) {
 
     /** 选中候选后先预览歌词，确认后再写入本地缓存。 */
 
-internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: LyricsCandidate) {
+internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: LyricsCandidate, onSaved: (LyricsResult) -> Unit) {
         val title = Lyrics.searchTitle(item.name, item.artist)
         val artist = item.artist
         val duration = item.duration / 1000.0
@@ -188,12 +312,9 @@ internal fun MainActivity.applyLyricsCandidate(item: MusicItem, candidate: Lyric
                             lyricsDialog?.dismiss()
                             ++lyricsGeneration
                             lyrics.applyCandidate(title, artist, duration, candidate, { result ->
-                                if (currentItem?.uri != item.uri) return@applyCandidate
                                 result.onSuccess {
-                                    currentLyrics = it
-                                    lyricsView.setLyrics(it)
+                                    onSaved(it)
                                     updateDriving()
-                                    pushLyricsToVisualizer()
                                 }
                                     .onFailure { toast(it.message ?: t("lyrics.fetch_failed")) }
                             })

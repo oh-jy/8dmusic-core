@@ -47,17 +47,19 @@ class LyricsView(context: Context) : FrameLayout(context) {
     var onExpand: (() -> Unit)? = null
 
     var dark = true
-        set(value) { field = value; applyColors() }
+        set(value) { field = value; applyColors(); secondary?.dark = value }
     var fullScreen = false
         set(value) {
             field = value
             rows.forEach { it.textSize = if (value) 22f else 15f }
+            secondary?.fullScreen = value
             resetPreview()
             applyColors()
         }
     var seekEnabled = true
         set(value) {
             field = value
+            secondary?.seekEnabled = value
             if (!value) resetPreview()
         }
 
@@ -69,6 +71,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     }
     private fun t(key: String) = AppLanguage.text(context, key)
     private val rows = mutableListOf<TextView>()
+    private var secondary: LyricsView? = null
     private var lyrics: LyricsResult? = null
     private var positionMs = 0L
     private var focusPositionMs = 0L
@@ -215,6 +218,38 @@ class LyricsView(context: Context) : FrameLayout(context) {
         }
     }
 
+    fun setDualLyrics(left: LyricsResult?, right: LyricsResult?, leftEdit: () -> Unit, rightEdit: () -> Unit) {
+        onManual = leftEdit
+        setLyrics(left)
+        val other = secondary ?: LyricsView(context).also {
+            secondary = it
+            addView(it, LayoutParams(0, -1, Gravity.END))
+        }
+        other.dark = dark
+        other.fullScreen = fullScreen
+        other.seekEnabled = seekEnabled
+        other.onManual = rightEdit
+        other.onSeek = { onSeek?.invoke(it) }
+        other.onExpand = { onExpand?.invoke() }
+        other.setLyrics(right)
+        other.setPosition(positionMs, true)
+        updateColumns(width)
+    }
+
+    fun clearDualLyrics() {
+        secondary?.let { removeView(it) }
+        secondary = null
+        scroller.layoutParams = (scroller.layoutParams as LayoutParams).apply { width = -1 }
+        timeLabel.layoutParams = (timeLabel.layoutParams as LayoutParams).apply { rightMargin = dp(8f) }
+    }
+
+    private fun updateColumns(width: Int) {
+        if (secondary == null || width <= 0) return
+        scroller.layoutParams = (scroller.layoutParams as LayoutParams).apply { this.width = width / 2 }
+        secondary?.layoutParams = (secondary?.layoutParams as LayoutParams).apply { this.width = width - width / 2 }
+        timeLabel.layoutParams = (timeLabel.layoutParams as LayoutParams).apply { rightMargin = width - width / 2 + dp(8f) }
+    }
+
     /** Shows the current FM transcript using the same centered, highlighted lyric row. */
     fun setLiveCaption(text: String) {
         if (liveCaption == text) return
@@ -228,6 +263,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
 
     /** 外部播放器仍是唯一进度来源；force 仅用于切歌或用户返回当前行。 */
     fun setPosition(positionMs: Long, force: Boolean = false) {
+        secondary?.setPosition(positionMs, force)
         val previous = this.positionMs
         this.positionMs = positionMs.coerceAtLeast(0)
         val lines = lyrics?.lines ?: return
@@ -322,6 +358,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        updateColumns(w)
         updatePadding()
         post {
             updatePadding()

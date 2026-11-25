@@ -16,6 +16,7 @@ import j5i.spatial8d.ui.VisualizerView
 import j5i.spatial8d.ui.VisualCreative
 import j5i.spatial8d.core.SLIDERS
 import j5i.spatial8d.core.SPACE_PRESETS
+import j5i.spatial8d.core.SELECTABLE_SPACE_PRESETS
 import j5i.spatial8d.core.PitchPreset
 import j5i.spatial8d.core.PITCH_PRESETS
 import j5i.spatial8d.core.clampSlider
@@ -101,9 +102,9 @@ internal fun MainActivity.spaceSettingsCard(): LinearLayout {
                 layoutParams = FrameLayout.LayoutParams(-1, -1)
                 setOnClickListener {
                     // 快速选择只调整展示顺序，保持内置和自定义预设原值不变。
-                    val pinned = listOfNotNull(SPACE_PRESETS.firstOrNull { it.raw },
-                        SPACE_PRESETS.firstOrNull { !it.raw })
-                    val all = pinned + (SPACE_PRESETS + customPresets).filter { it !in pinned }
+                    val pinned = listOfNotNull(SELECTABLE_SPACE_PRESETS.firstOrNull { it.raw },
+                        SELECTABLE_SPACE_PRESETS.firstOrNull { !it.raw })
+                    val all = pinned + (SELECTABLE_SPACE_PRESETS + customPresets).filter { it !in pinned }
                         .sortedWith(compareBy({ it.room }, { it.name }))
                     pickOption(t("space.choose"), all.map { item ->
                         val index = SPACE_PRESETS.indexOfFirst { it.name == item.name }
@@ -483,7 +484,7 @@ internal fun MainActivity.curveCard(): LinearLayout {
             lyricsView = LyricsView(this@curveCard).apply {
                 dark = this@curveCard.dark
                 onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
-                onManual = { currentItem?.let { showLyricsCandidates(it) } }
+                onManual = { currentItem?.let { showLyricsActions(it, currentLyrics) } }
                 onSeek = { target ->
                     val player = service?.player
                     if (!isLive && player?.isPrepared == true) {
@@ -593,6 +594,66 @@ internal fun MainActivity.showVisualCreative(scrollY: Int = 0) {
             creativePrefs.edit().remove("lock_hue").remove("lock_overlay").apply()
             toast(t("creative.reset.done"))
             reopen()
+        })
+        section(t("creative.random_visual"))
+        addView(android.widget.CheckBox(this@showVisualCreative).apply {
+            text = t("creative.random_visual.enable"); setTextColor(palette.text)
+            buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+            isChecked = current.randomVisual
+            setOnCheckedChangeListener { _, checked -> current = current.copy(randomVisual = checked); visualizerView.setCreative(current) }
+        })
+        val range = ThemeUi.row(this@showVisualCreative)
+        fun rangeButton(minimum: Boolean): android.widget.Button {
+            val key = if (minimum) "creative.random_visual.minimum" else "creative.random_visual.maximum"
+            fun label() = "${t(key)}: ${if (minimum) current.randomMinSeconds else current.randomMaxSeconds} ${t("creative.seconds")}"
+            return ThemeUi.button(this@showVisualCreative, palette, label(), ThemeUi.ROLE_CONTROL) {
+                val options = (1..60).toList()
+                val selected = if (minimum) current.randomMinSeconds else current.randomMaxSeconds
+                pickOption(t(key), options.map { "$it ${t("creative.seconds")}" }, selected - 1) { index ->
+                    val value = options[index]
+                    current = if (minimum) current.copy(randomMinSeconds = value, randomMaxSeconds = maxOf(value, current.randomMaxSeconds))
+                        else current.copy(randomMaxSeconds = value, randomMinSeconds = minOf(value, current.randomMinSeconds))
+                    visualizerView.setCreative(current)
+                    reopen()
+                }
+            }
+        }
+        range.addView(rangeButton(true), LinearLayout.LayoutParams(0, -2, 1f))
+        range.addView(rangeButton(false), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gap })
+        addView(range)
+        addView(ThemeUi.button(this@showVisualCreative, palette, t("creative.random_visual.choose").format(current.randomModes.size), ThemeUi.ROLE_CONTROL) {
+            val selected = current.randomModes.toMutableSet()
+            val checks = mutableListOf<Pair<Int, android.widget.CheckBox>>()
+            val picker = ThemeUi.showSheet(this@showVisualCreative, palette, t("creative.random_visual.title")) {
+                val groups = listOf(t("analysis") to 0) + exclusiveVisualModes.map { t(it.first) to it.second }
+                val actions = ThemeUi.row(this@showVisualCreative)
+                actions.addView(ThemeUi.button(this@showVisualCreative, palette, t("creative.random_visual.all"), ThemeUi.ROLE_CONTROL) {
+                    checks.forEach { (mode, check) -> check.isChecked = mode != 39 || visualizerView.hasSandImages }
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                actions.addView(ThemeUi.button(this@showVisualCreative, palette, t("creative.random_visual.clear"), ThemeUi.ROLE_CONTROL) {
+                    checks.forEach { (_, check) -> check.isChecked = false }
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gap })
+                addView(actions)
+                groups.forEach { (name, mode) ->
+                    addView(android.widget.CheckBox(this@showVisualCreative).apply {
+                        text = name; setTextColor(palette.text)
+                        buttonTintList = android.content.res.ColorStateList.valueOf(palette.accent)
+                        isChecked = mode in selected
+                        setOnCheckedChangeListener { button, checked ->
+                            if (checked && mode == 39 && !visualizerView.hasSandImages) {
+                                button.isChecked = false; toast(t("creative.random_visual.sand"))
+                            } else if (checked) selected.add(mode) else selected.remove(mode)
+                        }
+                        checks.add(mode to this)
+                    })
+                }
+            }
+            picker.setOnDismissListener {
+                if (selected.isEmpty()) toast(t("creative.random_visual.required"))
+                else { current = current.copy(randomModes = selected.toList()); visualizerView.setCreative(current) }
+                reopen()
+            }
+            picker.show()
         })
         section(t("creative.image_color"))
         val colors = ThemeUi.row(this@showVisualCreative)

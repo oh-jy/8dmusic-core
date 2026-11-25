@@ -17,6 +17,10 @@ import com.j5i.spatial8d.NativeSpatialExport
 import com.j5i.spatial8d.NativeSpatialPlayer
 import com.j5i.spatial8d.PcmWavRecorder
 import j5i.spatial8d.core.PcmBuffer
+import j5i.spatial8d.core.DualAudio
+import j5i.spatial8d.core.DualVolumeBalancer
+import j5i.spatial8d.core.DualSwapTimeline
+import j5i.spatial8d.core.DualSwapFader
 import j5i.spatial8d.core.SpacePreset
 import j5i.spatial8d.core.TransformParams
 import j5i.spatial8d.visual.PerfTrace
@@ -101,6 +105,38 @@ class SpatialPlayer(context: Context) {
             }
     }
     private var decoded: PcmBuffer? = null
+    private var dualRight: PcmBuffer? = null
+    private var dualRightDuration = 0.0
+    val isDual get() = dualRight != null
+    val dualLeftDuration get() = decoded?.let { if (it.decodeDone) it.durationSec else maxOf(it.estimatedDurationSec, remoteDurationSec) } ?: 0.0
+    val dualOtherDuration get() = dualRight?.let { if (it.decodeDone) it.durationSec else maxOf(it.estimatedDurationSec, dualRightDuration) } ?: 0.0
+    @Volatile private var dualManualSwap = false
+    @Volatile var dualRandomMinSeconds = 3
+        set(value) { field = value.coerceAtLeast(1); updateDualTimeline() }
+    @Volatile var dualRandomMaxSeconds = 0
+        set(value) { field = value.coerceAtLeast(0); updateDualTimeline() }
+    @Volatile private var dualSeed = 0x43f6a888L
+    @Volatile private var dualTimeline = DualSwapTimeline(3, 0, 44100)
+    @Volatile var dualSwapped = false
+        private set
+    var onDualSwapChanged: ((Boolean) -> Unit)? = null
+    private fun updateDualTimeline() {
+        dualTimeline = DualSwapTimeline(dualRandomMinSeconds, dualRandomMaxSeconds, sampleRate, dualSeed)
+    }
+    fun dualSwappedAt(seconds: Double): Boolean = dualManualSwap xor
+        dualTimeline.swappedAt((seconds.coerceAtLeast(0.0) * sampleRate).toLong())
+    fun snapshotDualSwap(): (Double) -> Boolean {
+        val manual = dualManualSwap
+        val timeline = dualTimeline
+        val rate = sampleRate
+        return { seconds -> manual xor timeline.swappedAt((seconds.coerceAtLeast(0.0) * rate).toLong()) }
+    }
+    fun swapDual() { dualManualSwap = !dualManualSwap; publishDualSwap(dualSwappedAt(position)) }
+    private fun publishDualSwap(value: Boolean) {
+        if (dualSwapped == value) return
+        dualSwapped = value
+        main.post { onDualSwapChanged?.invoke(value) }
+    }
     private var remoteDurationSec = 0.0
     private var sampleRate = 44100
     private var track: AudioTrack? = null
@@ -133,10 +169,10 @@ class SpatialPlayer(context: Context) {
 
     val duration get() = decoded?.let {
         if (it.decodeDone) it.durationSec else maxOf(it.estimatedDurationSec, remoteDurationSec)
-    } ?: 0.0
+    }?.let { left -> maxOf(left, dualRight?.let { if (it.decodeDone) it.durationSec else maxOf(it.estimatedDurationSec, dualRightDuration) } ?: 0.0) } ?: 0.0
     val isPrepared get() = prepared
     val isPlaying get() = prepared && !paused
-    val isDecodeDone get() = decoded?.decodeDone == true
+    val isDecodeDone get() = decoded?.decodeDone == true && (dualRight?.decodeDone != false)
     val position: Double
         get() {
             if (!paused && trackStarted) {
@@ -166,10 +202,28 @@ class SpatialPlayer(context: Context) {
         syncWakeLock()
     }
 
+    fun prepareDual(left: PcmBuffer, right: PcmBuffer, leftDurationSec: Double = 0.0, rightDurationSec: Double = 0.0,
+        preserveSwap: Boolean = false) {
+        prepare(left, leftDurationSec)
+        reverse = false
+        dualRight = right
+        dualRightDuration = rightDurationSec.coerceAtLeast(0.0)
+        playPos = maxOf(left.retainedStartFrame(), (right.retainedStartFrame().toLong() * sampleRate / right.sampleRate).toInt())
+        pausedHead = playPos
+        headBase = playPos
+        cacheStart.set(playPos.toLong())
+        if (!preserveSwap) {
+            dualManualSwap = false
+            dualSeed = java.util.concurrent.ThreadLocalRandom.current().nextLong()
+        }
+        updateDualTimeline()
+        publishDualSwap(dualSwappedAt(playPos.toDouble() / sampleRate))
+    }
+
     fun play(): Boolean = synchronized(lock) {
         if (!prepared || !paused) return@synchronized prepared
         val source = decoded ?: return@synchronized false
-        if (source.decodeDone && playPos >= source.frames) {
+        if (isDecodeDone && playPos >= (duration * sampleRate).toInt()) {
             playPos = if (reverse) source.frames else source.retainedStartFrame()
             headBase = playPos
         }
@@ -208,9 +262,13 @@ class SpatialPlayer(context: Context) {
     fun seek(seconds: Double, userInitiated: Boolean = false) {
         val source = decoded ?: return
         val targetFrame = (seconds.coerceIn(0.0, duration) * sampleRate).toInt()
+        val right = dualRight
+        val rightTarget = right?.let { (seconds * it.sampleRate).toInt() }
         val outsideWindow = seekRestartSupported &&
-            (targetFrame < source.retainedStartFrame() || targetFrame > source.frames ||
-                source.isDiskBacked && targetFrame < position * sampleRate)
+            (targetFrame < source.retainedStartFrame() || targetFrame > source.frames && !source.decodeDone ||
+                source.isDiskBacked && targetFrame < position * sampleRate ||
+                right != null && rightTarget != null && (rightTarget < right.retainedStartFrame() ||
+                    rightTarget > right.frames && !right.decodeDone || right.isDiskBacked && seconds < position))
         if (outsideWindow) {
             onSeekOutsideWindow?.invoke(targetFrame.toDouble() / sampleRate)
             return
@@ -248,6 +306,9 @@ class SpatialPlayer(context: Context) {
             drainStartedAt = 0L
             decoded?.close()
             decoded = null
+            dualRight?.close()
+            dualRight = null
+            dualRightDuration = 0.0
             playPos = 0
             headBase = 0
             pausedHead = 0
@@ -326,6 +387,11 @@ class SpatialPlayer(context: Context) {
     private fun applyPlaybackParams() {
         // 某些机型在暂停状态设置 PlaybackParams 会意外起播，恢复时再统一应用。
         if (paused || !trackStarted) return
+        if (isDual) {
+            try { track?.playbackParams = PlaybackParams().setSpeed(1f).setPitch(1f) }
+            catch (e: Exception) { report("${t("audio.params.failed")}: ${e.message}") }
+            return
+        }
         // speed 保持音高；磁带模式把速度叠加到音高；semi 再按十二平均律换算。
         val pitch = ((if (transform.tape) transform.speed else 1.0) *
             2.0.pow(transform.semi / 12.0)).coerceIn(0.5, 2.0)
@@ -345,6 +411,7 @@ class SpatialPlayer(context: Context) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         try {
             val output = ByteArray(OUTPUT_CHUNK * 4)
+            val swapFader = DualSwapFader(sampleRate)
             while (own == generation && prepared) {
                 if (paused) { Thread.sleep(12); continue }
                 if (reverse && decoded?.isDiskBacked == true) {
@@ -375,6 +442,19 @@ class SpatialPlayer(context: Context) {
                 }
                 val count = min(OUTPUT_CHUNK, produced - current.consumed)
                 if (!current.read(output, count * 4)) { Thread.sleep(4); continue }
+                val right = dualRight
+                if (right != null) {
+                    val firstFrame = current.startFrame + current.consumed
+                    val left = decoded ?: break
+                    val leftEnd = if (left.decodeDone) left.frames else Int.MAX_VALUE
+                    val rightEnd = if (right.decodeDone) (right.frames.toLong() * sampleRate / right.sampleRate).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else Int.MAX_VALUE
+                    val timeline = dualTimeline
+                    val manual = dualManualSwap
+                    DualAudio.swap(output, firstFrame, count, min(leftEnd, rightEnd), swapFader) { frame ->
+                        manual xor timeline.swappedAt(frame.toLong())
+                    }
+                    publishDualSwap(manual xor timeline.swappedAt(firstFrame.toLong()))
+                }
                 var written = 0
                 while (written < count * 4 && own == generation && !paused) {
                     val n = synchronized(trackLock) {
@@ -395,6 +475,7 @@ class SpatialPlayer(context: Context) {
                     else current.startFrame + current.consumed
                 // 只能回收硬件播放头之前的 PCM；已写入但尚未听到的预滚仍可能用于轨道恢复。
                 if (!reverse) decoded?.releaseBefore(lastHeardFrame())
+                if (!reverse && right != null) right.releaseBefore((lastHeardFrame().toLong() * right.sampleRate / sampleRate).toInt())
                 // 先写入短预滚再 play，兼顾起播延迟和 AudioTrack 不欠载。
                 if (!trackStarted && current.consumed >= min(START_FRAMES, current.produced.get())) {
                     trackStarted = true
@@ -430,7 +511,7 @@ class SpatialPlayer(context: Context) {
         synchronized(lock) {
             if (own != generation || track !== audio || paused) return
             val heard = synchronized(trackLock) { headBase + audio.playbackHeadPosition }
-                .coerceIn(0, decoded?.frames ?: 0)
+                .coerceIn(0, (duration * sampleRate).toInt())
             generation++
             cacheEpoch.incrementAndGet()
             playPos = heard
@@ -451,7 +532,12 @@ class SpatialPlayer(context: Context) {
 
     private fun createCache(own: Int, epoch: Long): RenderCache? {
         val source = decoded ?: return null
-        val start = cacheStart.get().toInt().coerceIn(0, source.frames)
+        val start = cacheStart.get().toInt().coerceIn(0, if (isDual) (duration * sampleRate).toInt() else source.frames)
+        if (isDual) {
+            val result = RenderCache(epoch, start, 0L)
+            Thread({ prerollLoop(own, result) }, "dual-preroll").start()
+            return result
+        }
         if ((!reverse && start >= source.frames || reverse && start <= 0) && !source.decodeDone) return null
         val p = preset
         val native = NativeSpatialPlayer.create(sampleRate.toDouble(), p.raw, p.period, p.elev,
@@ -464,10 +550,31 @@ class SpatialPlayer(context: Context) {
 
     private fun prerollLoop(own: Int, current: RenderCache) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
+        val dualBalancer = DualVolumeBalancer(sampleRate)
         try {
             while (own == generation && cache === current && !current.done.get()) {
                 val source = decoded ?: break
                 val start = current.startFrame + if (reverse) -current.produced.get() else current.produced.get()
+                val right = dualRight
+                if (right != null) {
+                    val end = maxOf(source.frames.toLong() * sampleRate / source.sampleRate,
+                        right.frames.toLong() * sampleRate / right.sampleRate).toInt()
+                    if (start >= end) {
+                        if (source.decodeDone && right.decodeDone) current.finish() else Thread.sleep(8)
+                        continue
+                    }
+                    val count = min(CHUNK, end - start)
+                    val rendered = DualAudio.render(source, right, sampleRate, start, count)
+                    if (rendered == null) { Thread.sleep(8); continue }
+                    val leftEnd = if (source.decodeDone) (source.frames.toLong() * sampleRate / source.sampleRate).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else Int.MAX_VALUE
+                    val rightEnd = if (right.decodeDone) (right.frames.toLong() * sampleRate / right.sampleRate).coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else Int.MAX_VALUE
+                    dualBalancer.process(rendered, start, count, min(leftEnd, rightEnd))
+                    while (own == generation && cache === current && !current.write(rendered)) Thread.sleep(8)
+                    if (own != generation || cache !== current) break
+                    val lead = current.produced.get() - current.consumed
+                    if (lead > sampleRate * PREROLL_SECONDS) Thread.sleep((count * 800L / sampleRate).coerceIn(8, 250))
+                    continue
+                }
                 if ((!reverse && start >= source.frames) || (reverse && start <= 0)) {
                     if (source.decodeDone) current.finish() else Thread.sleep(8)
                     continue
@@ -501,8 +608,10 @@ class SpatialPlayer(context: Context) {
 
     private fun drainAndFinish(own: Int, current: RenderCache): Boolean {
         val source = decoded ?: return false
-        if (!source.decodeDone) return false
-        if ((!reverse && current.startFrame + current.produced.get() < source.frames) ||
+        val right = dualRight
+        if (!source.decodeDone || right?.decodeDone == false) return false
+        val endFrames = if (right != null) maxOf(source.frames, (right.frames.toLong() * sampleRate / right.sampleRate).toInt()) else source.frames
+        if ((!reverse && current.startFrame + current.produced.get() < endFrames) ||
             (reverse && current.startFrame - current.produced.get() > 0)) return false
         if (own != generation) return true
         if (!trackStarted) return false
@@ -613,6 +722,11 @@ class SpatialPlayer(context: Context) {
         mp3Path: String? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val source = decoded
         if (source == null) { stream.close(); onDone(false, t("audio.export.no_audio")); return }
+        val right = dualRight
+        if (right != null) {
+            exportDual(source, right, stream, mp3, mp3Path, onProgress, onDone)
+            return
+        }
         // 立即回报失败并关闭 SAF 输出流，避免界面只留下一个空文档。
         fun fail(message: String) {
             try { stream.close() } catch (_: Exception) {}
@@ -679,6 +793,63 @@ class SpatialPlayer(context: Context) {
                 try { stream.close() } catch (_: Exception) {}
                 Log.e("8DExport", "export failed", e)
                 main.post { onDone(false, "${t("export.failed")}: ${e.message}") }
+            } finally { temp?.delete() }
+        }.start()
+    }
+
+    private fun exportDual(left: PcmBuffer, right: PcmBuffer, stream: OutputStream, mp3: Boolean,
+        mp3Path: String?, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+        val rate = sampleRate
+        val swap = snapshotDualSwap()
+        val swapFader = DualSwapFader(rate)
+        val dualBalancer = DualVolumeBalancer(rate)
+        Thread {
+            var temp: File? = null
+            try {
+                temp = File.createTempFile("8d-dual-", ".wav", cacheDir)
+                var frame = 0
+                val started = SystemClock.elapsedRealtime()
+                java.io.RandomAccessFile(temp, "rw").use { output ->
+                    output.write(ByteArray(44))
+                    while (true) {
+                        if (decoded !== left || dualRight !== right) error(t("audio.export.changed"))
+                        if (left.retainedStartFrame() > 0 || right.retainedStartFrame() > 0)
+                            error("双曲缓冲已回收，请重新加载后导出")
+                        val available = maxOf(left.frames.toLong() * rate / left.sampleRate,
+                            right.frames.toLong() * rate / right.sampleRate).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                        if (left.decodeDone && right.decodeDone && frame >= available) break
+                        if (SystemClock.elapsedRealtime() - started > 10 * 60_000L) error(t("audio.export.timeout"))
+                        val count = min(CHUNK, available - frame)
+                        if (count <= 0) { Thread.sleep(50); continue }
+                        val pcm = DualAudio.render(left, right, rate, frame, count)
+                        if (pcm == null) { Thread.sleep(50); continue }
+                        val leftEnd = if (left.decodeDone) (left.frames.toLong() * rate / left.sampleRate).toInt() else Int.MAX_VALUE
+                        val rightEnd = if (right.decodeDone) (right.frames.toLong() * rate / right.sampleRate).toInt() else Int.MAX_VALUE
+                        dualBalancer.process(pcm, frame, count, min(leftEnd, rightEnd))
+                        DualAudio.swap(pcm, frame, count, min(leftEnd, rightEnd), swapFader) { swap(it.toDouble() / rate) }
+                        output.write(pcm)
+                        frame += count
+                        val expected = (maxOf(left.estimatedDurationSec, right.estimatedDurationSec) * rate).toInt()
+                        onProgress((frame.toLong() * 90 / expected.coerceAtLeast(1)).toInt().coerceIn(0, 90))
+                    }
+                    check(frame > 0) { t("audio.export.incomplete") }
+                    output.seek(0)
+                    val header = java.nio.ByteBuffer.allocate(44)
+                    j5i.spatial8d.core.writeWavHeader(header, frame, rate)
+                    output.write(header.array())
+                }
+                if (mp3) {
+                    val target = mp3Path ?: error(t("audio.export.mp3_path"))
+                    com.j5i.spatial8d.Mp3Export.nativeEncode(temp.absolutePath, target)
+                    check(File(target).length() > 1024) { t("audio.export.mp3_invalid") }
+                    File(target).inputStream().use { it.copyTo(stream) }
+                } else temp.inputStream().use { it.copyTo(stream) }
+                stream.use { it.flush() }
+                main.post { onDone(true, t("export.complete.format").format(if (mp3) "MP3" else "WAV")) }
+            } catch (exception: Exception) {
+                try { stream.close() } catch (_: Exception) {}
+                Log.e("8DExport", "dual export failed", exception)
+                main.post { onDone(false, "${t("export.failed")}: ${exception.message}") }
             } finally { temp?.delete() }
         }.start()
     }

@@ -99,6 +99,20 @@ internal object ProviderPluginRunner {
                     }
                     return ProviderNetwork.pluginRequest(requestJson, entry.descriptor.domains)
                 }
+
+                override fun requestFile(requestJson: String): ParcelFileDescriptor {
+                    val response = request(requestJson).toByteArray(Charsets.UTF_8)
+                    val pipe = ParcelFileDescriptor.createReliablePipe()
+                    Thread {
+                        try {
+                            java.io.FileOutputStream(pipe[1].fileDescriptor).write(response)
+                            pipe[1].close()
+                        } catch (error: java.io.IOException) {
+                            runCatching { pipe[1].closeWithError("响应传输失败") }
+                        }
+                    }.apply { isDaemon = true; start() }
+                    return pipe[0]
+                }
             }
             val call = executor.submit<String> {
                 ParcelFileDescriptor.open(entry.file, ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->

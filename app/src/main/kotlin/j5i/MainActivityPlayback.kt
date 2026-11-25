@@ -473,6 +473,7 @@ internal fun MainActivity.savePlaybackState() {
 
 internal fun MainActivity.next(auto: Boolean = false) {
         if (isLive) { skipStation(1); return }
+        if (service?.dualTracks != null) return
         if (!auto) autoplayRequests = 0
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (currentItem != null && items.indexOfFirst { it.id == currentItem?.id } < 0) {
@@ -501,6 +502,7 @@ internal fun MainActivity.next(auto: Boolean = false) {
 
 internal fun MainActivity.previous() {
         if (isLive) { skipStation(-1); return }
+        if (service?.dualTracks != null) return
         val items = if (currentQueue.isNotEmpty()) currentQueue else queue
         if (items.isEmpty()) {
             playbackStatus = t("playback.queue.empty")
@@ -531,6 +533,10 @@ internal fun MainActivity.showPlaylist(requestedTab: Int? = null) {
                 isLive -> 1
                 onlinePlayingUri != null -> 2
                 else -> 0
+            }, onOnlineSearch = { query ->
+                onlineQuery = query
+                providerResults = emptyList()
+                pluginResults = emptyList()
             }) { tab, body, dialog ->
                 // FM and online share one body; invalidate delayed online
                 // callbacks before rebuilding the selected tab.

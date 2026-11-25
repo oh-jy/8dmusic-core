@@ -9,7 +9,18 @@ import com.j5i.spatial8d.MicWavRecorder
 import j5i.spatial8d.ui.VideoExport
 import j5i.spatial8d.ui.ThemeUi
 import j5i.spatial8d.ui.GifExport
+import j5i.spatial8d.audio.exportDualLocal
 import java.io.File
+import java.io.OutputStream
+
+private fun MainActivity.exportCurrentAudio(stream: OutputStream, mp3: Boolean = false, mp3Path: String? = null,
+    onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+    val playback = service ?: run { stream.close(); onDone(false, t("audio.export.no_audio")); return }
+    val tracks = playback.dualTracks
+    if (tracks != null) exportDualLocal(applicationContext, tracks, stream, mp3, mp3Path,
+        playback.player.snapshotDualSwap(), onProgress, onDone)
+    else playback.player.export(stream, mp3 = mp3, mp3Path = mp3Path, onProgress = onProgress, onDone = onDone)
+}
 
 internal fun MainActivity.updateExportProgress(message: String) {
     playbackStatus = message
@@ -30,10 +41,15 @@ internal fun MainActivity.showExportProgress() {
 internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: Int, startSeconds: Double, durationSeconds: Double, gif: Boolean = false, preview: Boolean = false, smoothGifLoop: Boolean = false, previewTailSeconds: Int = 0, onComplete: () -> Unit = {}) {
     if (exporting) { showExportProgress(); return }
     val player = service?.player ?: return
-    val state = visualizerView.exportState()
+    val state = visualizerView.exportState().let { state ->
+        val tracks = service?.dualTracks
+        if (player.isDual) state.copy(dualLyrics = dualLyricsSnapshot(), dualSwap = player.snapshotDualSwap(),
+            dualDurations = (player.dualLeftDuration.takeIf { it > 0 } ?: (tracks?.first?.duration ?: 0L) / 1000.0) to
+                (player.dualOtherDuration.takeIf { it > 0 } ?: (tracks?.second?.duration ?: 0L) / 1000.0)) else state
+    }
     val lyrics = currentLyrics
-    val speed = player.transform.speed
-    val reversed = player.reverse
+    val speed = if (player.isDual) 1.0 else player.transform.speed
+    val reversed = !player.isDual && player.reverse
     val wav = File.createTempFile("8d-export-", ".wav", cacheDir)
     val video = File.createTempFile("8d-export-", if (gif) ".gif" else ".mp4", cacheDir)
     exporting = true
@@ -53,7 +69,7 @@ internal fun MainActivity.exportMp4(uri: Uri?, landscape: Boolean, resolution: I
     displayProgress()
     main.postDelayed(heartbeat, 1000)
     showExportProgress()
-    player.export(wav.outputStream(), onProgress = { value -> main.post {
+    exportCurrentAudio(wav.outputStream(), onProgress = { value -> main.post {
         if (exporting) {
             phase = t(if (value == 10) "export.preprocess" else "export.render")
             displayProgress()
@@ -187,7 +203,7 @@ internal fun MainActivity.exportWav(uri: Uri, onComplete: () -> Unit = {}) {
         }
         playbackStatus = t("export.format.progress").format("WAV")
         var published = false
-        player.export(stream, mp3 = false,
+        exportCurrentAudio(stream, mp3 = false,
             onProgress = { percent -> main.post { playbackStatus = t("export.percent").format(percent); refreshPlayback() } },
             onDone = { ok, message ->
                 exporting = false
@@ -208,7 +224,7 @@ internal fun MainActivity.exportMp3(uri: Uri, onComplete: () -> Unit = {}) {
             toast(t("mv.export.create_failed"))
             return
         }
-        player.export(stream, mp3 = true, mp3Path = mp3.absolutePath,
+        exportCurrentAudio(stream, mp3 = true, mp3Path = mp3.absolutePath,
             onProgress = { percent -> main.post { playbackStatus = t("export.percent").format(percent); refreshPlayback() } },
             onDone = { ok, message ->
                 mp3.delete()

@@ -523,9 +523,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
                     j5i.spatial8d.provider.ProviderTrackRef.plugin(providerId, result)
                 }
                 stageOnlineQueue(visibleItems, id, item.id)
-            // Search metadata can under-report Bilibili's P count. Always ask
-            // the provider for the authoritative pagelist before playing.
-            if (id == "platform.bilibili" || track.optBoolean("compilation")) expandPluginTrack(id, track)
+            // Search metadata can under-report Bilibili's P count; already
+            // expanded BV:cid entries are individual playable parts.
+            if (shouldExpandPluginTrack(id, track.optString("id"), track.optBoolean("compilation"))) expandPluginTrack(id, track)
             else playPluginTrack(id, track)
         }
     }
@@ -560,6 +560,9 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         addView(rows)
     }, LinearLayout.LayoutParams(-1, 0, 1f))
 }
+
+internal fun shouldExpandPluginTrack(source: String, trackId: String, compilation: Boolean): Boolean =
+    if (source == "platform.bilibili") !trackId.matches(Regex("BV[0-9A-Za-z]+:[0-9]+")) else compilation
 
 internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
     lateinit var sheet: android.app.Dialog

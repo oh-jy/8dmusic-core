@@ -40,6 +40,10 @@ class TrajectoryTest {
     }
 
     @Test fun builtInPresetsCoverTrajectoriesAndMatchTheirSettings() {
+        assertEquals(20, SELECTABLE_SPACE_PRESETS.size)
+        assertTrue(SELECTABLE_SPACE_PRESETS[0].raw)
+        assertEquals(DEFAULT_SPACE_PRESET, SELECTABLE_SPACE_PRESETS[1])
+        assertEquals((0..4).toSet(), SELECTABLE_SPACE_PRESETS.filterNot { it.raw }.map { it.trajectory }.toSet())
         assertEquals((0..4).toSet(), SPACE_PRESETS.filterNot { it.raw }.map { it.trajectory }.toSet())
         assertEquals(0, SPACE_PRESETS.first { it.raw }.trajectory)
         assertEquals(0, DEFAULT_SPACE_PRESET.trajectory)

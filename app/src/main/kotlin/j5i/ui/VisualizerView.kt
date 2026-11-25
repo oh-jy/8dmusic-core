@@ -358,15 +358,23 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         updateMode()
     }
     val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
+    internal val hasSandImages: Boolean get() = canvas.sandImages.isNotEmpty()
+    private var exportRandomTimeline: RandomVisualTimeline? = null
     internal data class ExportState(
         val exclusive: Boolean, val mode: Int, val layers: BooleanArray,
         val single: Int, val dark: Boolean, val palette: ThemeUi.Palette, val creative: VisualCreative, val touches: List<VisualTouch>, val background: String?, val graphStyle: Int,
-        val sandImages: List<SandImage>, val sandDuration: Long
+        val sandImages: List<SandImage>, val sandDuration: Long, val randomSeed: Long,
+        val dualLyrics: Pair<LyricsResult?, LyricsResult?>? = null,
+        val dualSwap: ((Double) -> Boolean)? = null,
+        val dualDurations: Pair<Double, Double>? = null
     )
     internal fun exportState() = ExportState(exclusive, visualMode, layers.copyOf(), singleVisualLayer,
-        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration)
+        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration, kotlin.random.Random.nextLong())
 
     internal fun prepareExport(state: ExportState, lyrics: LyricsResult?, width: Int, height: Int, sampleRate: Int) {
+        exportDualLyrics = state.dualLyrics
+        exportDualSwap = state.dualSwap
+        exportDualDurations = state.dualDurations
         dark = state.dark
         state.layers.copyInto(layers)
         restoreVisualState(state.exclusive to state.mode, state.single)
@@ -379,6 +387,9 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.exporting = true
         canvas.sandImages = state.sandImages
         canvas.sandDuration = state.sandDuration
+        val modes = state.creative.randomModes.filter { it != 39 || state.sandImages.isNotEmpty() }
+        exportRandomTimeline = if (state.creative.randomVisual && modes.isNotEmpty())
+            RandomVisualTimeline(modes, state.creative.randomMinSeconds, state.creative.randomMaxSeconds, state.randomSeed) else null
         sandButton.visibility = View.GONE
         canvas.immersive = true
         canvas.sampleRate = sampleRate
@@ -391,11 +402,28 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
 
     internal fun drawExportFrame(target: Canvas, data: ByteArray, bytes: Int, timeUs: Long, lyricPositionMs: Long) {
+        exportRandomTimeline?.modeAt(timeUs)?.let { mode ->
+            if ((mode == 0 && exclusive) || (mode != 0 && (!exclusive || visualMode != mode))) {
+                restoreVisualState((mode != 0) to mode)
+                measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY))
+                layout(0, 0, width, height)
+            }
+        }
         pcmClock.acceptOffline(data, bytes, timeUs)
         canvas.acceptOffline(data, bytes)
         if (graphView.visibility == View.VISIBLE) {
             graphView.accept(data, bytes)
             graphView.setSpectrum(canvas.spectrumSnapshot())
+        }
+        exportDualLyrics?.let { lyrics ->
+            val swapped = exportDualSwap?.invoke(lyricPositionMs / 1000.0) == true
+            val durations = exportDualDurations
+            val seconds = lyricPositionMs / 1000.0
+            val leftEnded = durations != null && durations.first > 0 && durations.first < durations.second && seconds >= durations.first
+            val rightEnded = durations != null && durations.second > 0 && durations.second < durations.first && seconds >= durations.second
+            val left = when { leftEnded -> lyrics.second; rightEnded -> lyrics.first; swapped -> lyrics.second; else -> lyrics.first }
+            val right = when { leftEnded -> lyrics.second; rightEnded -> lyrics.first; swapped -> lyrics.first; else -> lyrics.second }
+            lyricOverlay.setDualLyrics(left, right)
         }
         lyricOverlay.setPosition(lyricPositionMs)
         canvas.visualPositionMs = lyricPositionMs
@@ -460,6 +488,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     /** 当前歌曲歌词与播放位置，用于在穿梭模式中叠加逐行歌词字幕。 */
     fun setLyrics(result: LyricsResult?) {
         lyricOverlay.setLyrics(result)
+        updateMode()
+    }
+    private var exportDualLyrics: Pair<LyricsResult?, LyricsResult?>? = null
+    private var exportDualSwap: ((Double) -> Boolean)? = null
+    private var exportDualDurations: Pair<Double, Double>? = null
+    fun setDualLyrics(left: LyricsResult?, right: LyricsResult?) {
+        lyricOverlay.setDualLyrics(left, right)
         updateMode()
     }
     fun setPosition(positionMs: Long) {
@@ -1928,14 +1963,26 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         var dark = true
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private var lines: List<LyricLine> = emptyList()
+        private var rightLines: List<LyricLine>? = null
         private var positionMs = 0L
         private var activeIndex = -1
         private var lineStartedAtNs = 0L
 
         fun setLyrics(result: LyricsResult?) {
             lines = result?.lines ?: emptyList()
+            rightLines = null
             activeIndex = -1
             lineStartedAtNs = 0L
+            invalidate()
+        }
+
+        fun setDualLyrics(left: LyricsResult?, right: LyricsResult?) {
+            val nextLeft = left?.lines ?: emptyList()
+            val nextRight = right?.lines ?: emptyList()
+            if (lines == nextLeft && rightLines == nextRight) return
+            lines = nextLeft
+            rightLines = nextRight
+            activeIndex = -1
             invalidate()
         }
 
@@ -1946,6 +1993,22 @@ class VisualizerView(context: Context) : LinearLayout(context) {
 
         override fun onDraw(c: Canvas) {
             super.onDraw(c)
+            rightLines?.let { right ->
+                val density = resources.displayMetrics.density
+                paint.textSize = 14f * density
+                paint.textAlign = Paint.Align.CENTER
+                paint.typeface = android.graphics.Typeface.DEFAULT
+                paint.color = if (dark) 0xffe8f4ff.toInt() else 0xff102a43.toInt()
+                paint.alpha = 255
+                paint.setShadowLayer(3f * density, 0f, 0f, if (dark) Color.BLACK else Color.WHITE)
+                listOf(lines, right).forEachIndexed { side, lyrics ->
+                    val text = lyrics.lastOrNull { it.timeMs <= positionMs }?.text.orEmpty()
+                    val display = android.text.TextUtils.ellipsize(text, android.text.TextPaint(paint), width / 2f - 12f * density, android.text.TextUtils.TruncateAt.END)
+                    c.drawText(display.toString(), width * (if (side == 0) .25f else .75f), height - 10f * density, paint)
+                }
+                paint.clearShadowLayer()
+                return
+            }
             if (lines.isEmpty()) return
             val index = lines.indexOfLast { it.timeMs <= positionMs }
             if (index < 0) return

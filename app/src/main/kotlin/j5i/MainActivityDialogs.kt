@@ -473,12 +473,17 @@ internal fun MainActivity.showExportSheet() {
                 inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
             }
             fun clip(): Pair<Double, Double>? {
+                if (format >= 2 && visualizerView.creative.randomVisual &&
+                    visualizerView.creative.randomModes.all { it == 39 } && !visualizerView.hasSandImages) {
+                    toast(t("creative.random_visual.sand")); return null
+                }
                 val startText = clipStart.text.toString().trim()
                 val durationText = clipDuration.text.toString().trim()
                 val start = if (startText.isEmpty()) 0.0 else startText.toDoubleOrNull()
                 val length = if (durationText.isEmpty()) 0.0 else durationText.toDoubleOrNull()
                 if (start == null || length == null || !start.isFinite() || !length.isFinite() || start < 0 || length < 0 ||
-                    start >= (service?.player?.duration ?: 0.0) / (service?.player?.transform?.speed ?: 1.0)) {
+                    start >= (service?.player?.duration ?: 0.0) /
+                        (service?.player?.let { if (it.isDual) 1.0 else it.transform.speed } ?: 1.0)) {
                     toast(t("export.clip.invalid")); return null
                 }
                 if (format == 3 && length != 0.0 && length !in 1.0..10.0) {
@@ -570,8 +575,9 @@ internal fun MainActivity.showExportSheet() {
             resolutionRow.addView(hd, LinearLayout.LayoutParams(0, -2, 1f))
             resolutionRow.addView(fullHd, LinearLayout.LayoutParams(0, -2, 1f))
             addView(resolutionRow)
-            clipRow.addView(clipStart, LinearLayout.LayoutParams(0, -2, 1f))
-            clipRow.addView(clipDuration, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gap })
+            val clipInputHeight = ThemeUi.dp(this@showExportSheet, 42f)
+            clipRow.addView(clipStart, LinearLayout.LayoutParams(0, clipInputHeight, 1f))
+            clipRow.addView(clipDuration, LinearLayout.LayoutParams(0, clipInputHeight, 1f).apply { marginStart = gap })
             addView(clipRow)
             addView(smoothGifLoop)
             addView(durationRow)

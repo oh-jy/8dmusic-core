@@ -86,6 +86,8 @@ val SPACE_PRESETS: List<SpacePreset> = listOf(
     mk("巨型礼堂 · 深远", "48 米深广厅堂，长反射与慢速绕行营造庄重、深远的空间感。", 18.0, 58.0, 75.0, 48.0, 50.0, 3.4, 180.0, 1.0, 120.0)
 )
 
+val SELECTABLE_SPACE_PRESETS: List<SpacePreset> = SPACE_PRESETS.filterIndexed { index, _ -> index <= 20 && index != 13 }
+
 const val CUSTOM_SPACE = "自定义"
 
 val SLIDERS: List<SliderDef> = listOf(

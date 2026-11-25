@@ -2,6 +2,22 @@ package j5i.spatial8d.ui
 
 import kotlin.math.PI
 import kotlin.math.sin
+import kotlin.random.Random
+
+internal class RandomVisualTimeline(private val modes: List<Int>, private val minSeconds: Int, private val maxSeconds: Int, seed: Long) {
+    private val random = Random(seed)
+    private var endUs = 0L
+    private var mode = modes.first()
+
+    fun modeAt(timeUs: Long): Int {
+        while (timeUs >= endUs) {
+            val candidates = if (endUs > 0 && modes.size > 1) modes.filter { it != mode } else modes
+            mode = candidates[random.nextInt(candidates.size)]
+            endUs += random.nextInt(minSeconds, maxSeconds + 1) * 1_000_000L
+        }
+        return mode
+    }
+}
 
 internal val graphStyleKeys = listOf("graph.style.original", "graph.style.wave", "graph.style.mirror",
     "graph.style.lines", "graph.style.dots", "graph.style.bars", "graph.style.segments",

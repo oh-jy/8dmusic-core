@@ -83,7 +83,7 @@ internal object VideoExport {
                         view.drawExportFrame(canvas, pcm, sampleBytes, timeUs, lyricTime)
                     } else if (outro != null) {
                         if (!outroCaptured) { outro.captureOrigins(bitmap); outroCaptured = true }
-                        view.drawExportFrame(canvas, pcm, 0, timeUs, ((firstFrame + frames) * 1000.0 / rate * speed).toLong())
+                        view.drawExportFrame(canvas, pcm, 0, (durationUs - 1).coerceAtLeast(0), ((firstFrame + frames) * 1000.0 / rate * speed).toLong())
                         outro.draw(canvas, (frame - sceneCount) / 30f)
                     }
                     progress(frame * 75 / count.coerceAtLeast(1))

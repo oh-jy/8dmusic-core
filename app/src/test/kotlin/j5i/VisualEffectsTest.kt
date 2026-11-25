@@ -7,6 +7,19 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun randomVisualTimelineRespectsSelectionAndDurations() {
+        val timeline = RandomVisualTimeline(listOf(1, 2, 3), 2, 2, 42L)
+        val first = timeline.modeAt(0)
+        assertEquals(first, timeline.modeAt(1_999_999))
+        val second = timeline.modeAt(2_000_000)
+        assertTrue(second in listOf(1, 2, 3) && second != first)
+        assertEquals(second, timeline.modeAt(3_999_999))
+        assertEquals(first, RandomVisualTimeline(listOf(1, 2, 3), 2, 2, 42L).modeAt(0))
+        assertEquals(7, RandomVisualTimeline(listOf(7), 1, 3, 1L).modeAt(20_000_000))
+        val settings = VisualCreative(randomVisual = true, randomMinSeconds = 3, randomMaxSeconds = 7, randomModes = listOf(0, 2, 39))
+        assertEquals(settings, VisualCreative.decode(settings.encode()))
+        assertFailsWith<IllegalArgumentException> { VisualCreative.decode(settings.copy(randomModes = emptyList()).encode()) }
+    }
     @Test fun gourdCountVariesWithinBounds() {
         val counts = (0L..200L).map(::gourdCount)
         assertEquals(setOf(3, 4, 5, 6, 7, 8, 9), counts.toSet())

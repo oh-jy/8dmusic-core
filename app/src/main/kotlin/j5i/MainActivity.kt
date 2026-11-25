@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var restoreUri: String? = null
     internal var restorePosition = 0.0
     internal var currentItem: MusicItem? = null
+    internal var displayedDualTracks: Pair<MusicItem, MusicItem>? = null
     internal val favoriteDownloads = mutableSetOf<Long>()
     internal var pageActive = true
     internal var updateNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
@@ -630,7 +631,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             return
         }
         if (player.isPlaying) {
-            player.pause()
+            service?.pause()
         } else {
             if (service?.play() != true) {
                 songs.getOrNull(currentIndex)?.let { load(it) }

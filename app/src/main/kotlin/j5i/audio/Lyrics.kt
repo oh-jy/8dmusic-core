@@ -58,6 +58,7 @@ class Lyrics(context: Context) {
     private fun text(key: String) = AppLanguage.text(appContext, key)
     // 歌词属于可长期复用的下载内容，不能放在系统可能随时清理的 cacheDir。
     private val cache = File(appContext.filesDir, "lyrics")
+    private val edits = File(appContext.filesDir, "lyrics-edited")
     private val legacyCache = File(appContext.cacheDir, "lyrics")
     private val failures = appContext.getSharedPreferences("lyrics_retry", Context.MODE_PRIVATE)
     private val prefetchExecutor = Executors.newSingleThreadExecutor()
@@ -167,6 +168,7 @@ class Lyrics(context: Context) {
     }
 
     private fun cachedLyrics(title: String, artist: String, duration: Double): LyricsResult? {
+        cached(File(edits, key(title, artist, duration) + ".json"))?.let { return it }
         cacheFile(title, artist, duration).let { file ->
             cached(file)?.let { return it }
             File(legacyCache, file.name).let { old ->
@@ -304,6 +306,7 @@ class Lyrics(context: Context) {
         thread(name = "lyrics-apply") {
             val result = try {
                 val fetched = fetchCandidate(candidate, title, artist, durationSeconds, persist = true)
+                File(edits, key(title, knownArtist(artist), durationSeconds) + ".json").delete()
                 failures.edit().remove(key(title, knownArtist(artist), durationSeconds)).apply()
                 Result.success(fetched)
             } catch (e: Exception) {
@@ -405,11 +408,22 @@ class Lyrics(context: Context) {
         put("artistName", artistName)
         put("syncedLyrics", lines.joinToString("\n") {
             val total = it.timeMs
-            "[%02d:%02d.%02d]%s".format(total / 60000, total / 1000 % 60, total % 1000 / 10, it.text)
+            "[%02d:%02d.%03d]%s".format(Locale.US, total / 60000, total / 1000 % 60, total % 1000, it.text)
         })
         put("plainLyrics", plainLyrics)
         put("instrumental", instrumental)
         put("duration", duration)
+    }
+
+    fun saveEdited(title: String, artist: String, duration: Double, result: LyricsResult) {
+        check(edits.isDirectory || edits.mkdirs()) { "Cannot create lyrics directory" }
+        val file = File(edits, key(title, knownArtist(artist), duration) + ".json")
+        val temp = File(edits, file.name + ".tmp")
+        temp.writeText(result.toRow(duration).toString(), Charsets.UTF_8)
+        if (!temp.renameTo(file)) {
+            file.writeText(temp.readText(Charsets.UTF_8), Charsets.UTF_8)
+            temp.delete()
+        }
     }
 
     private fun rowToCandidate(row: JSONObject, source: String): LyricsCandidate? {

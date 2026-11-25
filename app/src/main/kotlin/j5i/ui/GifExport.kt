@@ -55,7 +55,7 @@ internal object GifExport {
                             view.drawExportFrame(canvas, bytes, bytes.size, frame * 100_000L, lyricTime.coerceAtLeast(0))
                         } else if (outro != null) {
                             if (!outroCaptured) { outro.captureOrigins(bitmap); outroCaptured = true }
-                            view.drawExportFrame(canvas, ByteArray(0), 0, frame * 100_000L,
+                            view.drawExportFrame(canvas, ByteArray(0), 0, (sceneCount - 1L).coerceAtLeast(0) * 100_000L,
                                 ((first + frames) * 1000.0 / rate * speed).toLong())
                             outro.draw(canvas, (frame - sceneCount) / 10f)
                         }

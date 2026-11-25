@@ -42,6 +42,7 @@ class PlaylistDialog(
     private val onChanged: (List<MusicItem>) -> Unit,
     private var source: List<MusicItem>,
     private val initialTab: Int = 0,
+    private val onOnlineSearch: (String) -> Unit = {},
     private val onSourceTab: (Int, LinearLayout, Dialog) -> Unit = { _, _, _ -> }
 ) {
     private var dialog: Dialog? = null
@@ -330,6 +331,12 @@ class PlaylistDialog(
             else if (source.isEmpty()) "playlist.empty.library" else "playlist.empty.filter"), 12f, p, role = ThemeUi.ROLE_SUB).apply {
             gravity = Gravity.CENTER; setPadding(dp(16), dp(40), dp(16), dp(40))
         })
+        if (songs.isEmpty() && store.query.isNotBlank()) {
+            list.addView(ThemeUi.button(context, p, t("playlist.search_online"), ThemeUi.ROLE_CONTROL) {
+                onOnlineSearch(store.query.trim())
+                selectSourceTab(2)
+            })
+        }
         sortRow.addView(HorizontalScrollView(context).apply {
             isHorizontalScrollBarEnabled = false
             addView(actions)

@@ -47,7 +47,9 @@ internal class IsolatedProviderService : Service() {
             val clazz = loader.loadClass(entryClass)
             require(clazz.classLoader === loader && MusicProvider::class.java.isAssignableFrom(clazz)) { "插件入口无效" }
             val provider = clazz.getDeclaredConstructor().newInstance() as MusicProvider
-            val response = provider.invoke(requestJson, NetworkBroker { request -> broker.request(request) })
+            val response = provider.invoke(requestJson, NetworkBroker { request ->
+                ParcelFileDescriptor.AutoCloseInputStream(broker.requestFile(request)).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            })
             require(response.toByteArray(Charsets.UTF_8).size <= 128 * 1024) { "插件结果过大" }
             return response
         }

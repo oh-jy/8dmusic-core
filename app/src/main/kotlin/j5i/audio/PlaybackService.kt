@@ -64,6 +64,9 @@ class PlaybackService : Service() {
     private val store by lazy { MusicStore(this) }
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val decodeExecutor = Executors.newSingleThreadExecutor()
+    private val dualDecodeExecutor = Executors.newFixedThreadPool(2)
+    @Volatile var dualTracks: Pair<MusicItem, MusicItem>? = null
+        private set
     @Volatile private var queue = listOf<MusicItem>()
     @Volatile private var currentItem: MusicItem? = null
     @Volatile private var loadGeneration = 0
@@ -152,7 +155,13 @@ class PlaybackService : Service() {
             })
             isActive = true
         }
-        player.onEnd = { if (!pausedByFocus) continueQueue() }
+        player.onEnd = {
+            if (dualTracks != null) {
+                desiredPlaying = false
+                updateMedia(title, subtitle, false, player.position, player.duration)
+                onPlaybackChanged?.invoke()
+            } else if (!pausedByFocus) continueQueue()
+        }
         player.onError = { message -> main.post { onPlaybackError?.invoke(message) } }
         player.onReverseUnavailable = {
             controlsReverse = false
@@ -160,6 +169,11 @@ class PlaybackService : Service() {
         }
         player.onSeekOutsideWindow = { position ->
             main.post {
+                val pair = dualTracks
+                if (pair != null) {
+                    loadDual(pair.first, pair.second, position, desiredPlaying || player.isPlaying, preserveSwap = true)
+                    return@post
+                }
                 val item = currentItem ?: return@post
                 load(item, queue, autoplay = desiredPlaying || player.isPlaying, resumePosition = position)
             }
@@ -174,9 +188,11 @@ class PlaybackService : Service() {
     fun load(item: MusicItem, queue: List<MusicItem> = this.queue, autoplay: Boolean = true,
         resumePosition: Double = 0.0) {
         if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
+            val resolving = ++loadGeneration
             decodeExecutor.execute {
                 val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
                 main.post {
+                    if (resolving != loadGeneration) return@post
                     resolved.onSuccess { load(it, queue, autoplay, resumePosition) }
                         .onFailure { onPlaybackError?.invoke("${t("playback.online.failed")}: ${it.message}") }
                 }
@@ -194,6 +210,7 @@ class PlaybackService : Service() {
             if (!active) { onPlaybackError?.invoke(t("playback.source.missing")); return }
         }
         val own = ++loadGeneration
+        dualTracks = null
         desiredPlaying = autoplay
         pausedByFocus = false
         if (!autoplay || currentItem?.uri != item.uri) autoplayFailures = 0
@@ -260,10 +277,89 @@ class PlaybackService : Service() {
         }
     }
 
+    fun loadDual(left: MusicItem, right: MusicItem, resumePosition: Double = 0.0, autoplay: Boolean = true,
+        preserveSwap: Boolean = false) {
+        require(!left.isOnlineAudio() && !right.isOnlineAudio())
+        val own = ++loadGeneration
+        dualTracks = left to right
+        currentItem = left
+        queue = listOf(left, right)
+        desiredPlaying = autoplay
+        pausedByFocus = false
+        transitioning = false
+        radio.stop()
+        player.stop()
+        player.seekRestartSupported = true
+        updateMedia(left.name, right.name, false)
+        val heads = arrayOfNulls<j5i.spatial8d.core.PcmBuffer>(2)
+        fun prepareIfReady() {
+            val first = heads[0]
+            val second = heads[1]
+            if (first != null && second != null) {
+                player.prepareDual(first, second, left.duration / 1000.0, right.duration / 1000.0,
+                    preserveSwap = preserveSwap)
+                if (desiredPlaying && requestPlaybackFocus()) player.play()
+                updateMedia(left.name, right.name, player.isPlaying, player.position, player.duration)
+                onPlaybackChanged?.invoke()
+            }
+        }
+        listOf(left, right).forEachIndexed { index, item ->
+            dualDecodeExecutor.execute {
+                try {
+                    if (resumePosition > 0 && item.duration > 0 && resumePosition >= item.duration / 1000.0) {
+                        main.post {
+                            if (own == loadGeneration) {
+                                heads[index] = j5i.spatial8d.core.PcmBuffer(44100, 1, false).apply { decodeDone = true }
+                                prepareIfReady()
+                            }
+                        }
+                        return@execute
+                    }
+                    var published = false
+                    val result = AudioDecoder(this).decode(store.readableUri(item), {}, { own == loadGeneration }, onHead = { head, _ ->
+                        published = true
+                        main.post {
+                            if (own != loadGeneration) return@post
+                            heads[index] = head
+                            prepareIfReady()
+                        }
+                    }, startPositionSec = resumePosition)
+                    if (!published) {
+                        result.close()
+                        check(resumePosition > 0) { t("playback.load_failed") }
+                        main.post {
+                            if (own == loadGeneration) {
+                                heads[index] = j5i.spatial8d.core.PcmBuffer(44100, 1, false).apply { decodeDone = true }
+                                prepareIfReady()
+                            }
+                        }
+                    }
+                } catch (exception: Exception) {
+                    main.post {
+                        if (own == loadGeneration) {
+                            ++loadGeneration
+                            player.stop()
+                            dualTracks = null
+                            desiredPlaying = false
+                            onPlaybackError?.invoke(exception.message ?: t("playback.load_failed"))
+                            onPlaybackChanged?.invoke()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fun play(): Boolean {
         pausedByHeadset = false
         pausedByFocus = false
+        val pair = dualTracks
+        if (pair != null && player.isPrepared && player.duration > 0 && player.position >= player.duration - 0.05) {
+            loadDual(pair.first, pair.second)
+            return true
+        }
         if (!requestPlaybackFocus()) return false
+        if (dualTracks != null && !player.isPrepared) { desiredPlaying = true; return true }
         val resumed = if (currentItem == null) radio.play() else player.play()
         if (currentItem != null) desiredPlaying = resumed
         updateMedia(title, subtitle, resumed, player.position, player.duration)
@@ -279,9 +375,10 @@ class PlaybackService : Service() {
         updateMedia(title, subtitle, false, player.position, player.duration)
     }
 
-    fun next() = continueQueue(auto = false)
+    fun next() { if (dualTracks == null) continueQueue(auto = false) }
 
     fun previous() {
+        if (dualTracks != null) return
         val item = currentItem ?: return
         PlaybackQueue(queue, playbackMode()).previous(item.uri, item.id)?.let { load(it) }
     }
@@ -289,6 +386,7 @@ class PlaybackService : Service() {
     /** 切到电台也使尚未完成的本地解码失效，避免后台迟到回调重新起播。 */
     fun stopLocal() {
         loadGeneration++
+        dualTracks = null
         transitioning = false
         player.stop()
         currentItem = null
@@ -350,10 +448,12 @@ class PlaybackService : Service() {
 
     /** 每次页面刷新都复用此方法，确保电台与本地歌曲使用同一套系统控制。 */
     fun updateMedia(title: String, subtitle: String, playing: Boolean, position: Double = 0.0, duration: Double = 0.0) {
-        val newTitle = title.ifBlank { t("app.name") }
+        val pair = dualTracks
+        val newTitle = (pair?.let { "${it.first.name} / ${it.second.name}" } ?: title).ifBlank { t("app.name") }
+        val actualSubtitle = if (pair != null) t("dual.title") else subtitle
         val newPositionMs = (position * 1000).toLong().coerceAtLeast(0)
         val newDurationMs = (duration * 1000).toLong().coerceAtLeast(0)
-        val mediaChanged = !mediaInitialized || newTitle != this.title || subtitle != this.subtitle ||
+        val mediaChanged = !mediaInitialized || newTitle != this.title || actualSubtitle != this.subtitle ||
             playing != this.playing || newDurationMs != durationMs || appInForeground != lastAppInForeground
         lastAppInForeground = appInForeground
         val now = SystemClock.elapsedRealtime()
@@ -362,7 +462,7 @@ class PlaybackService : Service() {
         if (!mediaChanged && !positionChanged) return
 
         this.title = newTitle
-        this.subtitle = subtitle
+        this.subtitle = actualSubtitle
         this.playing = playing
         positionMs = newPositionMs
         durationMs = newDurationMs
@@ -371,7 +471,7 @@ class PlaybackService : Service() {
         if (mediaChanged) {
             session.setMetadata(MediaMetadata.Builder()
                 .putString(MediaMetadata.METADATA_KEY_TITLE, this.title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, subtitle)
+                .putString(MediaMetadata.METADATA_KEY_ARTIST, actualSubtitle)
                 .putLong(MediaMetadata.METADATA_KEY_DURATION, durationMs).build())
         }
         val state = if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
@@ -472,6 +572,7 @@ class PlaybackService : Service() {
     }
 
     private fun savePlaybackSnapshot(force: Boolean = false) {
+        if (dualTracks != null) return
         val item = currentItem ?: return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - lastSnapshotAtMs < 5000) return
@@ -492,6 +593,7 @@ class PlaybackService : Service() {
         session.isActive = false
         session.release()
         decodeExecutor.shutdownNow()
+        dualDecodeExecutor.shutdownNow()
         player.close()
         radio.stop()
         radio.stopRecording()
