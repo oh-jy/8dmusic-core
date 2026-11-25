@@ -27,6 +27,7 @@ import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
 
 internal fun videoTime(ms: Int): String {
     val seconds = (ms / 1000).coerceAtLeast(0)
@@ -49,19 +50,28 @@ private fun MainActivity.videoIcon(res: Int, description: String, action: () -> 
     setImageResource(res); contentDescription = description; setColorFilter(palette.text); setBackgroundColor(Color.TRANSPARENT); setOnClickListener { action() }
 }
 
-internal fun MainActivity.openExternalMedia(intent: Intent) {
+internal fun MainActivity.openExternalMedia(intent: Intent, channels: List<Pair<String, () -> Unit>> = emptyList(), channelIndex: Int = -1) {
     val uri = intent.data ?: return
     val live = intent.getBooleanExtra("j5i.live", false)
     val liveStreams = intent.getStringArrayListExtra("j5i.liveStreams").orEmpty().filter {
         runCatching { java.net.URI(it).let { address -> address.scheme in listOf("http", "https") && address.host != null && address.rawUserInfo == null && address.fragment == null } }.getOrDefault(false)
     }.distinct()
     var liveStreamIndex = 0
+    val liveLatency = LongArray(liveStreams.size) { -1L }
+    val liveAudioFailures = mutableSetOf<Int>()
+    val attemptedLiveStreams = mutableSetOf(0)
+    lateinit var switchLiveStream: (Int) -> Unit
     val resumeKey = if (live) "live" else intent.getStringExtra("j5i.providerMv") ?: uri.toString()
     if (uri.scheme !in listOf("content", "file", "http", "https")) return
     val mime = intent.type ?: runCatching { contentResolver.getType(uri) }.getOrNull().orEmpty()
-    externalVideoDialog?.dismiss()
+    if (externalVideoDialog != null) {
+        externalVideoPreviousOrientation?.let { requestedOrientation = it }
+        externalVideoPreviousOrientation = null
+        externalVideoDialog?.dismiss()
+    }
     if (!mime.startsWith("video/", true)) { runCatching { addAndPlay(uri) }.onFailure { toast(t("video.audio.open_failed")) }; return }
     if (recordingKind.isNotEmpty()) { toast(t("video.stop_recording")); return }
+    val liveProbeExecutor = if (liveStreams.isNotEmpty()) Executors.newFixedThreadPool(4) else null
     if (uri.scheme == "content" && intent.flags and Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION != 0) {
         runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
     }
@@ -88,6 +98,37 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setTextColor(Color.WHITE); textSize = 18f; gravity = Gravity.CENTER
         setBackgroundColor(0xaa000000.toInt()); setPadding(28, 16, 28, 16)
         text = t("video.preparing")
+    }
+    val networkSpeed = TextView(this).apply {
+        setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.CENTER
+        setBackgroundColor(0xaa000000.toInt())
+        setPadding(28, 0, 28, 12)
+        text = "${t("video.network_speed")} -- KB/s"
+    }
+    val cornerSpeed = TextView(this).apply {
+        setTextColor(Color.WHITE); textSize = controlTextSize
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Color.TRANSPARENT)
+    }
+    val cornerInfo = LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        setBackgroundColor(Color.TRANSPARENT)
+        addView(cornerSpeed)
+        addView(android.widget.TextClock(this@openExternalMedia).apply {
+            format12Hour = "HH:mm"; format24Hour = "HH:mm"
+            setTextColor(Color.WHITE); textSize = controlTextSize
+            setPadding(ThemeUi.dp(this@openExternalMedia, 12f), 0, 0, 0)
+            setBackgroundColor(Color.TRANSPARENT)
+        })
+    }
+    val loadingPanel = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER
+        addView(android.widget.ProgressBar(this@openExternalMedia).apply {
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.WHITE)
+        }, LinearLayout.LayoutParams(ThemeUi.dp(this@openExternalMedia, 36f), ThemeUi.dp(this@openExternalMedia, 36f)))
+        addView(loading, LinearLayout.LayoutParams(-2, -2))
+        addView(networkSpeed, LinearLayout.LayoutParams(-2, -2))
     }
     val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
     var muted = false
@@ -118,9 +159,18 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         setPadding(8, 8, 8, 8)
         setBackgroundColor(Color.TRANSPARENT)
     }
-    val controlGroups = listOf(controls, topBar, rightControls, centerButtons)
-    centerButtons.addView(videoIcon(R.drawable.video_rewind, t("video.rewind")) {
-        player.seekTo((player.currentPosition - 10000).coerceAtLeast(0)); showControls()
+    fun selectChannel(index: Int) {
+        if (index !in channels.indices || index == channelIndex) return
+        loading.text = t("live.loading")
+        loadingPanel.visibility = View.VISIBLE
+        main.postDelayed({ if (dialog.isShowing && loading.text == t("live.loading")) loadingPanel.visibility = View.GONE }, 15000)
+        channels[index].second()
+    }
+    val controlGroups = mutableListOf<View>(controls, topBar, rightControls, centerButtons)
+    var channelDrawer: View? = null
+    var refreshStreamInfo: () -> Unit = {}
+    centerButtons.addView(videoIcon(R.drawable.video_rewind, t(if (live) "live.previous_channel" else "video.rewind")) {
+        if (live) selectChannel(channelIndex - 1) else player.seekTo((player.currentPosition - 10000).coerceAtLeast(0)); showControls()
     }.apply {
         val padding = ThemeUi.dp(this@openExternalMedia, 12f)
         setPadding(padding, padding, padding, padding)
@@ -128,8 +178,8 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xaa000000.toInt()) }
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 48f), ThemeUi.dp(this, 48f)))
     centerButtons.addView(centerPlay, LinearLayout.LayoutParams(ThemeUi.dp(this, 64f), ThemeUi.dp(this, 64f)).apply { leftMargin = ThemeUi.dp(this@openExternalMedia, 12f); rightMargin = leftMargin })
-    centerButtons.addView(videoIcon(R.drawable.video_forward, t("video.forward")) {
-        player.seekTo((player.currentPosition + 10000).coerceAtMost(player.duration)); showControls()
+    centerButtons.addView(videoIcon(R.drawable.video_forward, t(if (live) "live.next_channel" else "video.forward")) {
+        if (live) selectChannel(channelIndex + 1) else player.seekTo((player.currentPosition + 10000).coerceAtMost(player.duration)); showControls()
     }.apply {
         val padding = ThemeUi.dp(this@openExternalMedia, 12f)
         setPadding(padding, padding, padding, padding)
@@ -137,7 +187,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0xaa000000.toInt()) }
     }, LinearLayout.LayoutParams(ThemeUi.dp(this, 48f), ThemeUi.dp(this, 48f)))
     val hide = Runnable {
-        if (player.isPlaying) {
+        if (player.isPlaying && channelDrawer?.visibility != View.VISIBLE) {
             controlGroups.forEach { view ->
                 view.animate().alpha(0f).setDuration(250).withEndAction { view.visibility = android.view.View.INVISIBLE }.start()
             }
@@ -154,7 +204,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         main.removeCallbacks(hide)
         main.postDelayed(hide, 3000)
     }
-    fun showChoices(anchor: View, labels: List<String>, selected: Int, choose: (Int) -> Unit) {
+    fun showChoices(anchor: View, labels: List<String>, selected: Int, width: Int = 120, choose: (Int) -> Unit) {
         main.removeCallbacks(hide)
         val items = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -167,7 +217,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         overlay.getLocationOnScreen(overlayPosition)
         val rowHeight = ThemeUi.dp(this, 36f)
         val height = minOf(rowHeight * labels.size, (anchorPosition[1] - overlayPosition[1] - ThemeUi.dp(this, 8f)).coerceAtLeast(rowHeight))
-        val popup = PopupWindow(scroll, ThemeUi.dp(this, 120f), height, true).apply {
+        val popup = PopupWindow(scroll, ThemeUi.dp(this, width.toFloat()), height, true).apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
             isOutsideTouchable = true
             setOnDismissListener { showControls() }
@@ -176,6 +226,8 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
             items.addView(ThemeUi.text(this, label, 14f, palette,
                 bold = index == selected, role = if (index == selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
                 gravity = Gravity.CENTER
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
                 setOnClickListener { popup.dismiss(); choose(index) }
             }, LinearLayout.LayoutParams(-1, rowHeight))
         }
@@ -265,6 +317,30 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         showControls()
     }.topIcon()
     rightControls.addView(muteButton, LinearLayout.LayoutParams(topButtonSize, topButtonSize))
+    val liveLineButton = if (liveStreams.isNotEmpty()) TextView(this).apply {
+        setTextColor(Color.WHITE); gravity = Gravity.CENTER; textSize = controlTextSize
+        includeFontPadding = false
+        text = "${t("live.lines")} ${liveStreamIndex + 1}"
+        setOnClickListener {
+            val orderedIndices = liveStreams.indices.sortedWith(compareBy<Int> { it in liveAudioFailures }
+                .thenBy { if (liveLatency[it] >= 0) liveLatency[it] else Long.MAX_VALUE })
+            val labels = orderedIndices.map { index ->
+                val stream = liveStreams[index]
+                val host = android.net.Uri.parse(stream).host.orEmpty()
+                val latency = when (val value = liveLatency[index]) {
+                    -1L -> t("live.line.testing")
+                    -2L -> t("live.line.unavailable")
+                    else -> "${t("live.line.probe")} ${value} ms"
+                }
+                val audioStatus = if (index in liveAudioFailures) " · ${t("live.audio_unsupported")}" else ""
+                "${t("live.line.number").format(index + 1)} · $host · $latency$audioStatus"
+            }
+            showChoices(this, labels, orderedIndices.indexOf(liveStreamIndex), 280) { index ->
+                switchLiveStream(orderedIndices[index])
+            }
+        }
+    } else null
+    if (liveLineButton != null) rightControls.addView(liveLineButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 62f), topButtonSize))
     rightControls.addView(speedButton, LinearLayout.LayoutParams(ThemeUi.dp(this, 40f), topButtonSize))
     rightControls.addView(modeButton, LinearLayout.LayoutParams(ThemeUi.dp(this, if (j5i.spatial8d.ui.AppLanguage.resolved(this) == j5i.spatial8d.ui.AppLanguage.ENGLISH) 52f else 40f), topButtonSize))
     val providerMvItem = currentItem?.takeIf { intent.hasExtra("j5i.providerMv") && it.uri.startsWith("online://plugin/") }
@@ -291,7 +367,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
                             if (options[index].id == currentQuality) return@showChoices
                             val cacheRequest = ++qualityRequest
                             loading.text = t("video.mv.caching")
-                            loading.visibility = View.VISIBLE
+                            loadingPanel.visibility = View.VISIBLE
                             Thread {
                                 val media = runCatching {
                                     j5i.spatial8d.provider.ProviderMvCache.cache(this@openExternalMedia, providerMvItem, options[index],
@@ -312,7 +388,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
                                         currentVideoUri = android.net.Uri.parse(it.uri)
                                         currentQuality = options[index].id
                                         player.setVideoURI(currentVideoUri)
-                                    }.onFailure { loading.visibility = View.GONE; toast("${t("video.mv.load_failed")}: ${errorDetail(it)}") }
+                                    }.onFailure { loadingPanel.visibility = View.GONE; toast("${t("video.mv.load_failed")}: ${errorDetail(it)}") }
                                 }
                             }.start()
                         }
@@ -337,6 +413,10 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         val margin = ThemeUi.dp(this@openExternalMedia, 24f)
         setMargins(margin, margin, margin, 0)
     })
+    overlay.addView(cornerInfo, FrameLayout.LayoutParams(-2, topButtonSize, Gravity.TOP or Gravity.END).apply {
+        topMargin = ThemeUi.dp(this@openExternalMedia, 24f)
+        rightMargin = topMargin
+    })
     overlay.addView(controls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply { bottomMargin = ThemeUi.dp(this@openExternalMedia, 24f) })
     overlay.addView(rightControls, FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM).apply {
         leftMargin = ThemeUi.dp(this@openExternalMedia, 24f)
@@ -345,13 +425,102 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     })
     overlay.addView(centerButtons, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
     overlay.addView(feedback, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
-    overlay.addView(loading, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+    overlay.addView(loadingPanel, FrameLayout.LayoutParams(-2, -2, Gravity.CENTER))
+    if (channels.isNotEmpty()) {
+        val drawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(palette.surface)
+            visibility = View.GONE
+        }
+        drawer.addView(ThemeUi.text(this, t("live.channels"), 16f, palette, bold = true).apply {
+            setPadding(ThemeUi.dp(this@openExternalMedia, 16f), ThemeUi.dp(this@openExternalMedia, 12f), 0, ThemeUi.dp(this@openExternalMedia, 12f))
+        })
+        val channelRows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        channels.forEachIndexed { index, (name, _) ->
+            channelRows.addView(ThemeUi.button(this, palette, name, if (index == channelIndex) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT) {
+                drawer.visibility = View.GONE; showControls()
+                selectChannel(index)
+            })
+        }
+        drawer.addView(android.widget.ScrollView(this).apply { addView(channelRows) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        overlay.addView(drawer, FrameLayout.LayoutParams(ThemeUi.dp(this, 240f), -1, Gravity.END))
+        val drawerButton = ThemeUi.text(this, t("live.channels"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            gravity = Gravity.CENTER
+            background = ThemeUi.bgDrawable(this@openExternalMedia, palette.surface, 8f)
+            setOnClickListener {
+                drawer.visibility = if (drawer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                channelDrawer = if (drawer.visibility == View.VISIBLE) drawer else null
+                showControls()
+                if (drawer.visibility == View.VISIBLE) main.removeCallbacks(hide)
+            }
+        }
+        controlGroups.add(drawerButton)
+        overlay.addView(drawerButton, FrameLayout.LayoutParams(ThemeUi.dp(this, 52f), ThemeUi.dp(this, 48f), Gravity.END or Gravity.CENTER_VERTICAL))
+    }
+    if (live) {
+        val sourceDrawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ThemeUi.dp(this@openExternalMedia, 16f), ThemeUi.dp(this@openExternalMedia, 16f), ThemeUi.dp(this@openExternalMedia, 16f), 0)
+            setBackgroundColor(palette.surface)
+            visibility = View.GONE
+        }
+        sourceDrawer.addView(ThemeUi.text(this, t("live.source_info"), 16f, palette, bold = true))
+        val details = ThemeUi.text(this, "", 13f, palette, role = ThemeUi.ROLE_TEXT).apply {
+            setPadding(0, ThemeUi.dp(this@openExternalMedia, 12f), 0, 0)
+        }
+        sourceDrawer.addView(android.widget.ScrollView(this).apply { addView(details) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        overlay.addView(sourceDrawer, FrameLayout.LayoutParams(ThemeUi.dp(this, 240f), -1, Gravity.END))
+        var lookupGeneration = 0
+        refreshStreamInfo = {
+            val address = liveStreams.getOrNull(liveStreamIndex) ?: currentVideoUri.toString()
+            val host = runCatching { java.net.URI(address).host }.getOrNull().orEmpty()
+            val metrics = if (Build.VERSION.SDK_INT >= 26) runCatching { prepared?.metrics }.getOrNull() else null
+            val width = runCatching { prepared?.videoWidth ?: 0 }.getOrDefault(0)
+            val height = runCatching { prepared?.videoHeight ?: 0 }.getOrDefault(0)
+            val size = if (width > 0 && height > 0) "${width}x$height" else null
+            val video = listOfNotNull(metrics?.getString("android.media.mediaplayer.video.mime"),
+                metrics?.getString("android.media.mediaplayer.video.codec"), size).joinToString(" · ").ifEmpty { t("live.info.unknown") }
+            val audio = listOfNotNull(metrics?.getString("android.media.mediaplayer.audio.mime"),
+                metrics?.getString("android.media.mediaplayer.audio.codec")).joinToString(" · ").ifEmpty { t("live.info.unknown") }
+            fun display(ip: String) {
+                details.text = "${t("live.info.host")}: ${host.ifEmpty { t("live.info.unknown") }}\n${t("live.info.dns")}: $ip\n\n${t("live.info.video")}: $video\n\n${t("live.info.audio")}: $audio"
+            }
+            val generation = ++lookupGeneration
+            display(t("live.line.testing"))
+            if (host.isNotEmpty()) Thread {
+                val ip = runCatching { java.net.InetAddress.getAllByName(host).joinToString(", ") { it.hostAddress.orEmpty() } }
+                    .getOrNull().orEmpty().ifEmpty { t("live.info.unknown") }
+                main.post { if (dialog.isShowing && generation == lookupGeneration) display(ip) }
+            }.start() else display(t("live.info.unknown"))
+        }
+        val sourceButton = ThemeUi.text(this, t("live.source_info.short"), 13f, palette, role = ThemeUi.ROLE_ACCENT).apply {
+            gravity = Gravity.CENTER
+            background = ThemeUi.bgDrawable(this@openExternalMedia, palette.surface, 8f)
+            translationY = ThemeUi.dp(this@openExternalMedia, 52f).toFloat()
+            setOnClickListener {
+                val opening = sourceDrawer.visibility != View.VISIBLE
+                channelDrawer?.visibility = View.GONE
+                sourceDrawer.visibility = if (opening) View.VISIBLE else View.GONE
+                channelDrawer = if (opening) sourceDrawer else null
+                if (opening) refreshStreamInfo()
+                showControls()
+                if (opening) main.removeCallbacks(hide)
+            }
+        }
+        controlGroups.add(sourceButton)
+        overlay.addView(sourceButton, FrameLayout.LayoutParams(ThemeUi.dp(this, 52f), ThemeUi.dp(this, 48f), Gravity.END or Gravity.CENTER_VERTICAL))
+    }
     overlay.setOnApplyWindowInsetsListener { _, insets ->
         val cutout = if (Build.VERSION.SDK_INT >= 28) insets.displayCutout else null
         val margin = ThemeUi.dp(this, 24f)
         (topBar.layoutParams as FrameLayout.LayoutParams).apply {
             setMargins(margin + (cutout?.safeInsetLeft ?: 0), margin + (cutout?.safeInsetTop ?: 0), margin + (cutout?.safeInsetRight ?: 0), 0)
             topBar.layoutParams = this
+        }
+        (cornerInfo.layoutParams as FrameLayout.LayoutParams).apply {
+            topMargin = margin + (cutout?.safeInsetTop ?: 0)
+            rightMargin = margin + (cutout?.safeInsetRight ?: 0)
+            cornerInfo.layoutParams = this
         }
         (controls.layoutParams as FrameLayout.LayoutParams).apply {
             leftMargin = cutout?.safeInsetLeft ?: 0
@@ -372,6 +541,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     fun toggleControls() {
         if (hidden) showControls() else {
+            channelDrawer?.visibility = View.GONE
             controlGroups.forEach { it.visibility = android.view.View.INVISIBLE }
             hidden = true
             main.removeCallbacks(hide)
@@ -456,21 +626,51 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     }
     externalVideoDialog = dialog
     var liveTimeout: Runnable? = null
-    fun nextLiveStream(): Boolean {
-        if (!dialog.isShowing || liveStreamIndex + 1 >= liveStreams.size) return false
+    var rendered = false
+    lateinit var nextLiveStream: () -> Boolean
+    fun liveFailed() {
+        loadingPanel.visibility = View.GONE
+        showControls()
+        toast(t("video.play_failed"))
+    }
+    switchLiveStream = { index ->
         liveTimeout?.let(main::removeCallbacks)
-        liveStreamIndex++
+        liveStreamIndex = index
+        attemptedLiveStreams.add(index)
+        liveLineButton?.text = "${t("live.lines")} ${index + 1}"
         loading.text = t("live.switching")
-        loading.visibility = View.VISIBLE
+        loadingPanel.visibility = View.VISIBLE
+        rendered = false
+        prepared = null
         player.stopPlayback()
-        player.setVideoURI(android.net.Uri.parse(liveStreams[liveStreamIndex]))
-        liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
-        main.postDelayed(liveTimeout!!, 12000)
-        return true
+        player.setVideoURI(android.net.Uri.parse(liveStreams[index]))
+        if (channelDrawer?.visibility == View.VISIBLE) refreshStreamInfo()
+        liveTimeout = Runnable { if (dialog.isShowing && !nextLiveStream()) liveFailed() }
+        main.postDelayed(liveTimeout!!, 30000)
+    }
+    nextLiveStream = {
+        val next = liveStreams.indices.filter { it !in attemptedLiveStreams && it !in liveAudioFailures }
+            .minByOrNull { if (liveLatency[it] >= 0) liveLatency[it] else Long.MAX_VALUE }
+        if (!dialog.isShowing || next == null) false
+        else { switchLiveStream(next); true }
     }
     val update = object : Runnable {
+        var lastBytes = android.net.TrafficStats.UNSUPPORTED.toLong()
+        var lastSample = 0L
         override fun run() {
             if (!dialog.isShowing) return
+            val now = SystemClock.elapsedRealtime()
+            if (now - lastSample >= 1000L) {
+                val bytes = android.net.TrafficStats.getTotalRxBytes()
+                val value = if (bytes >= 0 && lastBytes >= 0 && bytes >= lastBytes && lastSample > 0L) {
+                    val kilobytes = (bytes - lastBytes) * 1000.0 / (now - lastSample) / 1024.0
+                    "%.1f KB/s".format(java.util.Locale.ROOT, kilobytes)
+                } else "-- KB/s"
+                cornerSpeed.text = value
+                cornerSpeed.contentDescription = "${t("video.network_speed")} $value"
+                networkSpeed.text = "${t("video.network_speed")} $value"
+                lastBytes = bytes; lastSample = now
+            }
             if (!dragging) {
                 seek.max = player.duration.coerceAtLeast(0)
                 seek.progress = player.currentPosition.coerceAtLeast(0)
@@ -487,16 +687,22 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
     var cacheThread: Thread? = null
     dialog.setOnDismissListener {
         qualityRequest++
+        liveProbeExecutor?.shutdownNow()
         liveTimeout?.let(main::removeCallbacks)
         main.removeCallbacks(update); main.removeCallbacks(hide); cacheThread?.interrupt()
         if (!live && !completed && player.duration > 0 && player.currentPosition > 0) preferences.edit().putInt("video-position:$resumeKey", player.currentPosition).apply()
         player.stopPlayback(); prepared = null
-        externalVideoPreviousOrientation?.let { requestedOrientation = it }; externalVideoPreviousOrientation = null
-        if (externalVideo === player) externalVideo = null; if (externalVideoDialog === dialog) externalVideoDialog = null
+        if (externalVideo === player) externalVideo = null
+        if (externalVideoDialog === dialog) {
+            externalVideoPreviousOrientation?.let { requestedOrientation = it }
+            externalVideoPreviousOrientation = null
+            externalVideoDialog = null
+        }
     }
     player.setOnPreparedListener {
-        liveTimeout?.let(main::removeCallbacks)
+        if (externalVideoDialog !== dialog || !dialog.isShowing) return@setOnPreparedListener
         prepared = it
+        if (channelDrawer?.visibility == View.VISIBLE) refreshStreamInfo()
         if (!live) rememberVideo(uri, intent)
         it.setVolume(if (muted) 0f else 1f, if (muted) 0f else 1f)
         requestedOrientation = if (it.videoWidth > it.videoHeight) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -505,25 +711,48 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         val saved = if (live) 0 else qualityResume?.first ?: preferences.getInt("video-position:$resumeKey", 0)
         val resume = videoResumePosition(saved, it.duration)
         if (resume > 0) it.seekTo(resume)
-        loading.visibility = View.GONE
         val shouldPlay = qualityResume?.second ?: true
         qualityResume = null
-        if (shouldPlay) it.start() else player.pause()
+        if (shouldPlay) it.start() else { player.pause(); loadingPanel.visibility = View.GONE }
         overlay.post { applyScaleMode() }; showControls()
     }
     player.setOnCompletionListener { completed = true; if (!live) preferences.edit().remove("video-position:$resumeKey").apply() }
-    player.setOnInfoListener { _, what, _ ->
+    player.setOnInfoListener { mediaPlayer, what, _ ->
+        if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START) {
+            loading.text = t("live.buffering")
+            loadingPanel.visibility = View.VISIBLE
+        } else if (what == android.media.MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+            rendered = true
+            loadingPanel.visibility = View.GONE
+            liveTimeout?.let(main::removeCallbacks)
+        } else if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END && rendered) {
+            loadingPanel.visibility = View.GONE
+        } else if (live && what == android.media.MediaPlayer.MEDIA_INFO_AUDIO_NOT_PLAYING) {
+            val failedIndex = liveStreamIndex
+            main.post {
+                if (dialog.isShowing && prepared === mediaPlayer && liveStreamIndex == failedIndex) {
+                    liveAudioFailures.add(failedIndex)
+                    if (liveStreams.isEmpty() || !nextLiveStream()) {
+                        liveTimeout?.let(main::removeCallbacks)
+                        loadingPanel.visibility = View.GONE
+                        showControls()
+                        toast(t("live.audio_unsupported"))
+                    } else toast(t("live.audio_switching"))
+                }
+            }
+        }
         if (liveStreams.isNotEmpty()) {
             if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_START) {
                 liveTimeout?.let(main::removeCallbacks)
-                liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
-                main.postDelayed(liveTimeout!!, 15000)
-            } else if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END) liveTimeout?.let(main::removeCallbacks)
+                liveTimeout = Runnable { if (dialog.isShowing && !nextLiveStream()) liveFailed() }
+                main.postDelayed(liveTimeout!!, 30000)
+            } else if (what == android.media.MediaPlayer.MEDIA_INFO_BUFFERING_END && rendered) liveTimeout?.let(main::removeCallbacks)
         }
         false
     }
     player.setOnErrorListener { _, _, _ ->
         if (live && nextLiveStream()) return@setOnErrorListener true
+        if (liveStreams.isNotEmpty()) { liveTimeout?.let(main::removeCallbacks); liveFailed(); return@setOnErrorListener true }
         dialog.dismiss()
         val web = intent.getStringExtra("j5i.liveWeb")
         val fallbackWeb = intent.getStringExtra("j5i.liveFallbackWeb")?.takeIf {
@@ -550,20 +779,35 @@ internal fun MainActivity.openExternalMedia(intent: Intent) {
         true
     }
     dialog.show(); main.post(update)
+    liveStreams.forEachIndexed { index, stream ->
+        liveProbeExecutor?.execute {
+            val started = SystemClock.elapsedRealtime()
+            val result = runCatching {
+                val client = j5i.spatial8d.provider.ProviderNetwork.client(true).newBuilder().callTimeout(4, TimeUnit.SECONDS).build()
+                client.newCall(Request.Builder().url(stream).get().build()).execute().use { response ->
+                    check(response.isSuccessful)
+                    check((response.body?.byteStream()?.read() ?: -1) >= 0)
+                }
+                SystemClock.elapsedRealtime() - started
+            }.getOrDefault(-2L)
+            main.post { if (dialog.isShowing) liveLatency[index] = result }
+        }
+    }
     if (liveStreams.isNotEmpty()) {
-        liveTimeout = Runnable { if (!nextLiveStream()) { dialog.dismiss(); toast(t("video.play_failed")) } }
-        main.postDelayed(liveTimeout!!, 12000)
+        liveTimeout = Runnable { if (dialog.isShowing && !nextLiveStream()) liveFailed() }
+        main.postDelayed(liveTimeout!!, 30000)
     }
     val cached = if (!live && isCacheableVideo(uri, mime)) videoCacheFile(this, uri.toString()).takeIf { it.isFile && it.length() > 0L } else null
     fun startVideo(source: android.net.Uri) {
-        loading.visibility = View.GONE
+        loading.text = t("video.preparing")
+        loadingPanel.visibility = View.VISIBLE
         player.setVideoURI(source)
     }
     if (cached != null) {
         PlaybackCacheMetadata.put(this, cached, intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty(), uri.host.orEmpty())
         startVideo(android.net.Uri.fromFile(cached))
     } else if (!live && isCacheableVideo(uri, mime)) {
-        loading.visibility = View.VISIBLE
+        loadingPanel.visibility = View.VISIBLE
         val target = videoCacheFile(this, uri.toString())
         if (!PlaybackCacheMetadata.tryBegin(target)) {
             startVideo(uri)

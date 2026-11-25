@@ -120,7 +120,8 @@ private fun highestMvOption(options: List<j5i.spatial8d.provider.ProviderTrackRe
     options.maxWithOrNull(compareBy<j5i.spatial8d.provider.ProviderTrackRef.MvOption>({ it.size > 0L }, { it.size }, { mvQualityRank(it.label) }))
         ?: options.last()
 
-internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, autoSelectHighestQuality: Boolean = false) {
+internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, autoSelectHighestQuality: Boolean = false,
+    fallbackToAudio: (() -> Unit)? = null) {
     if (recordingKind.isNotEmpty()) { toast(t("playback.stop_recording_mv")); return }
     val returnToOnline = !audioOnly && onlineDialog?.isShowing == true
     val generation = prepareOnlineSelection(item, t("playback.mv.resolving"))
@@ -134,7 +135,7 @@ internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, au
                     val option = highestMvOption(options)
                     playbackStatus = t("playback.mv.auto").format(j5i.spatial8d.ui.AppLanguage.mvQuality(this, option.label))
                     refreshPlayback()
-                    loadProviderMv(item, option, audioOnly = true, generation)
+                    loadProviderMv(item, option, audioOnly = true, generation, fallbackToAudio = fallbackToAudio)
                     return@onSuccess
                 }
                 playbackStatus = t("playback.mv.choose")
@@ -154,6 +155,7 @@ internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, au
                 }
                 sheet.show()
             }.onFailure {
+                if (fallbackToAudio != null) { fallbackToAudio(); return@onFailure }
                 playbackStatus = "${t("video.mv.resolve_failed")}: ${errorDetail(it)}"
                 toast(playbackStatus)
                 refreshPlayback()
@@ -163,7 +165,7 @@ internal fun MainActivity.playProviderMv(item: MusicItem, audioOnly: Boolean, au
 }
 
 private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.provider.ProviderTrackRef.MvOption,
-    audioOnly: Boolean, generation: Int, returnToOnline: Boolean = false) {
+    audioOnly: Boolean, generation: Int, returnToOnline: Boolean = false, fallbackToAudio: (() -> Unit)? = null) {
     Thread {
         val result = runCatching {
             j5i.spatial8d.provider.ProviderMvCache.cache(this, item, option,
@@ -191,6 +193,7 @@ private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.p
                         .putExtra("j5i.returnToOnline", returnToOnline))
                 }
             }.onFailure {
+                if (fallbackToAudio != null) { fallbackToAudio(); return@onFailure }
                 playbackStatus = "${t("video.mv.resolve_failed")}: ${errorDetail(it)}"
                 toast(playbackStatus)
                 refreshPlayback()
@@ -199,18 +202,16 @@ private fun MainActivity.loadProviderMv(item: MusicItem, option: j5i.spatial8d.p
     }.start()
 }
 
-internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
-    if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
-        if (recordingKind.isNotEmpty()) { toast(t("plugin.stop_recording")); return }
-        val generation = prepareOnlineSelection(item, t("playback.online.resolving"))
-        Thread {
+private fun MainActivity.resolveOnlineAudio(item: MusicItem, autoplay: Boolean, allowMvFallback: Boolean) {
+    val generation = prepareOnlineSelection(item, t("playback.online.resolving"))
+    Thread {
             val resolved = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolve(this, item) }
             main.post {
                 if (generation != loadGeneration) return@post
                 resolved.onSuccess { load(it, autoplay) }
                     .onFailure {
                         val mv = Uri.parse(item.uri).getQueryParameter("mv").orEmpty()
-                        if (mv.isNotBlank()) {
+                        if (allowMvFallback && autoplay && mv.isNotBlank()) {
                             playProviderMv(item, audioOnly = true, autoSelectHighestQuality = true)
                         } else {
                             playbackStatus = "${t("playback.online.failed")}: ${errorDetail(it)}"
@@ -219,7 +220,21 @@ internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
                         }
                     }
             }
-        }.start()
+    }.start()
+}
+
+internal fun MainActivity.load(item: MusicItem, autoplay: Boolean) {
+    if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(item)) {
+        if (recordingKind.isNotEmpty()) { toast(t("plugin.stop_recording")); return }
+        val uri = Uri.parse(item.uri)
+        val source = uri.getQueryParameter("source").orEmpty()
+        val hasMv = uri.host == "plugin" && source in setOf("platform.netease", "platform.qq", "platform.kugou") &&
+            uri.getQueryParameter("mv").orEmpty().isNotBlank()
+        val anonymousMv = autoplay && hasMv && j5i.spatial8d.provider.ProviderCredentials(this).get(source).isEmpty()
+        if (anonymousMv) {
+            playProviderMv(item, audioOnly = true, autoSelectHighestQuality = true,
+                fallbackToAudio = { resolveOnlineAudio(item, autoplay, allowMvFallback = false) })
+        } else resolveOnlineAudio(item, autoplay, allowMvFallback = true)
         return
     }
         if (item.album.startsWith("provider:")) {

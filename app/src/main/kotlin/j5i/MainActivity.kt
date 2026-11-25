@@ -209,6 +209,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var onlineSearchSeq = 0
     internal var sourceSearchSeq = 0
     internal var pendingDeleteResult: ((Boolean) -> Unit)? = null
+    internal var pendingRenameResult: ((Boolean) -> Unit)? = null
     internal var recordingKind = ""
     internal var recordingPath = ""
     internal var recordingStartedAt = 0L
@@ -465,6 +466,12 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             pendingDeleteResult = null
             return
         }
+        if (requestCode == 8145) {
+            val callback = pendingRenameResult
+            pendingRenameResult = null
+            callback?.invoke(resultCode == RESULT_OK)
+            return
+        }
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
@@ -666,6 +673,52 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
             }
         }
         onResult(runCatching { contentResolver.delete(uri, null, null) > 0 }.getOrDefault(false))
+    }
+
+    override fun renameLibrarySource(item: MusicItem, name: String, onResult: (MusicItem?) -> Unit) {
+        val uri = Uri.parse(item.uri)
+        fun finish(newUri: Uri?) {
+            if (newUri == null) { onResult(null); return }
+            val renamed = item.copy(name = name, uri = newUri.toString())
+            musicStore.updateRenamed(item, renamed)
+            if (currentItem?.id == item.id && currentItem?.uri == item.uri) {
+                currentItem = renamed
+                currentUri = renamed.uri
+            }
+            onResult(renamed)
+        }
+        if (uri.scheme == "file") {
+            val source = java.io.File(uri.path ?: return onResult(null))
+            if (runCatching { source.canonicalFile.parentFile == java.io.File(filesDir, "provider-audio").canonicalFile }.getOrDefault(true)) {
+                onResult(null)
+                return
+            }
+            val target = java.io.File(source.parentFile, name)
+            finish(if (source == target || !target.exists() && source.renameTo(target)) Uri.fromFile(target) else null)
+            return
+        }
+        if (uri.scheme != "content") { onResult(null); return }
+        fun update(): Uri? = if (android.provider.DocumentsContract.isDocumentUri(this, uri)) {
+            android.provider.DocumentsContract.renameDocument(contentResolver, uri, name)
+        } else {
+            val values = android.content.ContentValues().apply { put(MediaStore.MediaColumns.DISPLAY_NAME, name) }
+            if (contentResolver.update(uri, values, null, null) > 0) uri else null
+        }
+        try {
+            finish(update())
+        } catch (error: SecurityException) {
+            val sender = when {
+                Build.VERSION.SDK_INT >= 30 && uri.authority == "media" -> runCatching {
+                    MediaStore.createWriteRequest(contentResolver, listOf(uri)).intentSender
+                }.getOrNull()
+                Build.VERSION.SDK_INT >= 29 && error is android.app.RecoverableSecurityException -> error.userAction.actionIntent.intentSender
+                else -> null
+            }
+            if (sender == null) { onResult(null); return }
+            pendingRenameResult = { granted -> finish(if (granted) runCatching { update() }.getOrNull() else null) }
+            try { startIntentSenderForResult(sender, 8145, null, 0, 0, 0) }
+            catch (_: Exception) { pendingRenameResult = null; onResult(null) }
+        } catch (_: Exception) { onResult(null) }
     }
 
     override fun addAudio() = openAudio.launch(arrayOf("audio/*"))

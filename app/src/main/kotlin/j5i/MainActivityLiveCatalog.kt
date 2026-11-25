@@ -13,11 +13,6 @@ import j5i.spatial8d.provider.ProviderPluginRunner
 import j5i.spatial8d.provider.ProviderPluginStore
 import j5i.spatial8d.ui.ThemeUi
 import org.json.JSONObject
-import j5i.spatial8d.provider.ProviderNetwork
-import okhttp3.Request
-import java.util.concurrent.Executors
-import java.util.concurrent.ExecutorCompletionService
-import java.util.concurrent.TimeUnit
 
 private fun liveUrl(value: String): Boolean = runCatching {
     val uri = java.net.URI(value)
@@ -112,57 +107,15 @@ internal fun MainActivity.showLiveCatalog(entry: ProviderPluginStore.Entry, kind
                         } else if (kind == "tv" && "live-tv" in entry.descriptor.capabilities) {
                             val streams = (0 until lines.length()).map { lines.getJSONObject(it).optString("url") }.filter(::liveUrl).distinct()
                             if (streams.isEmpty()) { toast(t("live.failed")); return@invoke }
-                            status.text = t("live.testing")
-                            more.isEnabled = false
-                            val generation = ++requestGeneration
-                            loading = true
-                            Thread {
-                                val executor = Executors.newFixedThreadPool(6)
-                                val completion = ExecutorCompletionService<String?>(executor)
-                                val client = ProviderNetwork.client(true).newBuilder()
-                                    .callTimeout(4, TimeUnit.SECONDS).build()
-                                streams.forEach { stream -> completion.submit {
-                                    runCatching {
-                                        var current = stream
-                                        var valid = false
-                                        repeat(5) {
-                                            if (!valid) client.newCall(Request.Builder().url(current).get().build()).execute().use { response ->
-                                                if (response.isRedirect) {
-                                                    current = response.header("Location")?.let { response.request.url.resolve(it)?.toString() }
-                                                        ?: error("Invalid redirect")
-                                                } else {
-                                                    check(response.isSuccessful)
-                                                    val bytes = ByteArray(512)
-                                                    val count = response.body?.byteStream()?.read(bytes) ?: -1
-                                                    valid = count > 0 && (bytes[0] == 0x47.toByte() ||
-                                                        String(bytes, 0, count, Charsets.UTF_8).trimStart().startsWith("#EXTM3U") ||
-                                                        count >= 8 && String(bytes, 4, 4, Charsets.US_ASCII) == "ftyp")
-                                                }
-                                            }
-                                        }
-                                        if (valid) stream else null
-                                    }.getOrNull()
-                                } }
-                                var fastest: String? = null
-                                try {
-                                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(12)
-                                    for (index in streams.indices) {
-                                        val remaining = deadline - System.nanoTime()
-                                        if (remaining <= 0) break
-                                        fastest = completion.poll(remaining, TimeUnit.NANOSECONDS)?.get()
-                                        if (fastest != null) break
-                                    }
-                                } finally { executor.shutdownNow() }
-                                runOnUiThread {
-                                    if (!dialog.isShowing || generation != requestGeneration) return@runOnUiThread
-                                    loading = false; more.isEnabled = true; status.text = ""
-                                    val first = fastest ?: streams.first()
-                                    val ordered = arrayListOf(first).apply { addAll(streams.filter { it != first }) }
-                                    openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(first), "video/*")
-                                        .putExtra(Intent.EXTRA_TITLE, title).putExtra("j5i.live", true)
-                                        .putStringArrayListExtra("j5i.liveStreams", ordered))
+                            val visibleChannels = (0 until rows.childCount).mapNotNull { index ->
+                                (rows.getChildAt(index) as? android.widget.TextView)?.let { button ->
+                                    button.text.toString() to { button.performClick(); Unit }
                                 }
-                            }.start()
+                            }
+                            openExternalMedia(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(streams.first()), "video/*")
+                                .putExtra(Intent.EXTRA_TITLE, title).putExtra("j5i.live", true)
+                                .putStringArrayListExtra("j5i.liveStreams", ArrayList(streams)), visibleChannels,
+                                visibleChannels.indexOfFirst { it.first == title })
                         } else {
                             val lineItems = (0 until lines.length()).map { lines.getJSONObject(it) }
                             choose(title, lineItems.map { it.optString("title") }) { index ->

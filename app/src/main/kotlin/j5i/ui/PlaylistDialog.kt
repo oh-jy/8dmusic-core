@@ -24,6 +24,7 @@ import android.provider.Settings
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import android.widget.TextView
+import android.widget.ImageButton
 import android.widget.Toast
 import j5i.spatial8d.data.FAVORITES_INDEX
 import j5i.spatial8d.data.FAVORITES_NAME
@@ -394,6 +395,15 @@ class PlaylistDialog(
                 addView(ThemeUi.text(c, "${AppLanguage.artist(c, song.artist)} · ${AppLanguage.album(c, song.album)} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) }, LinearLayout.LayoutParams(0, -2, 1f))
             })
         })
+        row.addView(ImageButton(c).apply {
+            val favorite = store.isFavorite(song.id)
+            background = null
+            setPadding(dp(19), dp(17), dp(11), dp(17))
+            setImageDrawable(HeartDrawable(favorite, if (favorite) 0xffff5c7a.toInt() else p.controlText))
+            contentDescription = t(if (favorite) "ui.favorite.remove" else "ui.favorite.add")
+            layoutParams = LinearLayout.LayoutParams(dp(44), dp(48))
+            setOnClickListener { store.toggleFavorite(song.id); refresh(scrollToPlaying = false) }
+        })
         row.addView(ThemeUi.text(c, "⋯", 18f, p, role = ThemeUi.ROLE_ACCENT).apply {
             contentDescription = "${song.name}, ${t("playlist.more")}"
             gravity = Gravity.CENTER
@@ -430,6 +440,9 @@ class PlaylistDialog(
                     sheet.dismiss(); store.removePermanently(song); syncLibrary()
                 })
             } else {
+                addView(sheetButton(t("playlist.rename"), ThemeUi.ROLE_CONTROL) {
+                    sheet.dismiss(); rename(song)
+                })
                 addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
                     sheet.dismiss(); confirmDelete(song)
                 })
@@ -437,6 +450,31 @@ class PlaylistDialog(
                     sheet.dismiss(); (context as? PlaylistMetadataHost)?.editMetadata(song)
                 })
             }
+        }
+        sheet.show()
+    }
+
+    private fun rename(song: MusicItem) {
+        val extension = song.name.substringAfterLast('.', "").takeIf { song.name.contains('.') && it.isNotBlank() }
+        val input = ThemeUi.input(context, p, t("playlist.rename")).apply {
+            setText(if (extension != null) song.name.dropLast(extension.length + 1) else song.name)
+            selectAll()
+        }
+        lateinit var sheet: Dialog
+        sheet = ThemeUi.showSheet(context, p, t("playlist.rename")) {
+            addView(input)
+            addView(sheetButton(t("save"), ThemeUi.ROLE_ACCENT_FILL) {
+                val name = input.text.toString().trim()
+                if (name.isBlank() || name == "." || name == ".." || name.any { it in "/\\\u0000" }) {
+                    Toast.makeText(context, t("playlist.rename.invalid"), Toast.LENGTH_SHORT).show()
+                } else {
+                    val fullName = if (extension != null && !name.endsWith(".$extension", true)) "$name.$extension" else name
+                    (context as? PlaylistLibraryHost)?.renameLibrarySource(song, fullName) { renamed ->
+                        if (renamed != null) { sheet.dismiss(); syncLibrary() }
+                        else Toast.makeText(context, t("playlist.rename.failed"), Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
         }
         sheet.show()
     }
@@ -641,4 +679,5 @@ interface PlaylistMetadataHost { fun editMetadata(item: MusicItem) }
 interface PlaylistLibraryHost {
     fun onLibraryChanged(items: List<MusicItem>)
     fun deleteLibrarySource(item: MusicItem, onResult: (Boolean) -> Unit)
+    fun renameLibrarySource(item: MusicItem, name: String, onResult: (MusicItem?) -> Unit)
 }

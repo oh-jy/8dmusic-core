@@ -230,6 +230,11 @@ class MusicStore(private val context: Context) {
         save("songs", JSONArray().apply { songs.forEach { put(songJson(it)) } }.toString())
     }
 
+    fun updateRenamed(item: MusicItem, renamed: MusicItem) {
+        saveLibrary(cached().map { if (it.id == item.id && it.uri == item.uri) renamed else it })
+        saveAdded(loadAdded().map { if (it.id == item.id && it.uri == item.uri) renamed else it })
+    }
+
     /** 纯在线引用（online://）独立存储，不进入本地歌曲库；播放时再按需解析真实地址。 */
     fun onlineCached(): List<MusicItem> = jsonSongs(preferences.getString("onlineSongs", "[]"))
 
