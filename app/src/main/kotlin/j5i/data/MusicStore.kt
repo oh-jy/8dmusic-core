@@ -21,7 +21,7 @@ internal fun isAutoScannedMusic(duration: Long, folder: String): Boolean {
 class MusicStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
     init { splitOnlineReferences() }
-    var sort = preferences.getString("sort", "name") ?: "name"
+    var sort = preferences.getString("sort", "name")?.takeUnless { it == "album" } ?: "name"
         private set
     var ascending = preferences.getBoolean("ascending", true)
         private set
@@ -152,33 +152,48 @@ class MusicStore(private val context: Context) {
         return next
     }
 
-    private fun writeId3(path: String, title: String, artist: String, album: String) {
+    internal fun writeMp3Metadata(path: String, title: String, artist: String, album: String,
+        cover: ByteArray? = null, lyrics: String = "") {
         val file = java.io.RandomAccessFile(path, "rw")
         file.use { output ->
-            val header = ByteArray(10)
-            output.readFully(header)
-            check(header.copyOfRange(0, 3).contentEquals("ID3".toByteArray())) { "MP3 没有可编辑的 ID3 标签" }
-            val oldSize = ((header[6].toInt() and 127) shl 21) or ((header[7].toInt() and 127) shl 14) or
-                ((header[8].toInt() and 127) shl 7) or (header[9].toInt() and 127)
-            val flags = header.copyOfRange(0, 6)
-            fun frame(id: String, text: String): ByteArray {
-                val value = text.toByteArray(Charsets.UTF_16LE)
-                val payload = byteArrayOf(3, 0) + value + byteArrayOf(0, 0)
-                val head = id.toByteArray(Charsets.US_ASCII) + ByteBuffer.allocate(4).putInt(payload.size).array() + byteArrayOf(0, 0, 0, 0)
+            val oldHeader = ByteArray(10)
+            output.seek(0)
+            val hasId3 = output.length() >= 10 && runCatching { output.readFully(oldHeader); oldHeader.copyOfRange(0, 3).contentEquals("ID3".toByteArray()) }.getOrDefault(false)
+            val oldSize = if (hasId3) ((oldHeader[6].toInt() and 127) shl 21) or ((oldHeader[7].toInt() and 127) shl 14) or
+                ((oldHeader[8].toInt() and 127) shl 7) or (oldHeader[9].toInt() and 127) else 0
+            val audioStart = if (hasId3) (10L + oldSize) else 0L
+            val rest = ByteArray((output.length() - audioStart).coerceAtLeast(0L).toInt())
+            output.seek(audioStart)
+            output.readFully(rest)
+            fun frame(id: String, payload: ByteArray): ByteArray {
+                val size = payload.size
+                val head = id.toByteArray(Charsets.US_ASCII) + byteArrayOf(((size shr 21) and 127).toByte(),
+                    ((size shr 14) and 127).toByte(), ((size shr 7) and 127).toByte(), (size and 127).toByte(), 0, 0)
                 return head + payload
             }
-            val tag = frame("TIT2", title) + frame("TPE1", artist) + frame("TALB", album)
-            val rest = ByteArray((output.length() - 10L - oldSize).toInt())
-            output.seek(10L + oldSize)
-            output.readFully(rest)
+            fun textFrame(id: String, value: String) = frame(id, byteArrayOf(3) + value.toByteArray(Charsets.UTF_8) + byteArrayOf(0))
+            val frames = mutableListOf<ByteArray>(textFrame("TIT2", title), textFrame("TPE1", artist), textFrame("TALB", album))
+            val coverBytes = cover
+            if (coverBytes != null && coverBytes.isNotEmpty()) {
+                val mime = when {
+                    coverBytes.size >= 8 && coverBytes[0] == 0x89.toByte() && coverBytes[1] == 0x50.toByte() -> "image/png"
+                    else -> "image/jpeg"
+                }
+                frames += frame("APIC", byteArrayOf(3) + mime.toByteArray(Charsets.US_ASCII) + byteArrayOf(0, 3, 0) + coverBytes)
+            }
+            if (lyrics.isNotBlank()) frames += frame("USLT", byteArrayOf(3) + "eng".toByteArray(Charsets.US_ASCII) + byteArrayOf(0) + lyrics.toByteArray(Charsets.UTF_8))
+            val tag = frames.fold(ByteArray(0)) { acc, next -> acc + next }
             output.seek(0)
-            output.write(flags + byteArrayOf(((tag.size shr 21) and 127).toByte(), ((tag.size shr 14) and 127).toByte(),
+            output.write("ID3".toByteArray(Charsets.US_ASCII) + byteArrayOf(4, 0, 0) + byteArrayOf(((tag.size shr 21) and 127).toByte(), ((tag.size shr 14) and 127).toByte(),
                 ((tag.size shr 7) and 127).toByte(), (tag.size and 127).toByte()))
             output.write(tag)
             output.write(rest)
             output.setLength(10L + tag.size + rest.size)
         }
     }
+
+    private fun writeId3(path: String, title: String, artist: String, album: String) =
+        writeMp3Metadata(path, title, artist, album)
 
     private fun writeFlac(path: String, title: String, artist: String, album: String) {
         val file = java.io.RandomAccessFile(path, "rw")
@@ -234,6 +249,16 @@ class MusicStore(private val context: Context) {
         saveLibrary(cached().map { if (it.id == item.id && it.uri == item.uri) renamed else it })
         saveAdded(loadAdded().map { if (it.id == item.id && it.uri == item.uri) renamed else it })
     }
+
+    fun updateCover(item: MusicItem, coverUri: String): MusicItem {
+        val next = item.copy(coverUri = coverUri)
+        preferences.edit().putString("cover:${item.uri}", coverUri).apply()
+        saveLibrary(cached().map { if (it.uri == item.uri) next else it })
+        saveAdded(loadAdded().map { if (it.uri == item.uri) next else it })
+        return next
+    }
+
+    fun coverFor(item: MusicItem): String = preferences.getString("cover:${item.uri}", null) ?: item.coverUri
 
     /** 纯在线引用（online://）独立存储，不进入本地歌曲库；播放时再按需解析真实地址。 */
     fun onlineCached(): List<MusicItem> = jsonSongs(preferences.getString("onlineSongs", "[]"))
@@ -296,6 +321,10 @@ class MusicStore(private val context: Context) {
             val sorted = if (sort == "time") {
                 // 主按加入媒体库时间，相同时再按文件修改时间；时间缺失的排最后。
                 filtered.sortedWith(compareBy({ it.addedAt }, { it.modifiedAt }))
+            } else if (sort == "duration") {
+                filtered.sortedWith(compareBy({ it.duration }, { it.name.lowercase() }))
+            } else if (sort == "size") {
+                filtered.sortedWith(compareBy({ it.size }, { it.name.lowercase() }))
             } else {
                 // ICU Collator 让中文按拼音排序，与 UTS 的 Locale.CHINA 行为一致。
                 val collator = java.text.Collator.getInstance(java.util.Locale.CHINA)
@@ -457,7 +486,7 @@ class MusicStore(private val context: Context) {
                     item.getString("uri"), item.optLong("size"),
                     item.optLong("duration"), item.optString("artist", "未知歌手"),
                     item.optString("album", "未知专辑"), item.optLong("addedAt"),
-                    item.optLong("modifiedAt"), item.optString("folder")
+                    item.optLong("modifiedAt"), item.optString("folder"), item.optString("coverUri")
                 )
             }
         } catch (_: Exception) { emptyList() }
@@ -474,13 +503,14 @@ class MusicStore(private val context: Context) {
             put("id", song.id); put("name", song.name); put("uri", song.uri); put("size", song.size)
             put("duration", song.duration); put("artist", song.artist); put("album", song.album)
             put("addedAt", song.addedAt); put("modifiedAt", song.modifiedAt); put("folder", song.folder)
+            if (song.coverUri.isNotBlank()) put("coverUri", song.coverUri)
         }
         fun jsonSongs(text: String?): List<MusicItem> = try {
             val array = JSONArray(text ?: "[]")
             (0 until array.length()).map { array.getJSONObject(it) }.filter { it.optLong("id") != 0L && it.optString("uri").isNotBlank() }.map {
                 MusicItem(it.getLong("id"), it.getString("name"), it.getString("uri"), it.optLong("size"),
                     it.optLong("duration"), it.optString("artist", "未知歌手"), it.optString("album", "未知专辑"),
-                    it.optLong("addedAt"), it.optLong("modifiedAt"), it.optString("folder"))
+                    it.optLong("addedAt"), it.optLong("modifiedAt"), it.optString("folder"), it.optString("coverUri"))
             }
         } catch (_: Exception) { emptyList() }
         private fun jsonPlaylists(text: String?): List<Playlist> = try {

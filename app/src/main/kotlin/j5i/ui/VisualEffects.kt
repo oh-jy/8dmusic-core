@@ -90,8 +90,17 @@ internal fun isVerticalGraphSwipe(deltaX: Float, deltaY: Float, threshold: Float
 internal fun nextGraphStyle(current: Int, forward: Boolean): Int =
     (current + if (forward) 1 else -1).mod(graphStyleKeys.size)
 
+internal const val SPATIAL_CURVE_MODE = -2
+
+internal fun visualizerPanel(state: Pair<Boolean, Int>): Int = when {
+    !state.first -> 0
+    state.second == SPATIAL_CURVE_MODE -> 1
+    state.second == 1 -> 3
+    else -> 2
+}
+
 internal fun nextVisualizerState(exclusive: Boolean, mode: Int, forward: Boolean): Pair<Boolean, Int> {
-    val modes = exclusiveVisualModes.map { it.second }
+    val modes = listOf(SPATIAL_CURVE_MODE, 4, 1) + exclusiveVisualModes.map { it.second }.filter { it != 4 && it != 1 }
     val index = if (exclusive) modes.indexOf(mode).takeIf { it >= 0 }?.plus(1) ?: 0 else 0
     val next = (index + if (forward) 1 else -1).mod(modes.size + 1)
     return if (next == 0) false to 0 else true to modes[next - 1]

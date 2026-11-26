@@ -49,6 +49,84 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     var onExpand: (() -> Unit)? = null
     var onChooseEffect: (() -> Unit)? = null
     var onChooseSandImages: (() -> Unit)? = null
+    var onVisualStateChanged: ((Pair<Boolean, Int>) -> Unit)? = null
+    internal val spatialCurve = CurveView(context)
+    private val spatialLegend = ThemeUi.row(context).apply {
+        listOf("left.ear" to 0xff4ea1ff.toInt(), "right.ear" to 0xffff7a59.toInt(),
+            "elevation" to 0xff4fd396.toInt(), "distance" to 0xffa98ce8.toInt()).forEach { (key, color) ->
+            addView(ThemeUi.text(context, "", 9f, ThemeUi.palette(true), role = ThemeUi.ROLE_SUB).apply {
+                text = android.text.SpannableString("● ${t(key)}").apply {
+                    setSpan(android.text.style.ForegroundColorSpan(color), 0, 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                includeFontPadding = false
+                setPadding(0, 0, ThemeUi.dp(context, 5f), 0)
+            })
+        }
+    }
+    private val spatialName = ThemeUi.text(context, "", 10f, ThemeUi.palette(true), role = ThemeUi.ROLE_SUB).apply {
+        setSingleLine()
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+        includeFontPadding = false
+        setPadding(0, ThemeUi.dp(context, 1f), 0, ThemeUi.dp(context, 1f))
+        isFocusable = true
+        setOnClickListener { showSpatialCurveInfo() }
+    }
+    private val spatialHeader = ThemeUi.row(context).apply {
+        setPadding(ThemeUi.dp(context, 6f), 0, ThemeUi.dp(context, 6f), 0)
+        addView(spatialLegend)
+        addView(spatialName, LayoutParams(0, -2, 1f))
+    }
+    private val spatialInfo = ThemeUi.text(context, "", 10f, ThemeUi.palette(true), role = ThemeUi.ROLE_SUB).apply {
+        setSingleLine()
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        includeFontPadding = false
+        setPadding(ThemeUi.dp(context, 6f), ThemeUi.dp(context, 1f), ThemeUi.dp(context, 6f), ThemeUi.dp(context, 1f))
+        isFocusable = true
+        setOnClickListener { showSpatialCurveInfo() }
+    }
+    internal var spatialPalette: ThemeUi.Palette? = null
+        set(value) {
+            field = value
+            val color = (value ?: ThemeUi.palette(dark)).sub
+            spatialInfo.setTextColor(color)
+            spatialName.setTextColor(color)
+        }
+
+    internal fun setSpatialPreset(preset: j5i.spatial8d.core.SpacePreset?) {
+        spatialCurve.preset = preset
+        if (preset == null) { spatialInfo.text = ""; spatialName.text = ""; return }
+        val index = j5i.spatial8d.core.SPACE_PRESETS.indexOfFirst { it.name == preset.name }
+        val name = if (index >= 0) AppLanguage.preset(context, index) else preset.name
+        val trajectory = listOf("orbit", "figure8", "vertical", "spiral", "wander")[preset.trajectory.coerceIn(0, 4)]
+        spatialName.text = "$name · ${t("curve.help")}"
+        spatialLegend.visibility = if (preset.raw) View.GONE else View.VISIBLE
+        spatialInfo.text = if (preset.raw) t("curve.raw") else
+            "${t("trajectory.$trajectory")} · ${t("curve.summary").format(preset.period, preset.elev, preset.depth)}"
+        spatialInfo.contentDescription = spatialInfo.text
+    }
+
+    private fun showSpatialCurveInfo() {
+        val preset = spatialCurve.preset ?: return
+        val index = j5i.spatial8d.core.SPACE_PRESETS.indexOfFirst { it.name == preset.name }
+        val name = if (index >= 0) AppLanguage.preset(context, index) else preset.name
+        val note = if (index >= 0) AppLanguage.preset(context, index, note = true) else preset.note
+        val trajectory = listOf("orbit", "figure8", "vertical", "spiral", "wander")[preset.trajectory.coerceIn(0, 4)]
+        val palette = spatialPalette ?: ThemeUi.palette(dark)
+        ThemeUi.showSheet(context, palette, t("curve.help"), name) {
+            addView(ThemeUi.text(context, note, 12f, palette))
+            if (preset.raw) {
+                addView(ThemeUi.text(context, t("curve.raw.explain"), 12f, palette, role = ThemeUi.ROLE_SUB))
+            } else {
+                addView(ThemeUi.text(context, t("curve.parameters").format(preset.period, preset.phase, preset.elev, preset.depth), 12f, palette))
+                val direction = when (preset.direction) { 0.0 -> "random"; -1.0 -> "ccw"; else -> "cw" }
+                addView(ThemeUi.text(context, "${t("trajectory.$trajectory")} · ${t("direction.$direction")}\n${t("curve.trajectory.$trajectory")}", 12f, palette))
+                addView(ThemeUi.text(context, t("curve.legend.explain"), 12f, palette, role = ThemeUi.ROLE_SUB))
+                addView(ThemeUi.text(context, t("curve.effects.explain"), 12f, palette, role = ThemeUi.ROLE_SUB))
+                addView(ThemeUi.text(context, t("curve.window.explain"), 12f, palette, role = ThemeUi.ROLE_SUB))
+            }
+        }.show()
+    }
     private var sandGeneration = 0
     private var sandLive = false
     private var sandControlsVisible = false
@@ -207,6 +285,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     singleModes.fill(false)
                     if (!exclusive) layers.fill(true)
                     updateMode()
+                    onVisualStateChanged?.invoke(visualState)
                     swipeHandled = true
                     while (touches.size > gestureTouchStart) touches.removeAt(touches.lastIndex)
                     canvas.visualTouches = touches.toList()
@@ -313,13 +392,17 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
     var drivingLyrics = false
         set(value) { field = value; updateMode() }
-    val showsLyrics: Boolean get() = exclusive && visualMode != 1 && visualMode != 39
+    val showsLyrics: Boolean get() = exclusive && visualMode != SPATIAL_CURVE_MODE && visualMode != 1 && visualMode != 39
 
     init {
         orientation = VERTICAL
+        addView(spatialHeader, LayoutParams(-1, -2))
+        addView(spatialInfo, LayoutParams(-1, -2))
         val stage = FrameLayout(context)
         addView(stage, LayoutParams(-1, 0, 1f))
         stage.addView(canvas, FrameLayout.LayoutParams(-1, -1))
+        stage.addView(spatialCurve, FrameLayout.LayoutParams(-1, -1))
+        spatialCurve.setOnTouchListener { _, event -> handleCanvasTouch(event) }
         canvas.setOnTouchListener { _, event -> handleCanvasTouch(event) }
         graphView.setOnTouchListener { _, event -> handleCanvasTouch(event) }
         stage.addView(graphView, FrameLayout.LayoutParams(-1, -1))
@@ -356,6 +439,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         exclusive = false
         singleModes.fill(false)
         updateMode()
+        onVisualStateChanged?.invoke(visualState)
     }
     val singleVisualLayer: Int get() = singleModes.indexOfFirst { it }
     internal val hasSandImages: Boolean get() = canvas.sandImages.isNotEmpty()
@@ -366,16 +450,19 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         val sandImages: List<SandImage>, val sandDuration: Long, val randomSeed: Long,
         val dualLyrics: Pair<LyricsResult?, LyricsResult?>? = null,
         val dualSwap: ((Double) -> Boolean)? = null,
-        val dualDurations: Pair<Double, Double>? = null
+        val dualDurations: Pair<Double, Double>? = null,
+        val spatialPreset: j5i.spatial8d.core.SpacePreset? = null
     )
     internal fun exportState() = ExportState(exclusive, visualMode, layers.copyOf(), singleVisualLayer,
-        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration, kotlin.random.Random.nextLong())
+        dark, ThemeUi.palette(dark), creative, touches.toList(), creativeBackground, graphView.style, canvas.sandImages, canvas.sandDuration, kotlin.random.Random.nextLong(), spatialPreset = spatialCurve.preset)
 
     internal fun prepareExport(state: ExportState, lyrics: LyricsResult?, width: Int, height: Int, sampleRate: Int) {
         exportDualLyrics = state.dualLyrics
         exportDualSwap = state.dualSwap
         exportDualDurations = state.dualDurations
         dark = state.dark
+        spatialPalette = state.palette
+        setSpatialPreset(state.spatialPreset)
         state.layers.copyInto(layers)
         restoreVisualState(state.exclusive to state.mode, state.single)
         canvas.exportPalette = state.palette
@@ -402,6 +489,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
 
     internal fun drawExportFrame(target: Canvas, data: ByteArray, bytes: Int, timeUs: Long, lyricPositionMs: Long) {
+        spatialCurve.position = timeUs / 1_000_000.0
         exportRandomTimeline?.modeAt(timeUs)?.let { mode ->
             if ((mode == 0 && exclusive) || (mode != 0 && (!exclusive || visualMode != mode))) {
                 restoreVisualState((mode != 0) to mode)
@@ -433,12 +521,13 @@ class VisualizerView(context: Context) : LinearLayout(context) {
     }
     fun restoreVisualState(state: Pair<Boolean, Int>, single: Int = -1) {
         exclusive = state.first
-        visualMode = state.second.takeIf { mode -> exclusiveVisualModes.any { it.second == mode } } ?: 3
+        visualMode = state.second.takeIf { mode -> mode == SPATIAL_CURVE_MODE || exclusiveVisualModes.any { it.second == mode } } ?: 3
         if (single in singleModes.indices) {
             singleModes.fill(false)
             singleModes[single] = true
         }
         updateMode()
+        onVisualStateChanged?.invoke(visualState)
     }
     private val consumePcm = object : Runnable {
         override fun run() {
@@ -510,12 +599,18 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         canvas.layers = layers.copyOf()
         canvas.singleLayer = singleVisualLayer
         graphView.dark = dark
+        spatialCurve.dark = dark
+        spatialCurve.visibility = if (exclusive && visualMode == SPATIAL_CURVE_MODE) View.VISIBLE else View.GONE
+        spatialInfo.visibility = spatialCurve.visibility
+        spatialHeader.visibility = spatialCurve.visibility
+        spatialInfo.setTextColor((spatialPalette ?: ThemeUi.palette(dark)).sub)
+        spatialName.setTextColor((spatialPalette ?: ThemeUi.palette(dark)).sub)
         graphView.visibility = if (exclusive && visualMode == 4) View.VISIBLE else View.GONE
         if (graphView.visibility != View.VISIBLE || canvas.exporting) {
             removeCallbacks(hideGraphStyle)
             graphStyle.visibility = View.GONE
         }
-        canvas.visibility = if (graphView.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        canvas.visibility = if (graphView.visibility == View.VISIBLE || spatialCurve.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         lyricOverlay.dark = dark
         lyricOverlay.visibility = if (showsLyrics && !drivingLyrics) View.VISIBLE else View.GONE
         val sand = exclusive && visualMode == 39

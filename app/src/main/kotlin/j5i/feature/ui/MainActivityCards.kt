@@ -1,5 +1,10 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.ui
+import j5i.spatial8d.feature.playback.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -21,11 +26,12 @@ import j5i.spatial8d.core.PitchPreset
 import j5i.spatial8d.core.PITCH_PRESETS
 import j5i.spatial8d.core.clampSlider
 import j5i.spatial8d.core.formatValue
-import j5i.spatial8d.ui.CurveView
 import j5i.spatial8d.ui.ThemeUi
 import j5i.spatial8d.ui.AppLanguage
 import j5i.spatial8d.ui.exclusiveVisualModes
 import j5i.spatial8d.ui.visualModeGroups
+import j5i.spatial8d.ui.SPATIAL_CURVE_MODE
+import j5i.spatial8d.ui.visualizerPanel
 import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.pow
@@ -443,44 +449,17 @@ internal fun MainActivity.transformCard(): LinearLayout {
 
 internal fun MainActivity.curveCard(): LinearLayout {
         val card = card {
-            curveTabs = tabRow(listOf(t("curve"), t("visualizer") + if (curvePanel == 1) " ▾" else "", t("lyrics")), curvePanel, compact = true) {
-                if (it == 1 && curvePanel == 1) showVisualEffectPicker() else selectCurvePanel(it)
+            curveTabs = tabRow(listOf(t("visualizer"), t("lyrics")), if (curvePanel == 4) 1 else 0, compact = true) {
+                if (it == 0) {
+                    if (curvePanel != 4) showVisualEffectPicker() else selectCurvePanel(visualizerPanel(visualizerView.visualState), restoreMode = false)
+                } else selectCurvePanel(4)
             }
             addView(curveTabs)
-            curveLegend = ThemeUi.row(this@curveCard).apply {
-                visibility = if (curvePanel == 0) View.VISIBLE else View.GONE
-                listOf(
-                    t("left.ear") to 0xff4ea1ff.toInt(),
-                    t("right.ear") to 0xffff7a59.toInt(),
-                    t("elevation") to 0xff4fd396.toInt(),
-                    t("distance") to 0xffa98ce8.toInt()
-                ).forEach { (label, color) ->
-                    addView(ThemeUi.row(this@curveCard).apply {
-                        addView(View(this@curveCard).apply {
-                            background = ThemeUi.bgDrawable(this@curveCard, color, 3f)
-                            layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@curveCard, 6f), ThemeUi.dp(this@curveCard, 6f))
-                        })
-                        addView(ThemeUi.text(this@curveCard, label, 10f, palette, role = ThemeUi.ROLE_SUB).apply {
-                            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                                leftMargin = ThemeUi.dp(this@curveCard, 4f)
-                            }
-                        })
-                    }.apply {
-                        gravity = Gravity.CENTER_VERTICAL
-                        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                            leftMargin = ThemeUi.dp(this@curveCard, 10f)
-                        }
-                    })
-                }
-            }
-            addView(curveLegend)
-            // 用 FrameLayout 叠放四个面板，同一时间只有一个 VISIBLE，MATCH_PARENT 才能占满整个高度。
+            // 用 FrameLayout 叠放曲线、歌词和可视化面板，同一时间只有一个 VISIBLE。
             // 之前 LinearLayout 中多个 height=-1 的子 view 会被平分/压缩，造成音频图谱/可视化上下留白。
             curveContent = FrameLayout(this@curveCard).apply {
-                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@curveCard, if (curvePanel == 0) 140f else 162f))
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ThemeUi.dp(this@curveCard, 162f))
             }
-            curve = CurveView(this@curveCard).apply { visibility = if (curvePanel == 0) View.VISIBLE else View.GONE }
-            curveContent.addView(curve, FrameLayout.LayoutParams(-1, -1))
             lyricsView = LyricsView(this@curveCard).apply {
                 dark = this@curveCard.dark
                 onSearch = { query -> currentItem?.let { loadLyrics(it, query) } }
@@ -497,16 +476,28 @@ internal fun MainActivity.curveCard(): LinearLayout {
                     }
                 }
                 onExpand = { showLyricsFullScreen() }
-                visibility = if (curvePanel == 2) View.VISIBLE else View.GONE
+                visibility = if (curvePanel == 4) View.VISIBLE else View.GONE
             }
             curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
             visualizerView = VisualizerView(this@curveCard).apply {
                 dark = this@curveCard.dark
-                visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
+                spatialPalette = palette
+                visibility = if (curvePanel != 4) View.VISIBLE else View.GONE
+                restoreVisualState(when (curvePanel) {
+                    1 -> true to SPATIAL_CURVE_MODE
+                    2 -> true to 4
+                    3 -> true to 1
+                    else -> false to 0
+                })
                 onExpand = { showVisualizerSheet() }
                 onChooseEffect = { showVisualEffectPicker() }
                 onChooseSandImages = { openSandImages.launch("image/*") }
+                onVisualStateChanged = { state ->
+                    val panel = visualizerPanel(state)
+                    if (curvePanel != 4 && curvePanel != panel) selectCurvePanel(panel, restoreMode = false)
+                }
             }
+            curve = visualizerView.spatialCurve
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
             addView(curveContent)
         }
@@ -521,18 +512,25 @@ internal fun MainActivity.showVisualEffectPicker() {
             dialog.dismiss()
             showVisualCreative()
         })
-        val analysisItems = listOf(t("analysis"), t("visual.layers"))
+        val analysisItems = listOf(t("analysis") to -1, t("curve") to -2,
+            t("visual.pcm") to 4, t("visual.spectral") to 1, t("visual.layers") to -3)
         visualModeGroups.forEachIndexed { groupIndex, (key, ids) ->
             addView(ThemeUi.text(this@showVisualEffectPicker, t(key), 12f, palette, bold = true, role = ThemeUi.ROLE_SUB).apply {
                 setPadding(0, ThemeUi.dp(context, 8f), 0, ThemeUi.dp(context, 4f))
             })
-            val modes = exclusiveVisualModes.filter { it.second in ids }
-            val entries = (if (groupIndex == 0) analysisItems.mapIndexed { index, name -> name to -index - 1 } else emptyList()) +
-                modes.map { t(it.first) to it.second }
+            val modes = exclusiveVisualModes.filter { it.second in ids && it.second !in setOf(1, 4) }
+            val entries = (if (groupIndex == 0) analysisItems else emptyList()) + modes.map { t(it.first) to it.second }
             entries.chunked(2).forEach { row ->
                 addView(ThemeUi.row(this@showVisualEffectPicker).apply {
                     row.forEach { (name, id) ->
-                        val selected = if (id == -1) !state.first else state.first && state.second == id
+                        val selected = when (id) {
+                            -1 -> !state.first && curvePanel == 0
+                            -2 -> curvePanel == 1
+                            -3 -> false
+                            4 -> state.first && state.second == 4 && curvePanel == 2
+                            1 -> state.first && state.second == 1 && curvePanel == 3
+                            else -> state.first && state.second == id && curvePanel == 2
+                        }
                         addView(ThemeUi.text(this@showVisualEffectPicker, name, 12f, palette,
                             bold = selected, role = if (selected) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
                             gravity = Gravity.CENTER_VERTICAL
@@ -541,9 +539,12 @@ internal fun MainActivity.showVisualEffectPicker() {
                             setOnClickListener {
                                 dialog.dismiss()
                                 when (id) {
-                                    -1 -> visualizerView.restoreVisualState(false to 0)
-                                    -2 -> showVisualLayerPicker()
-                                    else -> visualizerView.restoreVisualState(true to id)
+                                    -1 -> { selectCurvePanel(0); visualizerView.restoreVisualState(false to 0) }
+                                    -2 -> selectCurvePanel(1)
+                                    -3 -> showVisualLayerPicker()
+                                    4 -> { selectCurvePanel(2); visualizerView.restoreVisualState(true to id) }
+                                    1 -> { selectCurvePanel(3); visualizerView.restoreVisualState(true to id) }
+                                    else -> { selectCurvePanel(2); visualizerView.restoreVisualState(true to id) }
                                 }
                                 refreshPlayback()
                             }
@@ -863,32 +864,25 @@ internal fun MainActivity.showVisualLayerPicker() {
 
     /** 服务可能先于页面重建；每次恢复可视化都重新挂上输出回调，避免永久失去 PCM 输入。 */
 
-internal fun MainActivity.selectCurvePanel(index: Int) {
+internal fun MainActivity.selectCurvePanel(index: Int, restoreMode: Boolean = true) {
     curvePanel = index
-    (curveTabs.getChildAt(1) as? Button)?.text = t("visualizer") + if (index == 1) " ▾" else ""
     for (tab in 0 until curveTabs.childCount) {
         (curveTabs.getChildAt(tab) as? android.widget.Button)?.let { button ->
-            button.tag = if (tab == index) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
+            val selected = (tab == 1) == (index == 4)
+            button.tag = if (selected) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
             ThemeUi.applyButton(button, palette)
-            button.setTextColor(if (tab == index) palette.accent else palette.sub)
+            button.setTextColor(if (selected) palette.accent else palette.sub)
         }
     }
-    if (index == 1) installPcmRenderer()
-    curve.visibility = if (index == 0) View.VISIBLE else View.GONE
-    visualizerView.visibility = if (index == 1) View.VISIBLE else View.GONE
-    lyricsView.visibility = if (index == 2) View.VISIBLE else View.GONE
-    // 非"空间曲线" tab 隐藏图例并把它的高度转移给 curveContent，
-    // 避免图例行占位造成波形/频谱顶部一片空白。
-    val legendHeight = curveLegend.height.takeIf { it > 0 } ?: ThemeUi.dp(this, 22f)
-    val showLegend = index == 0
-    val wasVisible = curveLegend.visibility == View.VISIBLE
-    curveLegend.visibility = if (showLegend) View.VISIBLE else View.GONE
-    if (isViewReady(this::curveContent) && wasVisible != showLegend) {
-        val current = curveContent.layoutParams.height
-        val next = if (showLegend) (current - legendHeight).coerceAtLeast(ThemeUi.dp(this, 80f))
-        else current + legendHeight
-        curveContent.layoutParams = curveContent.layoutParams.apply { height = next }
+    if (index != 4) installPcmRenderer()
+    visualizerView.visibility = if (index != 4) View.VISIBLE else View.GONE
+    if (restoreMode) when (index) {
+        0 -> visualizerView.restoreVisualState(false to 0)
+        1 -> visualizerView.restoreVisualState(true to SPATIAL_CURVE_MODE)
+        2 -> visualizerView.restoreVisualState(true to 4)
+        3 -> visualizerView.restoreVisualState(true to 1)
     }
+    lyricsView.visibility = if (index == 4) View.VISIBLE else View.GONE
 }
 
 /** 点按播放栏当前歌词行时，直接切到歌词 tab 并滚动到卡片位置。 */
@@ -897,7 +891,7 @@ internal fun MainActivity.openLyricsTab() {
         toast(t("ui.lyrics.empty"))
         return
     }
-    selectCurvePanel(2)
+    selectCurvePanel(4)
     val scroll = root.parent as? android.widget.ScrollView ?: return
     val card = curveContent.parent as? View ?: return
     scroll.post { scroll.smoothScrollTo(0, card.top) }
@@ -909,7 +903,7 @@ internal fun MainActivity.installPcmRenderer() {
             val startedAt = System.nanoTime()
             visualizerView.pcmClock.accept(data, bytes)
             if (isViewReady(this@installPcmRenderer::visualization)) visualization.acceptPcm(data, bytes)
-            val visible = curvePanel == 1 || drivingDialog?.isShowing == true || popupVisualizer != null
+            val visible = curvePanel != 1 && curvePanel != 4 || drivingDialog?.isShowing == true || popupVisualizer != null
             if (isViewReady(this@installPcmRenderer::visualizerView) && (visible || startedAt - lastHistoryAt >= 100_000_000L)) {
                 visualizerView.accept(data, bytes)
                 lastHistoryAt = startedAt

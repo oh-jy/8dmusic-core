@@ -16,6 +16,8 @@ data class MusicItem(
     /** MediaStore DATE_MODIFIED 换算成毫秒；手动添加时回退为加入时间。 */
     val modifiedAt: Long = 0L,
     val folder: String = "",
+    /** 封面地址；本地内嵌封面和手动封面仍按需读取，不把图片写入歌曲索引。 */
+    val coverUri: String = "",
 )
 
 data class Playlist(val name: String, val ids: List<Long>, val rule: String = "")

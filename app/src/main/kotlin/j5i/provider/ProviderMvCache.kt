@@ -6,10 +6,10 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.util.Log
 import j5i.spatial8d.data.MusicItem
-import j5i.spatial8d.PlaybackCacheMetadata
-import j5i.spatial8d.isVideoCacheName
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.feature.cache.isVideoCacheName
 import j5i.spatial8d.ui.AppLanguage
-import j5i.spatial8d.videoCacheKey
+import j5i.spatial8d.feature.video.videoCacheKey
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream

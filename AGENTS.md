@@ -4,6 +4,7 @@
 
 - `versionCode` 在发布构建时按本机时间 `yyMMddHH` 加当小时发布序号生成，例如 `261104101`，同小时依次累计 1、2、3；序号保存在本机 `build/signing/version-code.properties`，九位数始终在 Android 32 位整数范围内。
 - 每一轮并行修复完成后将 `versionName` 的 patch 加 1；patch 满 10 时进位到 minor，并将 patch 归零，例如 `1.0.9 -> 1.1.0`。
+- 每次发布 GitHub Release 必须同时附带主 APK（默认不含 ASR）、全量 FM 配置 `all-fm-base64.txt` 和聚合 Provider `all-platforms-provider.jar`；即使 FM 或 Provider 没有变更也必须附带。发布后核对三个附件均已上传且校验值与本地一致。
 
 ## 排查证据
 

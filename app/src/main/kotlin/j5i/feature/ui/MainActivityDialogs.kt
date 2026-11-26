@@ -1,5 +1,10 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.ui
+import j5i.spatial8d.feature.playback.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
 import androidx.core.content.pm.PackageInfoCompat
 import android.app.Dialog
 import android.os.SystemClock
@@ -126,7 +131,7 @@ internal fun MainActivity.showDrivingMode() {
                 (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
                 curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
                 visualizerView.drivingLyrics = false
-                visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
+                visualizerView.visibility = if (curvePanel != 4) View.VISIBLE else View.GONE
                 drivingView = null
             }
             show()

@@ -396,6 +396,22 @@ class SpatialVisualization(context: Context) : AnimatedCanvasView(context) {
         Color.HSVToColor(floatArrayOf(((value % 360 + 360) % 360).toFloat(), 1f, 1f))
 }
 
+private val spatialCurveEarRange by lazy { earRange() }
+
+internal fun spatialCurveSample(time: Double, preset: SpacePreset): DoubleArray? {
+    if (preset.raw) return null
+    val range = spatialCurveEarRange
+    val center = (range[0] + range[1]) / 2.0
+    val half = max(0.0001, (range[1] - range[0]) / 2.0)
+    val frame = frameAt(time, preset.period, preset.phase, preset.direction, preset.elev, preset.depth / 100.0, preset.trajectory)
+    val gain = earGains(sin(frame.azimuth))
+    return doubleArrayOf((gain[0] - center) / half, (gain[1] - center) / half,
+        frame.elev * 180.0 / Math.PI / 80.0, (frame.far - 0.5) * 2.0 * preset.depth / 100.0)
+}
+
+internal fun spatialCurveWindowStart(position: Double, span: Double): Double =
+    kotlin.math.floor(position.coerceAtLeast(0.0) / span) * span
+
 class CurveView(context: Context) : AnimatedCanvasView(context) {
     var preset: SpacePreset? = null
         set(value) { field = value; clock.sync(clock.seconds); invalidate() }
@@ -413,17 +429,13 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
     private val d = resources.displayMetrics.density
 
     private fun ys(t: Double, p: SpacePreset, h: Float): FloatArray {
-        val range = earRange()
-        val center = (range[0] + range[1]) / 2.0
-        val half = max(0.0001, (range[1] - range[0]) / 2.0)
-        val f = frameAt(t, p.period, p.phase, p.direction, p.elev, p.depth / 100.0, p.trajectory)
-        val gain = earGains(sin(f.azimuth))
+        val sample = spatialCurveSample(t, p) ?: return FloatArray(4) { h / 2f }
         val mid = h / 2f
         return floatArrayOf(
-            mid - ((gain[0] - center) / half * (h - 26f) * 0.45f).toFloat(),
-            mid - ((gain[1] - center) / half * (h - 26f) * 0.45f).toFloat(),
-            mid - (f.elev * 180.0 / Math.PI).toFloat() / 40f * (h - 26f) * 0.34f,
-            mid - (f.far.toFloat() - 0.5f) * 2f * (p.depth.toFloat() / 100f) * (h - 26f) * 0.30f
+            mid - (sample[0] * (h - 26f) * 0.45).toFloat(),
+            mid - (sample[1] * (h - 26f) * 0.45).toFloat(),
+            mid - (sample[2] * (h - 26f) * 0.34).toFloat(),
+            mid - (sample[3] * (h - 26f) * 0.30).toFloat()
         )
     }
 
@@ -433,8 +445,19 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
         raw.scale(d, d)
         val w = width / d
         val h = height / d
+        if (spatialCurveSample(0.0, p) == null) {
+            paint.style = Paint.Style.FILL
+            paint.textAlign = Paint.Align.CENTER
+            paint.textSize = 12f
+            paint.color = ThemeUi.palette(dark).sub
+            raw.drawText(AppLanguage.text(context, "curve.raw"), w / 2f, h / 2f, paint)
+            raw.restore()
+            return
+        }
         val usable = w - 6f
         val span = max(2.0, p.period) * 2.0
+        val position = clock.now()
+        val start = spatialCurveWindowStart(position, span)
         val colors = if (dark) intArrayOf(0xff4ea1ff.toInt(), 0xffff7a59.toInt(), 0xff4fd396.toInt(), 0xffa98ce8.toInt()) else intArrayOf(0xff1f6feb.toInt(), 0xffd9501e.toInt(), 0xff0f9d58.toInt(), 0xff7c5cd6.toInt())
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1f
@@ -444,7 +467,7 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
             val path = Path()
             for (i in 0..120) {
                 val x = usable * i / 120f
-                val y = ys(span * i / 120.0, p, h)[index]
+                val y = ys(start + span * i / 120.0, p, h)[index]
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
             paint.color = colors[index]
@@ -457,13 +480,12 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
         paint.textSize = 9f
         paint.color = if (dark) 0xb8becada.toInt() else 0xc64c5869.toInt()
         paint.textAlign = Paint.Align.LEFT
-        raw.drawText("0s", 1f, h - 2f, paint)
+        raw.drawText("${start.toInt()}s", 1f, h - 2f, paint)
         paint.textAlign = Paint.Align.CENTER
-        raw.drawText("${(span / 2).toInt()}s", usable / 2, h - 2f, paint)
+        raw.drawText("${(start + span / 2).toInt()}s", usable / 2, h - 2f, paint)
         paint.textAlign = Paint.Align.RIGHT
-        raw.drawText("${span.toInt()}s", usable, h - 2f, paint)
-        val t = clock.now() % span
-        val x = usable * (t / span).toFloat()
+        raw.drawText("${(start + span).toInt()}s", usable, h - 2f, paint)
+        val x = usable * ((position - start) / span).toFloat()
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 1.5f
         paint.color = if (dark) 0xccebf0f8.toInt() else 0xcc374150.toInt()
@@ -471,8 +493,8 @@ class CurveView(context: Context) : AnimatedCanvasView(context) {
         raw.drawLine(x, 4f, x, h - 14f, paint)
         paint.pathEffect = null
         paint.style = Paint.Style.FILL
-        val yy = ys(t, p, h)
-        for (i in 0 until 3) { paint.color = colors[i]; raw.drawCircle(x, yy[i], 3f, paint) }
+        val yy = ys(position, p, h)
+        for (i in yy.indices) { paint.color = colors[i]; raw.drawCircle(x, yy[i], 3f, paint) }
         raw.restore()
     }
 }

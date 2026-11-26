@@ -45,7 +45,7 @@ internal data class VisualCreative(val hue: Int = 0, val overlay: Int = 0, val w
             val randomModes = if (randomArray == null) listOf(0) + exclusiveVisualModes.map { it.second }.filter { it != 39 }
                 else (0 until randomArray.length()).map { randomArray.getInt(it) }
             require(hue in 0..359 && overlay in listOf(0, 18, 19, 30))
-            require(mode == null || mode == 0 || exclusiveVisualModes.any { it.second == mode })
+            require(mode == null || mode == 0 || mode == SPATIAL_CURVE_MODE || exclusiveVisualModes.any { it.second == mode })
             require(backgroundAlpha in 0..100 && density in 25..200 && brightness in 25..150 && watermarkPosition in 0..3 && intensity in 25..200 &&
                 backgroundBlur in 0..24 && outroMotif in 1..3 && outroDuration in 1..5 && outroMotifs in 1..31)
             require(randomMinSeconds in 1..60 && randomMaxSeconds in randomMinSeconds..60 && randomModes.isNotEmpty() &&

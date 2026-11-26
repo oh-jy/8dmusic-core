@@ -449,7 +449,8 @@ class PlaybackService : Service() {
     /** 每次页面刷新都复用此方法，确保电台与本地歌曲使用同一套系统控制。 */
     fun updateMedia(title: String, subtitle: String, playing: Boolean, position: Double = 0.0, duration: Double = 0.0) {
         val pair = dualTracks
-        val newTitle = (pair?.let { "${it.first.name} / ${it.second.name}" } ?: title).ifBlank { t("app.name") }
+        val newTitle = (pair?.let { "${Lyrics.displayTitle(it.first.name)} / ${Lyrics.displayTitle(it.second.name)}" }
+            ?: Lyrics.displayTitle(title)).ifBlank { t("app.name") }
         val actualSubtitle = if (pair != null) t("dual.title") else subtitle
         val newPositionMs = (position * 1000).toLong().coerceAtLeast(0)
         val newDurationMs = (duration * 1000).toLong().coerceAtLeast(0)

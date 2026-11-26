@@ -1,5 +1,11 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.update
+import j5i.spatial8d.feature.ui.*
+import j5i.spatial8d.feature.playback.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
+import j5i.spatial8d.BuildConfig
 import android.content.Intent
 import android.content.Context
 import android.net.ConnectivityManager

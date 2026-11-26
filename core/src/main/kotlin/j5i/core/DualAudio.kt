@@ -57,8 +57,8 @@ class DualSwapTimeline(private val minSeconds: Int, private val maxSeconds: Int,
     }
 }
 
-class DualSwapFader(rate: Int) {
-    private val fadeFrames = (rate / 100).coerceAtLeast(1)
+class DualSwapFader(rate: Int, fadeMillis: Int = 10) {
+    private val fadeFrames = (rate * fadeMillis / 1000).coerceAtLeast(1)
     private var lastFrame = -1
     private var amount = 0.0
     private var target = false

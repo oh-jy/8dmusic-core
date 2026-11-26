@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 internal fun exportDualLocal(context: Context, tracks: Pair<MusicItem, MusicItem>, stream: OutputStream,
     mp3: Boolean, mp3Path: String?, swappedAt: (Double) -> Boolean,
-    onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+    mp3Metadata: ((String) -> Unit)? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
     val main = Handler(Looper.getMainLooper())
     Thread {
         val active = AtomicBoolean(true)
@@ -48,7 +48,7 @@ internal fun exportDualLocal(context: Context, tracks: Pair<MusicItem, MusicItem
             val left = sources[0].get()!!
             val right = sources[1].get()!!
             val rate = left.sampleRate
-            val swapFader = DualSwapFader(rate)
+            val swapFader = DualSwapFader(rate, fadeMillis = 40)
             val dualBalancer = DualVolumeBalancer(rate)
             var frame = 0
             RandomAccessFile(wav, "rw").use { output ->
@@ -89,6 +89,7 @@ internal fun exportDualLocal(context: Context, tracks: Pair<MusicItem, MusicItem
                 val target = mp3Path ?: error("MP3 输出路径不可用")
                 Mp3Export.nativeEncode(wav.absolutePath, target)
                 check(File(target).length() > 1024L) { "MP3 编码失败" }
+                mp3Metadata?.invoke(target)
                 File(target).inputStream().use { input -> stream.use { input.copyTo(it) } }
             } else wav.inputStream().use { input -> stream.use { input.copyTo(it) } }
             main.post { onDone(true, "导出完成") }

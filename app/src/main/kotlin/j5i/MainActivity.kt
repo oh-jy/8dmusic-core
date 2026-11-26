@@ -1,4 +1,10 @@
 package j5i.spatial8d
+import j5i.spatial8d.feature.ui.*
+import j5i.spatial8d.feature.playback.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
 
 import android.Manifest
 import android.content.ComponentName
@@ -120,7 +126,6 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal lateinit var curve: CurveView
     internal lateinit var lyricsView: LyricsView
     internal lateinit var visualizerView: VisualizerView
-    internal lateinit var curveLegend: LinearLayout
     internal lateinit var curveTabs: LinearLayout
     internal lateinit var curveContent: FrameLayout
     internal val lyrics by lazy { Lyrics(this) }
@@ -172,6 +177,10 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var trackInfoUri: String? = null
     internal var trackTechnicalInfo = ""
     internal lateinit var disc: ImageView
+    internal var coverLoadedUri: String? = null
+    internal var coverGeneration = 0
+    internal var coverHasImage = false
+    internal val autoCoverAttempts = mutableSetOf<String>()
     internal lateinit var modeTextView: TextView
     internal lateinit var currentTime: TextView
     internal lateinit var durationTime: TextView
@@ -189,7 +198,8 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var sourceType = "全部"
     internal var stationListBody: LinearLayout? = null
     internal var onlineProvider = 0
-    internal var curvePanel = 1
+    /** 0=音频分析，1=空间曲线，2=图谱，3=声谱，4=歌词。 */
+    internal var curvePanel = 0
     internal var onlinePage = 1
     internal var onlineQuery = ""
     internal var pendingNfcOnlineSearch: String? = null

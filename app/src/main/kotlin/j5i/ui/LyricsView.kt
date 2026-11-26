@@ -15,6 +15,7 @@ import android.text.style.CharacterStyle
 import android.view.Gravity
 import android.view.GestureDetector
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -51,7 +52,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     var fullScreen = false
         set(value) {
             field = value
-            rows.forEach { it.textSize = if (value) 22f else 15f }
+            applyTextSize()
             secondary?.fullScreen = value
             resetPreview()
             applyColors()
@@ -64,6 +65,8 @@ class LyricsView(context: Context) : FrameLayout(context) {
         }
 
     private val palette get() = ThemeUi.palette(dark)
+    private val fontPreferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
+    private var fontScale = fontPreferences.getFloat("lyrics_font_scale", 0.82f).coerceIn(0.65f, 1.35f)
     private val content = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
@@ -84,6 +87,14 @@ class LyricsView(context: Context) : FrameLayout(context) {
     private var touchStartY = 0f
     private var doubleTapped = false
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val scaleGesture = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(detector: ScaleGestureDetector): Boolean {
+            fontScale = (fontScale * detector.scaleFactor).coerceIn(0.65f, 1.35f)
+            fontPreferences.edit().putFloat("lyrics_font_scale", fontScale).apply()
+            applyTextSize()
+            return true
+        }
+    })
     private val resumeFollowing = Runnable {
         resetPreview()
         if (!touching) scrollToLine(activeIndex)
@@ -108,6 +119,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
 
         @SuppressLint("ClickableViewAccessibility")
         override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+            scaleGesture.onTouchEvent(event)
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     touching = true
@@ -194,7 +206,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
             value.synchronized -> value.lines.forEach { line ->
                 val row = RippleLyricText(context).apply {
                     text = line.text
-                    textSize = if (fullScreen) 22f else 15f
+                    textSize = baseTextSize()
                     gravity = Gravity.CENTER
                     maxLines = 3
                     setPadding(dp(20f), dp(4f), dp(20f), dp(4f))
@@ -216,6 +228,14 @@ class LyricsView(context: Context) : FrameLayout(context) {
             updatePadding()
             scrollToLine(activeIndex, false)
         }
+    }
+
+    private fun baseTextSize() = 15f * fontScale
+
+    private fun applyTextSize() {
+        rows.forEach { it.textSize = baseTextSize() }
+        secondary?.applyTextSize()
+        content.requestLayout()
     }
 
     fun setDualLyrics(left: LyricsResult?, right: LyricsResult?, leftEdit: () -> Unit, rightEdit: () -> Unit) {
@@ -456,7 +476,7 @@ class LyricsView(context: Context) : FrameLayout(context) {
     private fun updatePadding() {
         val compact = rows.isEmpty()
         val topPadding = if (compact) dp(8f) else ((height - rows.first().height) / 2).coerceAtLeast(0)
-        val bottomPadding = if (compact) dp(8f) else ((height - rows.last().height) / 2).coerceAtLeast(0)
+        val bottomPadding = if (compact) dp(8f) else dp(24f)
         content.setPadding(0, topPadding, 0, bottomPadding)
     }
 

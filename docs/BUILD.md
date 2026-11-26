@@ -27,6 +27,16 @@
 
 `build.ps1` 默认运行 `:app:assembleDebug` 或 `:app:assembleRelease`；`Install` 要求仅有一台 ADB 设备。安装成功只代表部署完成，音频和界面仍需实际验收。
 
+## GitHub Release
+
+每次发布完整功能版都必须上传以下三个附件，FM 与 Provider 未变更时复用已验证的版本：
+
+- `app-release-no-asr.apk`：本次签名 Release APK，来自 `build/outputs/apk/release/app-release.apk`。
+- `all-fm-base64.txt`：全量 FM 导入配置。
+- `all-platforms-provider.jar`：签名的聚合 Provider。
+
+三个附件统一整理到 `build/deliveries/`。先提交并推送源码，完整功能版沿用 `mainv2-v<versionName>` 标签；Release 标签必须指向本次提交。发布后通过 GitHub API 核对附件名称、大小和 SHA-256，不能只更新 APK 而遗漏 FM 或 Provider。默认包不包含离线 ASR；只有明确要求时额外发布 ASR 包。
+
 ## 清理后完整重建
 
 先确保没有其他会话或 Android Studio 正在构建本项目，然后执行：

@@ -9,10 +9,12 @@ $lameSources = @('VbrTag', 'bitstream', 'encoder', 'fft', 'gain_analysis', 'id3t
     'lame', 'newmdct', 'presets', 'psymodel', 'quantize', 'quantize_pvt', 'reservoir',
     'set_get', 'tables', 'takehiro', 'util', 'vbrquantize', 'version', 'mpglib_interface') |
     ForEach-Object { Join-Path $lame "libmp3lame\$_.c" }
+$mpegSources = @('common', 'dct64_i386', 'decode_i386', 'interface', 'layer1', 'layer2', 'layer3', 'tabinit') |
+    ForEach-Object { Join-Path $lame "mpglib\$_.c" }
 
 & (Join-Path $bin 'clang.exe') --target=aarch64-linux-android24 -O3 -fPIC -shared `
-    -DHAVE_CONFIG_H "-I$lame" "-I$lame\libmp3lame" "-I$lame\include" "-I$lame\mpglib" `
-    $pageSize '-Wl,-soname,libmp3lame.so' @lameSources -lm `
+    -DHAVE_CONFIG_H -DHAVE_MPGLIB "-I$lame" "-I$lame\libmp3lame" "-I$lame\include" "-I$lame\mpglib" `
+    $pageSize '-Wl,-soname,libmp3lame.so' @lameSources @mpegSources -lm `
     -o (Join-Path $output 'libmp3lame.so')
 if ($LASTEXITCODE -ne 0) { throw 'LAME build failed' }
 

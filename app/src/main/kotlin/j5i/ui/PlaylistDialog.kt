@@ -263,6 +263,11 @@ class PlaylistDialog(
         dialog?.let { onSourceTab(index, sourceBody, it) }
     }
 
+    private fun searchOnline(query: String) {
+        onOnlineSearch(query)
+        selectSourceTab(2)
+    }
+
     private fun drawInsertionLine(canvas: Canvas) {
         if (dragging < 0 || dragTarget !in rowTops.indices) return
         val gap = when {
@@ -309,7 +314,7 @@ class PlaylistDialog(
         sortRow.removeAllViews()
         val actions = ThemeUi.row(context)
         actions.addView(ThemeUi.text(context, t("playlist.sort"), 11f, p, role = ThemeUi.ROLE_SUB))
-        listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "album" to t("sort.album"), "time" to t("sort.time"), "folder" to t("sort.folder"), "manual" to t("sort.manual")).forEach { (key, label) ->
+        listOf("name" to t("sort.name"), "artist" to t("sort.artist"), "duration" to t("sort.duration"), "size" to t("sort.size"), "time" to t("sort.time"), "folder" to t("sort.folder"), "manual" to t("sort.manual")).forEach { (key, label) ->
             actions.addView(sortOption(label, store.sort == key) { store.setSort(key); refresh() })
         }
         // The trailing action pair remains fixed after Custom in the UTS order row.
@@ -333,8 +338,7 @@ class PlaylistDialog(
         })
         if (songs.isEmpty() && store.query.isNotBlank()) {
             list.addView(ThemeUi.button(context, p, t("playlist.search_online"), ThemeUi.ROLE_CONTROL) {
-                onOnlineSearch(store.query.trim())
-                selectSourceTab(2)
+                searchOnline(store.query.trim())
             })
         }
         sortRow.addView(HorizontalScrollView(context).apply {
@@ -399,7 +403,10 @@ class PlaylistDialog(
                         contentDescription = t("playlist.bili.audio")
                     }, LinearLayout.LayoutParams(-2, -2).apply { rightMargin = dp(4) })
                 }
-                addView(ThemeUi.text(c, "${AppLanguage.artist(c, song.artist)} · ${AppLanguage.album(c, song.album)} · ${clock(song.duration)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) }, LinearLayout.LayoutParams(0, -2, 1f))
+                val folder = song.folder.trimEnd('/').substringAfterLast('/').ifBlank {
+                    Uri.parse(song.uri).path?.let { java.io.File(it).parentFile?.name }.orEmpty()
+                }.ifBlank { t("metadata.unknown_album") }
+                addView(ThemeUi.text(c, "${AppLanguage.artist(c, song.artist)} · $folder · ${clock(song.duration)} · ${fileSize(song.size)}", 10f, p, role = ThemeUi.ROLE_SUB).apply { ThemeUi.hideOverflow(this) }, LinearLayout.LayoutParams(0, -2, 1f))
             })
         })
         row.addView(ImageButton(c).apply {
@@ -442,6 +449,14 @@ class PlaylistDialog(
             if (store.playlistIndex >= 0) addView(sheetButton(t("remove"), ThemeUi.ROLE_CONTROL) {
                 sheet.dismiss(); confirmRemove(song)
             })
+            if (!j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
+                addView(sheetButton(t("playlist.search_same_online"), ThemeUi.ROLE_CONTROL) {
+                    sheet.dismiss(); searchOnline(displayName)
+                })
+                addView(sheetButton(t("playlist.search_same_mv"), ThemeUi.ROLE_CONTROL) {
+                    sheet.dismiss(); searchOnline("$displayName MV")
+                })
+            }
             if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
                 addView(sheetButton(t("playlist.remove.library"), ThemeUi.ROLE_CONTROL) {
                     sheet.dismiss(); store.removePermanently(song); syncLibrary()
@@ -672,6 +687,12 @@ class PlaylistDialog(
         return ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     }
     private fun clock(ms: Long) = "%02d:%02d".format(ms / 60000, ms / 1000 % 60)
+    private fun fileSize(bytes: Long): String = when {
+        bytes >= 1_000_000_000L -> "%.1f GB".format(bytes / 1_000_000_000.0)
+        bytes >= 1_000_000L -> "%.1f MB".format(bytes / 1_000_000.0)
+        bytes >= 1_000L -> "%.1f KB".format(bytes / 1_000.0)
+        else -> "$bytes B"
+    }
 }
 interface PlaylistHost {
     fun songs(): List<MusicItem>

@@ -1,5 +1,10 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.ui
+import j5i.spatial8d.feature.playback.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
 import android.Manifest
 import android.content.Intent
 import android.content.ContentValues
@@ -96,13 +101,13 @@ internal fun MainActivity.buildUi() {
                 orientation = LinearLayout.VERTICAL
                 addView(ThemeUi.button(this@buildUi, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
                     openPanel(spaceCard, t("space.style"))
-                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 42f)))
                 homePresetButton = ThemeUi.button(this@buildUi, palette, t("space.style"), ThemeUi.ROLE_HOME_CONTROL) {
                     if (service?.dualTracks != null) toast(dualText("disabled")) else presetPicker.performClick()
                 }
                 homePresetButton.maxLines = 1
                 homePresetButton.ellipsize = android.text.TextUtils.TruncateAt.END
-                addView(homePresetButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)).apply {
+                addView(homePresetButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 42f)).apply {
                     topMargin = ThemeUi.dp(this@buildUi, 2f)
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -110,13 +115,13 @@ internal fun MainActivity.buildUi() {
                 orientation = LinearLayout.VERTICAL
                 addView(ThemeUi.button(this@buildUi, palette, t("transform"), ThemeUi.ROLE_HOME_CONTROL) {
                     openPanel(effectsCard, t("transform"))
-                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)))
+                }, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 42f)))
                 homePitchButton = ThemeUi.button(this@buildUi, palette, t("pitch"), ThemeUi.ROLE_HOME_CONTROL) {
                     if (service?.dualTracks != null) toast(dualText("disabled")) else pitchPicker.performClick()
                 }
                 homePitchButton.maxLines = 1
                 homePitchButton.ellipsize = android.text.TextUtils.TruncateAt.END
-                addView(homePitchButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 46f)).apply {
+                addView(homePitchButton, LinearLayout.LayoutParams(-1, ThemeUi.dp(this@buildUi, 42f)).apply {
                     topMargin = ThemeUi.dp(this@buildUi, 2f)
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f).apply {
@@ -215,7 +220,7 @@ internal fun MainActivity.refreshAll() {
         visualization.playing = playing
         updateDriving()
         visualization.invalidate()
-        curve.preset = preset
+        visualizerView.setSpatialPreset(preset)
         curve.playing = playing
         updateDriving()
         curve.invalidate()
@@ -346,6 +351,7 @@ internal fun MainActivity.refreshTheme() {
         root.findViewWithTag<View>("navbar")?.setBackgroundColor(palette.background)
         visualization.dark = dark
         curve.dark = dark
+        visualizerView.spatialPalette = palette
         visualizerView.dark = dark
         popupVisualizer?.dark = dark
         if (isViewReady(this@refreshTheme::lyricsView)) lyricsView.dark = dark
@@ -488,8 +494,8 @@ internal fun MainActivity.refreshPlayback() {
         }
         status.text = effectiveStatus
         // 歌词只允许出现在一个位置：同步歌词，或可视化的图谱/粒子/穿梭及其弹窗。
-        val visualLyrics = curvePanel == 1 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
-        val currentLine = if (!isLive && curvePanel != 2 && !visualLyrics) {
+        val visualLyrics = curvePanel != 1 && curvePanel != 4 && visualizerView.showsLyrics || popupVisualizer?.showsLyrics == true
+        val currentLine = if (!isLive && curvePanel != 4 && !visualLyrics) {
             val lines = currentLyrics?.lines
             lines?.let { ls ->
                 val idx = ls.indexOfLast { it.timeMs <= lyricPositionMs }
@@ -568,6 +574,7 @@ internal fun MainActivity.refreshPlayback() {
             playing, if (isLive) 0.0 else player?.position ?: 0.0, if (isLive) 0.0 else player?.duration ?: 0.0)
         // 应用图标旋转（约 30 秒一圈），跟随播放状态。
         if (playing) disc.rotation = (SystemClock.uptimeMillis() / 83f) % 360f
+        refreshCover()
         (transportRow.getChildAt(0) as? LinearLayout)?.let {
             val icon = (it.getChildAt(0) as? ImageButton) ?: return@let
             icon.setImageResource(when (currentMode()) {
@@ -673,7 +680,7 @@ internal fun MainActivity.showVisualizerSheet() {
             (visualizerView.parent as? ViewGroup)?.removeView(visualizerView)
             curveContent.addView(visualizerView, FrameLayout.LayoutParams(-1, -1))
             visualizerView.fullScreen = false
-            visualizerView.visibility = if (curvePanel == 1) View.VISIBLE else View.GONE
+            visualizerView.visibility = if (curvePanel != 4) View.VISIBLE else View.GONE
         }
         visualizerDialog = dialog
         dialog.show()
@@ -719,7 +726,7 @@ internal fun MainActivity.showLyricsFullScreen() {
         (lyricsView.parent as? ViewGroup)?.removeView(lyricsView)
         curveContent.addView(lyricsView, FrameLayout.LayoutParams(-1, -1))
         lyricsView.fullScreen = false
-        lyricsView.visibility = if (curvePanel == 2) View.VISIBLE else View.GONE
+        lyricsView.visibility = if (curvePanel == 4) View.VISIBLE else View.GONE
         lyricsFullscreenDialog = null
     }
     lyricsFullscreenDialog = dialog
@@ -925,6 +932,7 @@ internal fun MainActivity.nowPlayingBar(): LinearLayout {
             layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@nowPlayingBar, 48f), ThemeUi.dp(this@nowPlayingBar, 48f))
         }
         disc.setOnClickListener { showPlaylist() }
+        disc.setOnLongClickListener { showCoverActions(); true }
         meta.addView(disc)
         songTitle = ThemeUi.text(this, t("ui.audio.unloaded"), 14f, palette, bold = true).apply {
             isSingleLine = true

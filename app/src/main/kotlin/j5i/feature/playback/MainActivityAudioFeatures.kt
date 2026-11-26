@@ -1,5 +1,10 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.playback
+import j5i.spatial8d.feature.ui.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
 import android.content.ContentValues
 import android.net.Uri
 import android.os.SystemClock
@@ -14,12 +19,13 @@ import java.io.File
 import java.io.OutputStream
 
 private fun MainActivity.exportCurrentAudio(stream: OutputStream, mp3: Boolean = false, mp3Path: String? = null,
-    onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+    mp3Metadata: ((String) -> Unit)? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
     val playback = service ?: run { stream.close(); onDone(false, t("audio.export.no_audio")); return }
     val tracks = playback.dualTracks
     if (tracks != null) exportDualLocal(applicationContext, tracks, stream, mp3, mp3Path,
-        playback.player.snapshotDualSwap(), onProgress, onDone)
-    else playback.player.export(stream, mp3 = mp3, mp3Path = mp3Path, onProgress = onProgress, onDone = onDone)
+        playback.player.snapshotDualSwap(), mp3Metadata, onProgress, onDone)
+    else playback.player.export(stream, mp3 = mp3, mp3Path = mp3Path, mp3Metadata = mp3Metadata,
+        onProgress = onProgress, onDone = onDone)
 }
 
 internal fun MainActivity.updateExportProgress(message: String) {
@@ -224,7 +230,19 @@ internal fun MainActivity.exportMp3(uri: Uri, onComplete: () -> Unit = {}) {
             toast(t("mv.export.create_failed"))
             return
         }
-        exportCurrentAudio(stream, mp3 = true, mp3Path = mp3.absolutePath,
+        val metadataItem = currentItem
+        val metadataLyrics = currentLyrics
+        exportCurrentAudio(stream, mp3 = true, mp3Path = mp3.absolutePath, mp3Metadata = { path ->
+            metadataItem?.let { item ->
+                val text = metadataLyrics?.let { result ->
+                    if (result.lines.isNotEmpty()) result.lines.joinToString("\n") { line ->
+                        "[%02d:%02d.%03d]%s".format(java.util.Locale.US, line.timeMs / 60000,
+                            line.timeMs / 1000 % 60, line.timeMs % 1000, line.text)
+                    } else result.plainLyrics
+                }.orEmpty()
+                musicStore.writeMp3Metadata(path, item.name, item.artist, item.album, coverBytesForExport(item), text)
+            }
+        },
             onProgress = { percent -> main.post { playbackStatus = t("export.percent").format(percent); refreshPlayback() } },
             onDone = { ok, message ->
                 mp3.delete()

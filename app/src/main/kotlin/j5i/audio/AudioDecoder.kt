@@ -68,6 +68,9 @@ class AudioDecoder(private val context: Context) {
             val mime = format.getString(MediaFormat.KEY_MIME) ?: error(t("radio.invalid_format"))
             val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION))
                 format.getLong(MediaFormat.KEY_DURATION) else 0L
+            if (mime in setOf("audio/mpeg-L1", "audio/mpeg-L2")) {
+                return decodeMpeg(extractor, format, durationUs, startUs, ::reportProgress, isActive, onHead, onFormat)
+            }
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
@@ -151,5 +154,53 @@ class AudioDecoder(private val context: Context) {
             try { codec?.release() } catch (_: Exception) {}
             extractor.release()
         }
+    }
+
+    private fun decodeMpeg(extractor: MediaExtractor, format: MediaFormat, durationUs: Long, startUs: Long,
+        onProgress: (Int) -> Unit, isActive: () -> Boolean, onHead: (PcmBuffer, Long) -> Unit,
+        onFormat: (PcmBuffer) -> Unit): PcmBuffer {
+        val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+        val channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+        check(sampleRate > 0 && channels in 1..2) { t("decoder.unsupported") }
+        val handle = com.j5i.spatial8d.MpegAudioDecoder.create()
+        check(handle != 0L) { t("decoder.unsupported") }
+        var pcm: PcmBuffer? = null
+        try {
+            val output = PcmBuffer(sampleRate, channels, false, durationUs, File(context.cacheDir, "decoded-pcm"),
+                baseFrame = (startUs * sampleRate / 1_000_000L).toInt())
+            pcm = output
+            onFormat(output)
+            val packet = java.nio.ByteBuffer.allocate(65_536)
+            var headPublished = false
+            while (true) {
+                if (!isActive()) throw DecodeCancelledException()
+                packet.clear()
+                val size = extractor.readSampleData(packet, 0)
+                val packetTime = extractor.sampleTime
+                val input = if (size < 0) ByteArray(0) else ByteArray(size).also { packet.get(it) }
+                val bytes = com.j5i.spatial8d.MpegAudioDecoder.decode(handle, input, channels)
+                    ?: error(t("decoder.no_pcm"))
+                if (size < 0 || startUs == 0L || packetTime >= startUs) {
+                    while (!output.append(bytes)) {
+                        if (!isActive()) throw DecodeCancelledException()
+                        Thread.sleep(16)
+                    }
+                    if (!headPublished && output.frames > 0) {
+                        headPublished = true
+                        onHead(output, durationUs)
+                    }
+                }
+                if (size < 0) break
+                if (durationUs > 0) onProgress((packetTime * 100 / durationUs).toInt().coerceIn(0, 95))
+                extractor.advance()
+            }
+            check(headPublished) { t("decoder.no_pcm") }
+            output.decodeDone = true
+            onProgress(100)
+            return output
+        } catch (exception: Exception) {
+            pcm?.close()
+            throw exception
+        } finally { com.j5i.spatial8d.MpegAudioDecoder.release(handle) }
     }
 }

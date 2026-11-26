@@ -411,7 +411,7 @@ class SpatialPlayer(context: Context) {
         Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_AUDIO)
         try {
             val output = ByteArray(OUTPUT_CHUNK * 4)
-            val swapFader = DualSwapFader(sampleRate)
+            val swapFader = DualSwapFader(sampleRate, fadeMillis = 40)
             while (own == generation && prepared) {
                 if (paused) { Thread.sleep(12); continue }
                 if (reverse && decoded?.isDiskBacked == true) {
@@ -719,12 +719,13 @@ class SpatialPlayer(context: Context) {
     }
 
     fun export(stream: OutputStream, mp3: Boolean = false, wavPath: String? = null,
-        mp3Path: String? = null, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+        mp3Path: String? = null, mp3Metadata: ((String) -> Unit)? = null,
+        onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val source = decoded
         if (source == null) { stream.close(); onDone(false, t("audio.export.no_audio")); return }
         val right = dualRight
         if (right != null) {
-            exportDual(source, right, stream, mp3, mp3Path, onProgress, onDone)
+            exportDual(source, right, stream, mp3, mp3Path, mp3Metadata, onProgress, onDone)
             return
         }
         // 立即回报失败并关闭 SAF 输出流，避免界面只留下一个空文档。
@@ -785,6 +786,7 @@ class SpatialPlayer(context: Context) {
                     val target = mp3Path ?: error(t("audio.export.mp3_path"))
                     com.j5i.spatial8d.Mp3Export.nativeEncode(temp.absolutePath, target)
                     if (!File(target).isFile || File(target).length() <= 1024L) error(t("audio.export.mp3_invalid"))
+                    mp3Metadata?.invoke(target)
                     File(target).inputStream().use { it.copyTo(stream) }
                 } else temp.inputStream().use { it.copyTo(stream) }
                 stream.use { it.flush() }
@@ -798,10 +800,10 @@ class SpatialPlayer(context: Context) {
     }
 
     private fun exportDual(left: PcmBuffer, right: PcmBuffer, stream: OutputStream, mp3: Boolean,
-        mp3Path: String?, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
+        mp3Path: String?, mp3Metadata: ((String) -> Unit)?, onProgress: (Int) -> Unit, onDone: (Boolean, String) -> Unit) {
         val rate = sampleRate
         val swap = snapshotDualSwap()
-        val swapFader = DualSwapFader(rate)
+        val swapFader = DualSwapFader(rate, fadeMillis = 40)
         val dualBalancer = DualVolumeBalancer(rate)
         Thread {
             var temp: File? = null
@@ -842,6 +844,7 @@ class SpatialPlayer(context: Context) {
                     val target = mp3Path ?: error(t("audio.export.mp3_path"))
                     com.j5i.spatial8d.Mp3Export.nativeEncode(temp.absolutePath, target)
                     check(File(target).length() > 1024) { t("audio.export.mp3_invalid") }
+                    mp3Metadata?.invoke(target)
                     File(target).inputStream().use { it.copyTo(stream) }
                 } else temp.inputStream().use { it.copyTo(stream) }
                 stream.use { it.flush() }

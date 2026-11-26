@@ -7,6 +7,26 @@ import kotlin.test.assertTrue
 import kotlin.test.assertFailsWith
 
 class VisualEffectsTest {
+    @Test fun originalAudioHasNoSpatialCurveEvenWithLeftoverEffectParameters() {
+        val raw = j5i.spatial8d.core.SPACE_PRESETS[1].copy(raw = true)
+        for (time in listOf(0.0, 1.0, 7.0, 30.0)) assertEquals(null, spatialCurveSample(time, raw))
+    }
+    @Test fun spatialCurveRespondsToPresetTrajectoryAndDepth() {
+        val preset = j5i.spatial8d.core.SPACE_PRESETS[1]
+        assertTrue(!spatialCurveSample(0.0, preset)!!.contentEquals(spatialCurveSample(2.0, preset)!!))
+        assertEquals(0.0, spatialCurveSample(2.0, preset.copy(elev = 0.0, depth = 0.0))!![2])
+        assertEquals(0.0, spatialCurveSample(2.0, preset.copy(elev = 0.0, depth = 0.0))!![3])
+        assertTrue(!spatialCurveSample(2.0, preset)!!.contentEquals(spatialCurveSample(2.0, preset.copy(trajectory = 2))!!))
+        val highElevation = preset.copy(elev = 80.0, trajectory = 2)
+        assertTrue(abs(spatialCurveSample(highElevation.period / 4, highElevation)!![2]) <= 1.0)
+    }
+    @Test fun spatialCurveWindowTracksPlaybackInsteadOfRepeatingTheOpening() {
+        val preset = j5i.spatial8d.core.SPACE_PRESETS[1].copy(direction = 0.0, trajectory = 4)
+        val start = spatialCurveWindowStart(39.0, 16.0)
+        assertEquals(32.0, start)
+        assertEquals(0.0, spatialCurveWindowStart(0.0, 16.0))
+        assertTrue(!spatialCurveSample(0.0, preset)!!.contentEquals(spatialCurveSample(start, preset)!!))
+    }
     @Test fun randomVisualTimelineRespectsSelectionAndDurations() {
         val timeline = RandomVisualTimeline(listOf(1, 2, 3), 2, 2, 42L)
         val first = timeline.modeAt(0)
@@ -205,16 +225,28 @@ class VisualEffectsTest {
         assertTrue(!isHorizontalVisualSwipe(20f, 2f, 48f))
         assertTrue(!isHorizontalVisualSwipe(60f, 70f, 48f))
     }
+    @Test fun swipeStartsWithAnalysisCurveGraphAndSpectrogram() {
+        var state = false to 0
+        val sequence = mutableListOf(state)
+        repeat(3) {
+            state = nextVisualizerState(state.first, state.second, true)
+            sequence += state
+        }
+        assertEquals(listOf(false to 0, true to -2, true to 4, true to 1), sequence)
+        assertEquals(listOf(0, 1, 2, 3), sequence.map(::visualizerPanel))
+        val recipe = VisualCreative(mode = SPATIAL_CURVE_MODE)
+        assertEquals(recipe, VisualCreative.decode(recipe.encode()))
+    }
     @Test fun swipeCyclesAllModesIncludingAnalysisInBothDirections() {
         var state = false to 0
         val visited = mutableSetOf(state)
-        repeat(exclusiveVisualModes.size) {
+        repeat(exclusiveVisualModes.size + 1) {
             val next = nextVisualizerState(state.first, state.second, true)
             assertEquals(state, nextVisualizerState(next.first, next.second, false))
             visited += next
             state = next
         }
-        assertEquals(exclusiveVisualModes.size + 1, visited.size)
+        assertEquals(exclusiveVisualModes.size + 2, visited.size)
         assertEquals(false to 0, nextVisualizerState(state.first, state.second, true))
         assertEquals(state, nextVisualizerState(false, 0, false))
     }

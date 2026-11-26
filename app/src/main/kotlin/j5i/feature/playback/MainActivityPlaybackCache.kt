@@ -1,5 +1,10 @@
-package j5i.spatial8d
-
+package j5i.spatial8d.feature.playback
+import j5i.spatial8d.feature.ui.*
+import j5i.spatial8d.feature.source.*
+import j5i.spatial8d.feature.video.*
+import j5i.spatial8d.feature.update.*
+import j5i.spatial8d.feature.cache.*
+import j5i.spatial8d.MainActivity
 import android.app.Dialog
 import android.net.Uri
 import android.text.format.Formatter
