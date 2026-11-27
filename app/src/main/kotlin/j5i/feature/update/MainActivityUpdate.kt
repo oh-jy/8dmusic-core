@@ -31,6 +31,7 @@ import kotlin.concurrent.thread
 private const val UPDATE_URL = "https://api.github.com/repos/oh-jy/8dmusic-core/releases/latest"
 private const val BETA_UPDATE_URL = "https://api.github.com/repos/oh-jy/8dmusic-core/releases/tags/beta-latest"
 private const val MAX_APK_BYTES = 300L * 1024 * 1024
+private const val UPDATE_LATEST_VERSION = "updateLatestVersion"
 private val updateClient = OkHttpClient.Builder().connectTimeout(8, TimeUnit.SECONDS)
     .readTimeout(20, TimeUnit.SECONDS).callTimeout(5, TimeUnit.MINUTES).build()
 private val updateBusy = AtomicBoolean(false)
@@ -82,6 +83,11 @@ internal fun isNewerRelease(latest: String, current: String): Boolean {
     }
     return false
 }
+
+internal fun MainActivity.hasAvailableUpdate(): Boolean = preferences.getString(UPDATE_LATEST_VERSION, null)
+    ?.let { runCatching { isNewerRelease(it, BuildConfig.VERSION_NAME) }.getOrDefault(false) } == true
+
+internal fun MainActivity.showUpdateManager() = checkAppUpdate()
 
 internal fun MainActivity.updateChannel(): String = preferences.getString("updateChannel", "stable") ?: "stable"
 
@@ -176,6 +182,7 @@ internal fun MainActivity.checkAppUpdate(automatic: Boolean = false) {
             if (isFinishing || isDestroyed || updateChannel() != channel || (automatic && !pageActive) || (!automatic && dialog?.isShowing != true)) return@runOnUiThread
             result.fold(onSuccess = { (release, cached) ->
                 dialog?.dismiss()
+                preferences.edit().putString(UPDATE_LATEST_VERSION, release.version).apply()
                 val newer = runCatching { isNewerRelease(release.version, BuildConfig.VERSION_NAME) }
                 val currentWifi = activeWifi()
                 if (newer.isFailure) {

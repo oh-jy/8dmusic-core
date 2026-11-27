@@ -22,12 +22,14 @@ internal fun MainActivity.showPlaybackCacheManager() {
         addView(ThemeUi.text(this@showPlaybackCacheManager,
             t("cache.hint"),
             12f, palette, role = ThemeUi.ROLE_SUB))
-        listOf("audio", "video", "lyrics", "live").forEach { type ->
-            val files = cacheFiles(type)
+        listOf("audio", "video", "lyrics", "live", "picked", "provider_plugins", "covers", "other").forEach { type ->
+            val files = managedCacheFiles(type)
             val size = Formatter.formatShortFileSize(this@showPlaybackCacheManager, files.sumOf { it.length() })
             addView(ThemeUi.button(this@showPlaybackCacheManager, palette,
-                "${t("cache.$type.list")} · ${files.size} · $size") {
-                dialog.dismiss(); showCacheItems(type)
+                "${categoryLabel(type)} · ${files.size} · $size") {
+                dialog.dismiss()
+                if (type in setOf("audio", "video", "lyrics", "live")) showCacheItems(type)
+                else showManagedFiles(type)
             })
         }
     }
@@ -68,10 +70,100 @@ private fun MainActivity.cacheFiles(type: String): List<File> {
     }.sortedByDescending { it.lastModified() }
 }
 
+private fun MainActivity.categoryLabel(type: String): String = when (type) {
+    "audio" -> t("cache.audio.list")
+    "video" -> t("cache.video.list")
+    "lyrics" -> t("cache.lyrics.list")
+    "live" -> t("cache.live.list")
+    else -> t("cache.category.$type")
+}
+
+private fun MainActivity.managedCacheFiles(type: String): List<File> {
+    val directories = when (type) {
+        "audio" -> listOf(File(filesDir, "provider-audio"))
+        "video" -> listOf(File(filesDir, "video-cache"))
+        "lyrics" -> listOf(File(filesDir, "lyrics"), File(cacheDir, "lyrics"))
+        "live" -> listOf(File(filesDir, "live-catalog"))
+        "picked" -> listOf(File(filesDir, "picked"), File(filesDir, "online-favorites"))
+        "provider_plugins" -> listOf(File(filesDir, "provider-plugins"))
+        "covers" -> listOf(File(filesDir, "covers"))
+        "other" -> listOf(
+            File(filesDir, "provider-audio/.part"), File(cacheDir, "updates"),
+            File(cacheDir, "decoded-pcm"), File(cacheDir, "code_cache")
+        )
+        else -> emptyList()
+    }
+    return directories.flatMap { it.walkTopDown().filter { it.isFile }.asSequence() }.toList()
+        .sortedByDescending { it.lastModified() }
+}
+
+private fun MainActivity.managedFileProtected(type: String, file: File): Boolean {
+    return when (type) {
+        "picked", "provider_plugins", "covers" -> true
+        "other" -> file.name == "lyrics-edited" || file.path.contains("${File.separator}lyrics-edited${File.separator}") ||
+            file.path.contains("${File.separator}shared_prefs${File.separator}") ||
+            file.path.contains("${File.separator}databases${File.separator}")
+        else -> true
+    }
+}
+
+private fun MainActivity.showManagedFiles(type: String) {
+    val label = categoryLabel(type)
+    val files = managedCacheFiles(type)
+    lateinit var sheet: Dialog
+    sheet = ThemeUi.showSheet(this, palette, label, fullHeight = true) {
+        if (files.isEmpty()) addView(ThemeUi.text(this@showManagedFiles, t("cache.list.empty"), 12f, palette, role = ThemeUi.ROLE_SUB))
+        files.forEach { file ->
+            val details = listOf(
+                Formatter.formatShortFileSize(this@showManagedFiles, file.length()),
+                java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(file.lastModified()))
+            ).joinToString(" · ")
+            addView(ThemeUi.row(this@showManagedFiles).apply {
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+                    bottomMargin = ThemeUi.dp(this@showManagedFiles, 2f)
+                }
+                background = ThemeUi.alternatingRowBackground(this, palette, files.indexOf(file), false)
+                addView(LinearLayout(this@showManagedFiles).apply {
+                    orientation = LinearLayout.VERTICAL
+                    val displayName = if (type == "picked") {
+                        val id = file.name.substringAfter("music_").substringBefore('.').toLongOrNull()
+                            ?: file.name.substringBefore('.').toLongOrNull()
+                        (musicStore.cached() + musicStore.onlineCached()).firstOrNull { it.id == id }?.name ?: file.name
+                    } else file.name
+                    addView(ThemeUi.text(this@showManagedFiles, displayName, 13f, palette))
+                    addView(ThemeUi.text(this@showManagedFiles, details, 11f, palette, role = ThemeUi.ROLE_SUB))
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(ThemeUi.button(this@showManagedFiles, palette, t("delete"), ThemeUi.ROLE_CONTROL) {
+                    if (managedFileProtected(type, file)) {
+                        toast(t("cache.protected"))
+                    } else {
+                        lateinit var confirm: Dialog
+                        confirm = ThemeUi.showSheet(this@showManagedFiles, palette, t("delete"), t("cache.delete.confirm").format(file.name)) {
+                            addView(ThemeUi.button(this@showManagedFiles, palette, t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
+                                confirm.dismiss()
+                                val deleted = runCatching {
+                                    if (managedFileProtected(type, file)) false else file.delete()
+                                }.getOrDefault(false)
+                                toast(t(if (deleted) "cache.delete.success" else "cache.delete.failed"))
+                                if (deleted && sheet.isShowing) { sheet.dismiss(); showManagedFiles(type) }
+                            })
+                        }
+                        confirm.show()
+                    }
+                })
+            })
+        }
+    }
+    sheet.show()
+}
+
 private fun MainActivity.showCacheItems(type: String) {
     val isAudio = type == "audio"
     val isVideo = type == "video"
-    val files = cacheFiles(type)
+    val files = when (type) {
+        "video" -> managedCacheFiles(type)
+        else -> cacheFiles(type)
+    }
     val known = (musicStore.onlineCached() + musicStore.cached() + currentQueue + service?.queueSnapshot.orEmpty())
         .associateBy { it.id }
     fun sourceName(source: String): String = when (source) {
@@ -115,7 +207,8 @@ private fun MainActivity.showCacheItems(type: String) {
                                 } else {
                                     val deleted = runCatching {
                                         if (isAudio && id != null) ProviderAudioCache.deletePrivate(applicationContext, id)
-                                        else if (isVideo) ProviderMvCache.delete(applicationContext, file)
+                                        else if (isVideo) runCatching { ProviderMvCache.delete(applicationContext, file) }.getOrDefault(false)
+                                            .takeIf { it } ?: file.delete()
                                         else file.delete()
                                     }.getOrDefault(false)
                                     toast(t(if (deleted) "cache.delete.success" else "cache.delete.failed"))

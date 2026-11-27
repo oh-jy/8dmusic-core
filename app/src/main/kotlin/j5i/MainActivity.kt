@@ -202,6 +202,7 @@ class MainActivity : AppCompatActivity(), PlaylistHost, PlaylistMetadataHost, Pl
     internal var curvePanel = 0
     internal var onlinePage = 1
     internal var onlineQuery = ""
+    internal var onlineResourceFilter = OnlineResourceFilter.ALL
     internal var pendingNfcOnlineSearch: String? = null
     internal var onlineAutoSource: String? = null
     internal var providerSelection: String? = null

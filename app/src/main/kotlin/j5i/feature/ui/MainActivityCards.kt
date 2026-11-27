@@ -452,6 +452,8 @@ internal fun MainActivity.curveCard(): LinearLayout {
             curveTabs = tabRow(listOf(t("visualizer"), t("lyrics")), if (curvePanel == 4) 1 else 0, compact = true) {
                 if (it == 0) {
                     if (curvePanel != 4) showVisualEffectPicker() else selectCurvePanel(visualizerPanel(visualizerView.visualState), restoreMode = false)
+                } else if (curvePanel == 4) {
+                    currentItem?.let { item -> showLyricsActions(item, currentLyrics) }
                 } else selectCurvePanel(4)
             }
             addView(curveTabs)
@@ -512,7 +514,7 @@ internal fun MainActivity.showVisualEffectPicker() {
             dialog.dismiss()
             showVisualCreative()
         })
-        val analysisItems = listOf(t("analysis") to -1, t("curve") to -2,
+        val analysisItems = listOf(t("curve") to -2, t("analysis") to -1,
             t("visual.pcm") to 4, t("visual.spectral") to 1, t("visual.layers") to -3)
         visualModeGroups.forEachIndexed { groupIndex, (key, ids) ->
             addView(ThemeUi.text(this@showVisualEffectPicker, t(key), 12f, palette, bold = true, role = ThemeUi.ROLE_SUB).apply {
@@ -853,11 +855,13 @@ internal fun MainActivity.showVisualCreative(scrollY: Int = 0) {
 
 internal fun MainActivity.showVisualLayerPicker() {
     val layers = visualizerView.analysisLayers
-    val names = listOf("wave", "spectrum", "loudness", "phase").mapIndexed { index, key ->
-        "${if (layers[index]) "✓" else "○"} ${t(key)}"
+    val order = listOf(3, 0, 1, 2)
+    val keys = listOf("phase", "wave", "spectrum", "loudness")
+    val names = order.mapIndexed { position, layer ->
+        "${if (layers[layer]) "✓" else "○"} ${t(keys[position])}"
     }
-    pickOption(t("visual.layers"), names, -1) { index ->
-        visualizerView.toggleAnalysisLayer(index)
+    pickOption(t("visual.layers"), names, -1) { position ->
+        visualizerView.toggleAnalysisLayer(order[position])
         showVisualLayerPicker()
     }
 }
@@ -866,11 +870,14 @@ internal fun MainActivity.showVisualLayerPicker() {
 
 internal fun MainActivity.selectCurvePanel(index: Int, restoreMode: Boolean = true) {
     curvePanel = index
+    val tabLabels = listOf(t("visualizer"), t("lyrics"))
     for (tab in 0 until curveTabs.childCount) {
         (curveTabs.getChildAt(tab) as? android.widget.Button)?.let { button ->
             val selected = (tab == 1) == (index == 4)
             button.tag = if (selected) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT
             ThemeUi.applyButton(button, palette)
+            val base = tabLabels.getOrNull(tab).orEmpty()
+            button.text = if (selected) "$base ▾" else base
             button.setTextColor(if (selected) palette.accent else palette.sub)
         }
     }

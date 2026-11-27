@@ -1130,7 +1130,8 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         }
 
         private fun drawCombined(c: Canvas) {
-            val enabled = if (singleLayer >= 0) listOf(singleLayer) else layers.indices.filter { layers[it] }
+            val drawOrder = listOf(3, 0, 1, 2)
+            val enabled = if (singleLayer >= 0) listOf(singleLayer) else drawOrder.filter { layers[it] }
             if (enabled.isEmpty()) {
                 c.drawText(AppLanguage.text(context, "visual.empty"), dp(14f), height / 2f, paint)
                 return
@@ -1144,7 +1145,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
                     0 -> drawWave(c, top, bottom)
                     1 -> drawSpectrum(c, top, bottom)
                     2 -> drawLoudness(c, top, bottom)
-                    else -> drawPhase(c, top, bottom)
+                    3 -> drawPhase(c, top, bottom)
                 }
             }
         }
@@ -1208,7 +1209,7 @@ class VisualizerView(context: Context) : LinearLayout(context) {
         private fun drawPhase(c: Canvas, top: Float, bottom: Float) {
             label(c, String.format(AppLanguage.text(context, "visual.phase"), correlation), bottom)
             val center = width / 2f
-            val y = top + (bottom - top - dp(18f)) / 2
+            val y = top + (bottom - top - dp(8f)) / 2
             paint.strokeWidth = dp(2f)
             paint.color = if (dark) 0xff435468.toInt() else 0xffcbd5df.toInt()
             c.drawLine(0f, y, width.toFloat(), y, paint)

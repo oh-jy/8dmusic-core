@@ -34,6 +34,37 @@ internal fun orderedRadioStationIds(stationIds: List<String>, pinnedIds: List<St
 
 internal data class ImportPreviewCard(val name: String, val summary: String, val details: String)
 
+internal enum class OnlineResourceFilter { ALL, NON_V, MV }
+
+internal fun onlinePluginTrackMatchesFilter(sourceId: String, track: org.json.JSONObject, filter: OnlineResourceFilter): Boolean {
+    val hasVideo = track.optString("mvUrl").isNotBlank() || sourceId == "platform.bilibili"
+    return when (filter) {
+        OnlineResourceFilter.ALL -> true
+        // VIP tracks with a playable MV are usable as non-V resources here.
+        OnlineResourceFilter.NON_V -> !track.optBoolean("vip") || hasVideo
+        OnlineResourceFilter.MV -> hasVideo
+    }
+}
+
+internal fun onlineDeclarativeTrackMatchesFilter(track: ProviderSearch.Track, filter: OnlineResourceFilter): Boolean {
+    val hasMv = track.mvUrl.isNotBlank()
+    return when (filter) {
+        OnlineResourceFilter.ALL -> true
+        OnlineResourceFilter.NON_V -> !track.vip || hasMv
+        OnlineResourceFilter.MV -> hasMv
+    }
+}
+
+internal fun onlinePluginTrackDetail(track: org.json.JSONObject): String = buildList {
+    track.optString("album").takeIf { it.isNotBlank() }?.let { add(it) }
+    track.optLong("size").takeIf { it > 0 }?.let { add("%.1f MB".format(java.util.Locale.ROOT, it / 1048576.0)) }
+}.joinToString(" · ")
+
+internal fun onlineDeclarativeTrackDetail(track: ProviderSearch.Track): String = buildList {
+    track.album.takeIf { it.isNotBlank() }?.let { add(it) }
+    track.size.takeIf { it > 0 }?.let { add("%.1f MB".format(java.util.Locale.ROOT, it / 1048576.0)) }
+}.joinToString(" · ")
+
 internal fun MainActivity.showImportPreview(
     title: String, subtitle: String, cards: List<ImportPreviewCard>, warning: String, confirm: () -> Unit
 ) {
@@ -333,19 +364,26 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             val unfiltered = sourceRegion == "全部" && sourceCity == "全部" && sourceType == "全部" && text.isEmpty()
             val byId = filtered.associateBy { it.id }
             val ordered = orderedRadioStationIds(filtered.map { it.id }, pinnedStations, unfiltered).mapNotNull(byId::get)
-            ordered.take(visibleStationCount).forEach { station ->
+            ordered.take(visibleStationCount).forEachIndexed { index, station ->
                 rows.addView(ThemeUi.row(this).apply {
                     val active = isLive && currentStationId == station.id
                     if (active) activeStation = this
                     setPadding(ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f), ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f))
-                    background = ThemeUi.bgDrawable(this@populateSourceSheet, if (active) palette.surfaceAlt else palette.surface, 8f)
+                    layoutParams = LinearLayout.LayoutParams(-1, -2)
+                    background = ThemeUi.alternatingRowBackground(this, palette, index, active)
                     addView(LinearLayout(this@populateSourceSheet).apply {
                         orientation = LinearLayout.VERTICAL
                         val level = if (station.id in generatedLevels) t("source.radio.imported") else station.level
                         val type = if (station.id in generatedTypes) t("ui.radio.network") else station.type
-                        addView(ThemeUi.text(this@populateSourceSheet, "${if (station.id in pinnedStations) "📌 " else ""}${station.name} · $level", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
-                        addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · $type · ${t("source.radio.streams").format(station.sources.size)}", 10f, palette, role = ThemeUi.ROLE_SUB))
-                        if (station.note.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT))
+                        addView(ThemeUi.text(this@populateSourceSheet, "${if (station.id in pinnedStations) "📌 " else ""}${station.name} · $level", 13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
+                            ThemeUi.hideOverflow(this)
+                        })
+                        addView(ThemeUi.text(this@populateSourceSheet, "${station.region} · ${station.city} · $type · ${t("source.radio.streams").format(station.sources.size)}", 10f, palette, role = ThemeUi.ROLE_SUB).apply {
+                            ThemeUi.hideOverflow(this)
+                        })
+                        if (station.note.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, station.note, 10f, palette, role = ThemeUi.ROLE_FAINT).apply {
+                            ThemeUi.hideOverflow(this)
+                        })
                     }, LinearLayout.LayoutParams(0, -2, 1f))
                     addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                         contentDescription = "${station.name}, ${t("playlist.more")}"
@@ -419,6 +457,24 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             bottomMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
         }
     })
+    val resourceFilters = ThemeUi.row(this)
+    listOf(
+        OnlineResourceFilter.ALL to t("source.filter.all"),
+        OnlineResourceFilter.NON_V to t("source.filter.non_v"),
+        OnlineResourceFilter.MV to t("source.filter.mv")
+    ).forEach { (filter, label) ->
+        resourceFilters.addView(compactButton(label, onlineResourceFilter == filter) {
+            onlineResourceFilter = filter
+            populateSourceSheet(body, true)
+        })
+    }
+    body.addView(HorizontalScrollView(this).apply {
+        isHorizontalScrollBarEnabled = false
+        addView(resourceFilters)
+        layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+            bottomMargin = ThemeUi.dp(this@populateSourceSheet, 4f)
+        }
+    })
     val selectedPlugin = plugins.firstOrNull { it.descriptor.id == selected.first }
     val selectedData = entries.firstOrNull { it.definition.id == selected.first }
     if (selectedPlugin != null && "login" in selectedPlugin.descriptor.capabilities) {
@@ -473,9 +529,16 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
         body.post { if (!isDestroyed && request == providerRequest && body.tag == "online" &&
             sourceSheetBody === body && providerSelection == selected.first) runSearch() }
     }
-    val visibleTracks = pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }
+    val visiblePluginResults = pluginResults.filter { (id, track) ->
+        (selected.first == "@aggregate" || id == selected.first) &&
+            onlinePluginTrackMatchesFilter(id, track, onlineResourceFilter)
+    }
+    val visibleProviderResults = providerResults.filter { (id, _) ->
+        selected.first == "@aggregate" || id == selected.first
+    }.filter { onlineDeclarativeTrackMatchesFilter(it.second, onlineResourceFilter) }
+    val visibleTracks = visiblePluginResults
         .map { (id, track) -> j5i.spatial8d.provider.ProviderTrackRef.plugin(id, track) } +
-        providerResults.filter { selected.first == "@aggregate" || it.first == selected.first }
+        visibleProviderResults
             .map { (id, track) -> j5i.spatial8d.provider.ProviderTrackRef.declarative(id, track) }
     if (visibleTracks.isNotEmpty()) body.addView(ThemeUi.row(this).apply {
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
@@ -489,20 +552,40 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
     })
     val rows = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     fun addTrack(title: String, artist: String, sourceId: String, item: MusicItem, available: Boolean = true,
-        badge: String = "", play: () -> Unit) {
+        badges: List<String> = emptyList(), details: String = "", play: () -> Unit) {
+        val index = rows.childCount
         rows.addView(ThemeUi.row(this).apply {
             tag = "track:${item.id}"
             val active = !isLive && currentItem?.id == item.id
             setPadding(ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f),
                 ThemeUi.dp(this@populateSourceSheet, 8f), ThemeUi.dp(this@populateSourceSheet, 4f))
-            if (active) background = ThemeUi.bgDrawable(this@populateSourceSheet, palette.control, 8f)
+            background = ThemeUi.alternatingRowBackground(this, palette, index, active)
             addView(LinearLayout(this@populateSourceSheet).apply {
                 orientation = LinearLayout.VERTICAL
-                val label = if (badge.isEmpty()) title else "$badge $title"
-                addView(ThemeUi.text(this@populateSourceSheet, (if (active) "▶ " else "") + label,
-                    13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT))
+                addView(ThemeUi.row(this@populateSourceSheet).apply {
+                    badges.forEach { badge ->
+                        addView(ThemeUi.text(this@populateSourceSheet, badge, 10f, palette,
+                            bold = true, role = ThemeUi.ROLE_ACCENT).apply {
+                            background = ThemeUi.bgDrawable(this@populateSourceSheet, palette.control, 4f)
+                            setPadding(ThemeUi.dp(this@populateSourceSheet, 4f), 0,
+                                ThemeUi.dp(this@populateSourceSheet, 4f), 0)
+                            gravity = android.view.Gravity.CENTER
+                            layoutParams = LinearLayout.LayoutParams(-2, ThemeUi.dp(this@populateSourceSheet, 18f)).apply {
+                                rightMargin = ThemeUi.dp(this@populateSourceSheet, 5f)
+                            }
+                        })
+                    }
+                    addView(ThemeUi.text(this@populateSourceSheet, (if (active) "▶ " else "") + title,
+                        13f, palette, bold = true, role = if (active) ThemeUi.ROLE_ACCENT else ThemeUi.ROLE_TEXT).apply {
+                        ThemeUi.hideOverflow(this)
+                        layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                    })
+                })
                 val duration = if (item.duration > 0) " · ${item.duration / 60000}:${"%02d".format(item.duration / 1000 % 60)}" else ""
                 addView(ThemeUi.text(this@populateSourceSheet, "$artist · ${sources.firstOrNull { it.first == sourceId }?.second ?: sourceId}$duration", 11f, palette, role = ThemeUi.ROLE_SUB))
+                if (details.isNotBlank()) addView(ThemeUi.text(this@populateSourceSheet, details, 10f, palette, role = ThemeUi.ROLE_FAINT).apply {
+                    ThemeUi.hideOverflow(this)
+                })
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(ThemeUi.text(this@populateSourceSheet, "⋯", 18f, palette, role = ThemeUi.ROLE_ACCENT).apply {
                 contentDescription = "$title, ${t("playlist.more")}"
@@ -513,17 +596,16 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             setOnClickListener { play() }
         })
     }
-    pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }.forEach { (id, track) ->
+    visiblePluginResults.forEach { (id, track) ->
         val item = j5i.spatial8d.provider.ProviderTrackRef.plugin(id, track)
         val parts = track.optInt("partCount", 1)
         val badges = buildList {
             if (track.optBoolean("vip")) add("【V】")
-            if (track.optString("mvUrl").isNotBlank()) add("MV")
+            if (track.optString("mvUrl").isNotBlank()) add("【MV】")
             if (track.optBoolean("compilation")) add(t("source.collection.count").format(parts)) else if (id == "platform.bilibili") add(t("video.title"))
         }
-        val badge = badges.joinToString(" ")
-            addTrack(item.name, item.artist, id, item, badge = badge) {
-                val visibleResults = pluginResults.filter { selected.first == "@aggregate" || it.first == selected.first }
+            addTrack(item.name, item.artist, id, item, badges = badges, details = onlinePluginTrackDetail(track)) {
+                val visibleResults = visiblePluginResults
                 val visibleItems = visibleResults.map { (providerId, result) ->
                     j5i.spatial8d.provider.ProviderTrackRef.plugin(providerId, result)
                 }
@@ -534,10 +616,15 @@ internal fun MainActivity.populateSourceSheet(body: LinearLayout, online: Boolea
             else playPluginTrack(id, track)
         }
     }
-    providerResults.filter { selected.first == "@aggregate" || it.first == selected.first }.forEach { (id, track) ->
+    visibleProviderResults.forEach { (id, track) ->
         val item = j5i.spatial8d.provider.ProviderTrackRef.declarative(id, track)
-            addTrack(track.title, track.artist, id, item, track.audioUrl != null) {
-                val visibleResults = providerResults.filter { selected.first == "@aggregate" || it.first == selected.first }
+            val badges = buildList {
+                if (track.vip) add("【V】")
+                if (track.mvUrl.isNotBlank()) add("【MV】")
+            }
+            addTrack(track.title, track.artist, id, item, track.audioUrl != null, badges = badges,
+                details = onlineDeclarativeTrackDetail(track)) {
+                val visibleResults = visibleProviderResults
                 val visibleItems = visibleResults.map { (providerId, result) ->
                     j5i.spatial8d.provider.ProviderTrackRef.declarative(providerId, result)
                 }
@@ -603,6 +690,20 @@ internal fun MainActivity.showOnlineTrackActions(item: MusicItem) {
                     if (cid != null && cid > 0) url.appendQueryParameter("cid", cid.toString())
                     sheet.dismiss(); openWebVideo(url.build().toString())
                 }
+            })
+            addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.video.native")) {
+                sheet.dismiss()
+                Thread {
+                    val result = runCatching { j5i.spatial8d.provider.ProviderTrackRef.resolveVideo(this@showOnlineTrackActions, item) }
+                    main.post {
+                        result.onSuccess { url ->
+                            openExternalMedia(android.content.Intent(android.content.Intent.ACTION_VIEW)
+                                .setDataAndType(Uri.parse(url), "video/*")
+                                .putExtra("j5i.videoReferer", "https://www.bilibili.com/")
+                                .putExtra("j5i.videoUserAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"))
+                        }.onFailure { toast("${t("video.play_failed")}: ${errorDetail(it)}") }
+                    }
+                }.start()
             })
             addView(ThemeUi.button(this@showOnlineTrackActions, palette, t("source.bili.open")) {
                 val id = android.net.Uri.parse(item.uri).getQueryParameter("id").orEmpty()

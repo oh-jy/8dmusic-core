@@ -42,7 +42,7 @@ class PlaylistDialog(
     private val onChanged: (List<MusicItem>) -> Unit,
     private var source: List<MusicItem>,
     private val initialTab: Int = 0,
-    private val onOnlineSearch: (String) -> Unit = {},
+    private val onOnlineSearch: (String, Boolean) -> Unit = { _, _ -> },
     private val onSourceTab: (Int, LinearLayout, Dialog) -> Unit = { _, _, _ -> }
 ) {
     private var dialog: Dialog? = null
@@ -263,8 +263,8 @@ class PlaylistDialog(
         dialog?.let { onSourceTab(index, sourceBody, it) }
     }
 
-    private fun searchOnline(query: String) {
-        onOnlineSearch(query)
+    private fun searchOnline(query: String, mvOnly: Boolean = false) {
+        onOnlineSearch(query, mvOnly)
         selectSourceTab(2)
     }
 
@@ -379,8 +379,8 @@ class PlaylistDialog(
         val active = song.id == currentId
         val row = ThemeUi.row(c).apply {
             setPadding(dp(2), 0, 0, 0)
-            background = ThemeUi.bgDrawable(c, if (active) p.control else p.surfaceAlt, 8f)
-            layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(4) }
+            background = ThemeUi.alternatingRowBackground(this, p, index, active)
+            layoutParams = LinearLayout.LayoutParams(-1, dp(54)).apply { bottomMargin = dp(2) }
             isSelected = active
         }
         row.addView(ThemeUi.text(c, "☰", 13f, p, role = ThemeUi.ROLE_FAINT).apply {
@@ -446,31 +446,55 @@ class PlaylistDialog(
         val displayName = song.name.replace(Regex("\\.[A-Za-z0-9]{1,8}$"), "")
         sheet = ThemeUi.showSheet(context, p, displayName.take(28),
             "${AppLanguage.artist(context, song.artist)} · ${AppLanguage.album(context, song.album)}") {
-            if (store.playlistIndex >= 0) addView(sheetButton(t("remove"), ThemeUi.ROLE_CONTROL) {
-                sheet.dismiss(); confirmRemove(song)
-            })
-            if (!j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
-                addView(sheetButton(t("playlist.search_same_online"), ThemeUi.ROLE_CONTROL) {
-                    sheet.dismiss(); searchOnline(displayName)
-                })
-                addView(sheetButton(t("playlist.search_same_mv"), ThemeUi.ROLE_CONTROL) {
-                    sheet.dismiss(); searchOnline("$displayName MV")
+            fun action(label: String, role: String = ThemeUi.ROLE_CONTROL, run: () -> Unit) =
+                Triple(label, role, { sheet.dismiss(); run() })
+            fun section(title: String) {
+                addView(ThemeUi.text(context, title, 11f, p, bold = true, role = ThemeUi.ROLE_SUB).apply {
+                    setPadding(0, dp(10), 0, dp(2))
                 })
             }
-            if (j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)) {
-                addView(sheetButton(t("playlist.remove.library"), ThemeUi.ROLE_CONTROL) {
-                    sheet.dismiss(); store.removePermanently(song); syncLibrary()
-                })
+            fun grid(actions: List<Triple<String, String, () -> Unit>>) {
+                actions.chunked(2).forEach { chunk ->
+                    addView(ThemeUi.row(context).apply {
+                        chunk.forEachIndexed { index, (label, role, run) ->
+                            addView(ThemeUi.button(context, p, label, role) { run() },
+                                LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+                                    topMargin = dp(5)
+                                    if (index > 0) leftMargin = dp(6)
+                                })
+                        }
+                        if (chunk.size == 1) addView(View(context), LinearLayout.LayoutParams(0, dp(42), 1f).apply {
+                            topMargin = dp(5); leftMargin = dp(6)
+                        })
+                    })
+                }
+            }
+            val online = j5i.spatial8d.provider.ProviderTrackRef.isOnline(song)
+            if (store.playlistIndex >= 0) {
+                section(t("playlist.actions.playback"))
+                grid(listOf(action(t("remove")) { confirmRemove(song) }))
+            }
+            if (!online) {
+                section(t("playlist.actions.search"))
+                val searchActions = buildList {
+                    add(action(t("playlist.search_same_online")) { searchOnline(displayName) })
+                    if (song.artist.isNotBlank()) add(action(t("playlist.search_same_artist")) { searchOnline(song.artist) })
+                    if (song.album.isNotBlank()) add(action(t("playlist.search_same_album")) { searchOnline(song.album) })
+                    add(action(t("playlist.search_same_mv")) { searchOnline(displayName, mvOnly = true) })
+                }
+                grid(searchActions)
+            }
+            section(t("playlist.actions.manage"))
+            if (online) {
+                grid(listOf(action(t("playlist.remove.library")) {
+                    store.removePermanently(song); syncLibrary()
+                }))
             } else {
-                addView(sheetButton(t("playlist.rename"), ThemeUi.ROLE_CONTROL) {
-                    sheet.dismiss(); rename(song)
-                })
-                addView(sheetButton(t("delete"), ThemeUi.ROLE_ACCENT_FILL) {
-                    sheet.dismiss(); confirmDelete(song)
-                })
-                addView(sheetButton(t("metadata.edit"), ThemeUi.ROLE_CONTROL) {
-                    sheet.dismiss(); (context as? PlaylistMetadataHost)?.editMetadata(song)
-                })
+                grid(listOf(
+                    action(t("playlist.rename")) { rename(song) },
+                    action(t("metadata.edit")) { (context as? PlaylistMetadataHost)?.editMetadata(song) },
+                    action(t("delete")) { confirmDelete(song) }
+                ))
             }
         }
         sheet.show()

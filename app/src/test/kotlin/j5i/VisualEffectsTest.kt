@@ -225,15 +225,18 @@ class VisualEffectsTest {
         assertTrue(!isHorizontalVisualSwipe(20f, 2f, 48f))
         assertTrue(!isHorizontalVisualSwipe(60f, 70f, 48f))
     }
-    @Test fun swipeStartsWithAnalysisCurveGraphAndSpectrogram() {
+    @Test fun swipeStartsWithAnalysisGraphSpectrogramAndCurveLast() {
         var state = false to 0
         val sequence = mutableListOf(state)
-        repeat(3) {
+        repeat(exclusiveVisualModes.size + 1) {
             state = nextVisualizerState(state.first, state.second, true)
             sequence += state
         }
-        assertEquals(listOf(false to 0, true to -2, true to 4, true to 1), sequence)
-        assertEquals(listOf(0, 1, 2, 3), sequence.map(::visualizerPanel))
+        assertEquals(false to 0, sequence.first())
+        assertEquals(true to 4, sequence[1])
+        assertEquals(true to 1, sequence[2])
+        assertEquals(true to 39, sequence[sequence.lastIndex - 1])
+        assertEquals(true to SPATIAL_CURVE_MODE, sequence.last())
         val recipe = VisualCreative(mode = SPATIAL_CURVE_MODE)
         assertEquals(recipe, VisualCreative.decode(recipe.encode()))
     }

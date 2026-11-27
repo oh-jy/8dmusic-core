@@ -198,10 +198,10 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem, onSaved: (Lyrics
             addView(artistInput)
             addView(ThemeUi.text(this@showLyricsCandidates, t("lyrics.choose"), 12f, palette, role = ThemeUi.ROLE_SUB))
 
-            // 候选按来源分组，可切换 tab 只看某一源。LRCLIB 自带完整 LRC，通常最可靠。
-            val sourceOrder = listOf("LRCLIB", "QQ", "酷狗")
+            // 候选按来源分组，可切换 tab 只看某一源。QQ 优先，便于命中中文歌曲原版时间轴。
+            val sourceOrder = listOf("QQ", "LRCLIB", "酷狗")
             var bySource: Map<String, List<LyricsCandidate>> = emptyMap()
-            var activeSource = "LRCLIB"
+            var activeSource = "QQ"
             val list = LinearLayout(this@showLyricsCandidates).apply {
                 orientation = LinearLayout.VERTICAL
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -256,7 +256,7 @@ internal fun MainActivity.showLyricsCandidates(item: MusicItem, onSaved: (Lyrics
                     result.onSuccess { all ->
                         bySource = all.groupBy { it.source }
                         // 默认落在第一个有结果的源，避免打开就是空列表。
-                        activeSource = sourceOrder.firstOrNull { !bySource[it].isNullOrEmpty() } ?: "LRCLIB"
+                        activeSource = sourceOrder.firstOrNull { !bySource[it].isNullOrEmpty() } ?: "QQ"
                         renderTabs()
                         renderList()
                     }.onFailure { status.text = it.message ?: t("lyrics.search_failed") }

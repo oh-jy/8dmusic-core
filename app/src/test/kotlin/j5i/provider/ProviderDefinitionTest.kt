@@ -59,6 +59,24 @@ class ProviderDefinitionTest {
         assertEquals(123456L, ProviderTrackRef.declarative("demo", tracks[0]).duration)
     }
 
+    @Test fun searchReadsOptionalVipAndMvPaths() {
+        val p = parse("""{"version":1,"id":"demo","name":"Demo","type":"music","search":{"url":"https://api.example/search?q={query}","results":"items","id":"id","title":"name","artist":"artist","audio":"audio","vip":"payInfo.isVip","mvUrl":"mv.url"}}""")
+        val tracks = ProviderSearch.parse(p, org.json.JSONObject("""{"items":[{"id":"1","name":"VIP MV","payInfo":{"isVip":true},"mv":{"url":"https://mv.example/1"}},{"id":"2","name":"Free"}]}"""))
+        assertTrue(tracks[0].vip)
+        assertEquals("https://mv.example/1", tracks[0].mvUrl)
+        assertFalse(tracks[1].vip)
+        assertEquals("", tracks[1].mvUrl)
+    }
+
+    @Test fun searchReadsOptionalAlbumAndSizePaths() {
+        val p = parse("""{"version":1,"id":"demo","name":"Demo","type":"music","search":{"url":"https://api.example/search?q={query}","results":"items","id":"id","title":"name","artist":"artist","audio":"audio","album":"album.name","size":"fileSize"}}""")
+        val tracks = ProviderSearch.parse(p, org.json.JSONObject("""{"items":[{"id":"1","name":"Song","album":{"name":"Album"},"fileSize":3145728},{"id":"2","name":"Unknown","fileSize":-1}]}"""))
+        assertEquals("Album", tracks[0].album)
+        assertEquals(3145728L, tracks[0].size)
+        assertEquals("", tracks[1].album)
+        assertEquals(0L, tracks[1].size)
+    }
+
     @Test fun rejectsUnsupportedOrDangerousStructure() {
         val base = """{"version":1,"id":"demo","name":"Demo","type":"fm","stations":[{"id":"a","name":"A","url":"https://audio.example/live"}]}"""
         assertFails { parse(base.replace("https://audio.example/live", "file:///tmp/a")) }

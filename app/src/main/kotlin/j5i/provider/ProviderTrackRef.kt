@@ -79,6 +79,23 @@ internal object ProviderTrackRef {
         }.distinctBy { it.id }.sortedBy { if (it.size > 0) it.size else Long.MAX_VALUE }
     }
 
+    fun resolveVideo(context: Context, item: MusicItem): String {
+        val uri = Uri.parse(item.uri)
+        require(uri.host == "plugin") { "只有插件来源支持原生视频播放" }
+        val source = uri.getQueryParameter("source").orEmpty()
+        val trackId = uri.getQueryParameter("id").orEmpty()
+        require(source.isNotEmpty() && trackId.isNotEmpty()) { AppLanguage.text(context, "provider.error.track_id") }
+        val entry = ProviderPluginStore(context).list().firstOrNull { it.enabled && it.descriptor.id == source }
+            ?: error(AppLanguage.text(context, "provider.error.plugin_unavailable"))
+        val response = JSONObject(ProviderPluginRunner.invoke(context, entry,
+            JSONObject().put("version", 1).put("operation", "resolveVideo")
+                .put("id", trackId).put("cookie", ProviderCredentials(context).get(source)).toString()))
+        val url = response.getString("url")
+        ProviderBrokerPolicy.validateUrl(url, entry.descriptor.domains,
+            allowHttp = "http-audio" in entry.descriptor.capabilities)
+        return url
+    }
+
     fun resolve(context: Context, item: MusicItem): MusicItem {
         val uri = Uri.parse(item.uri)
         val id = uri.getQueryParameter("source").orEmpty()

@@ -45,7 +45,8 @@ internal fun MainActivity.tabRow(labels: List<String>, selected: Int, compact: B
             val padding = if (compact) 2f else 5f
             setPadding(0, ThemeUi.dp(this@tabRow, padding), 0, ThemeUi.dp(this@tabRow, padding))
             background = ThemeUi.bgDrawable(this@tabRow, palette.control, 10f)
-            labels.forEachIndexed { i, label ->
+            labels.forEachIndexed { i, rawLabel ->
+                val label = if (compact && i == selected && rawLabel.endsWith(" ▾")) rawLabel else if (compact && i == selected) "$rawLabel ▾" else rawLabel
                 addView(ThemeUi.button(this@tabRow, palette, label,
                     if (i == selected) ThemeUi.ROLE_SURFACE else ThemeUi.ROLE_TEXT) {
                         // 点击后同步整排按钮的角色与颜色，不能只切内容而保留首项高亮。

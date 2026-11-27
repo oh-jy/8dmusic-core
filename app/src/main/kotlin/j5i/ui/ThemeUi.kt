@@ -137,6 +137,13 @@ object ThemeUi {
         view.background = gd
     }
 
+    fun alternatingRowBackground(view: View, palette: Palette, index: Int, active: Boolean) =
+        bgDrawable(view.context, when {
+            active -> palette.control
+            index % 2 == 0 -> palette.surfaceAlt
+            else -> palette.surface
+        }, 8f)
+
     fun text(context: Context, value: String, sp: Float, p: Palette, bold: Boolean = false, role: String = ROLE_TEXT): TextView =
         TextView(context).apply {
             text = value

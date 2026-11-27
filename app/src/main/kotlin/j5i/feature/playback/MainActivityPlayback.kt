@@ -538,8 +538,9 @@ internal fun MainActivity.showPlaylist(requestedTab: Int? = null) {
                 isLive -> 1
                 onlinePlayingUri != null -> 2
                 else -> 0
-            }, onOnlineSearch = { query ->
+            }, onOnlineSearch = { query, mvOnly ->
                 onlineQuery = query
+                onlineResourceFilter = if (mvOnly) j5i.spatial8d.feature.source.OnlineResourceFilter.MV else j5i.spatial8d.feature.source.OnlineResourceFilter.ALL
                 providerResults = emptyList()
                 pluginResults = emptyList()
                 onlineAutoSource = null

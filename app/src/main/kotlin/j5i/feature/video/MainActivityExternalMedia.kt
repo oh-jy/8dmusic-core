@@ -83,6 +83,10 @@ internal fun MainActivity.openExternalMedia(intent: Intent, channels: List<Pair<
     }
     service?.pause()
     val player = VideoView(this); externalVideo = player
+    val videoHeaders = buildMap {
+        intent.getStringExtra("j5i.videoReferer")?.takeIf { it.isNotBlank() }?.let { put("Referer", it) }
+        intent.getStringExtra("j5i.videoUserAgent")?.takeIf { it.isNotBlank() }?.let { put("User-Agent", it) }
+    }
     val overlay = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
     val controls = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(8, 8, 8, 8); setBackgroundColor(Color.TRANSPARENT) }
     val topBar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -807,7 +811,7 @@ internal fun MainActivity.openExternalMedia(intent: Intent, channels: List<Pair<
     fun startVideo(source: android.net.Uri) {
         loading.text = t("video.preparing")
         loadingPanel.visibility = View.VISIBLE
-        player.setVideoURI(source)
+        player.setVideoURI(source, videoHeaders)
     }
     if (cached != null) {
         PlaybackCacheMetadata.put(this, cached, intent.getStringExtra(Intent.EXTRA_TITLE).orEmpty(), uri.host.orEmpty())

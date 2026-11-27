@@ -5,6 +5,7 @@ import j5i.spatial8d.feature.video.*
 import j5i.spatial8d.feature.update.*
 import j5i.spatial8d.feature.cache.*
 import j5i.spatial8d.MainActivity
+import j5i.spatial8d.BuildConfig
 import androidx.core.content.pm.PackageInfoCompat
 import android.app.Dialog
 import android.os.SystemClock
@@ -29,7 +30,7 @@ import j5i.spatial8d.nfc.showNfcWriteSheet
 
 internal fun MainActivity.showSettingsSheet() {
         lateinit var dialog: Dialog
-        fun settingRow(icon: String, title: String, value: String, action: () -> Unit) =
+        fun settingRow(icon: String, title: String, value: String, badge: Boolean = false, action: () -> Unit) =
             ThemeUi.row(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 background = ThemeUi.bgDrawable(this@showSettingsSheet, palette.surfaceAlt, 8f)
@@ -42,6 +43,13 @@ internal fun MainActivity.showSettingsSheet() {
                 })
                 addView(ThemeUi.text(this@showSettingsSheet, title, 13f, palette, bold = true),
                     LinearLayout.LayoutParams(0, -2, 1f))
+                if (badge) addView(ThemeUi.text(this@showSettingsSheet, "", 1f, palette).apply {
+                    background = ThemeUi.bgDrawable(this@showSettingsSheet, 0xffff4d5d.toInt(), 8f)
+                    layoutParams = LinearLayout.LayoutParams(ThemeUi.dp(this@showSettingsSheet, 8f), ThemeUi.dp(this@showSettingsSheet, 8f)).apply {
+                        rightMargin = ThemeUi.dp(this@showSettingsSheet, 8f)
+                    }
+                    contentDescription = t("settings.update")
+                })
                 addView(ThemeUi.text(this@showSettingsSheet, "$value  ›", 12f, palette, role = ThemeUi.ROLE_SUB).apply {
                     gravity = Gravity.CENTER_VERTICAL or Gravity.END
                     setPadding(0, 0, ThemeUi.dp(this@showSettingsSheet, 12f), 0)
@@ -73,7 +81,11 @@ internal fun MainActivity.showSettingsSheet() {
             addView(settingRow("◫", t("cache.title"), "") {
                 dialog.dismiss(); showPlaybackCacheManager()
             })
-            addView(settingRow("↑", t("settings.update.channel"), t(if (updateChannel() == "beta") "settings.update.beta" else "settings.update.stable")) {
+            addView(settingRow("↑", t("settings.update"), "v${BuildConfig.VERSION_NAME}", hasAvailableUpdate()) {
+                dialog.dismiss()
+                showUpdateManager()
+            })
+            addView(settingRow("⇄", t("settings.update.channel"), t(if (updateChannel() == "beta") "settings.update.beta" else "settings.update.stable")) {
                 dialog.dismiss()
                 pickOption(t("settings.update.channel"), listOf(t("settings.update.stable"), t("settings.update.beta")), if (updateChannel() == "beta") 1 else 0) { index ->
                     preferences.edit().putString("updateChannel", if (index == 1) "beta" else "stable").remove("updateLastCheck").apply()

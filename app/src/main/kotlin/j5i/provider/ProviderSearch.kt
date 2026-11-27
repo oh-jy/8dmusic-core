@@ -6,7 +6,9 @@ import java.net.URI
 import java.net.URLEncoder
 
 internal object ProviderSearch {
-    data class Track(val id: String, val title: String, val artist: String, val audioUrl: String?, val duration: Long = 0)
+    data class Track(val id: String, val title: String, val artist: String, val audioUrl: String?,
+                     val duration: Long = 0, val vip: Boolean = false, val mvUrl: String = "",
+                     val album: String = "", val size: Long = 0)
 
     fun search(provider: ProviderDefinition, query: String, page: Int): List<Track> {
         require(provider.type == ProviderDefinition.Type.MUSIC)
@@ -39,8 +41,19 @@ internal object ProviderSearch {
                         uri.userInfo == null && uri.fragment == null
                 }.getOrDefault(false)
             }
+            val vip = search.vipPath?.let { path ->
+                when (val value = value(row, path)) {
+                    is Boolean -> value
+                    is Number -> value.toInt() != 0
+                    is String -> value.equals("true", true) || value == "1"
+                    else -> false
+                }
+            } ?: false
             Track(id, title, text(search.artistPath), audio,
-                search.durationPath?.let { text(it).toLongOrNull()?.coerceAtLeast(0) } ?: 0)
+                search.durationPath?.let { text(it).toLongOrNull()?.coerceAtLeast(0) } ?: 0,
+                vip, search.mvUrlPath?.let { text(it) }.orEmpty(),
+                search.albumPath?.let { text(it) }.orEmpty(),
+                search.sizePath?.let { text(it).toLongOrNull()?.coerceAtLeast(0) } ?: 0)
         }
     }
 }

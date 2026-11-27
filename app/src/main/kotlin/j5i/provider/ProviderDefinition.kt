@@ -16,7 +16,9 @@ internal data class ProviderDefinition(
 ) {
     enum class Type { MUSIC, FM }
     data class Search(val url: String, val resultsPath: String, val idPath: String,
-                      val titlePath: String, val artistPath: String, val audioPath: String, val durationPath: String? = null)
+                      val titlePath: String, val artistPath: String, val audioPath: String, val durationPath: String? = null,
+                      val vipPath: String? = null, val mvUrlPath: String? = null,
+                      val albumPath: String? = null, val sizePath: String? = null)
     data class Station(val id: String, val name: String, val url: String, val alternateUrls: List<String> = emptyList(),
                        val region: String = "", val city: String = "", val category: String = "",
                        val level: String = "", val note: String = "")
@@ -62,10 +64,14 @@ internal data class ProviderDefinition(
             val search = if (type == Type.MUSIC) {
                 require(!root.has("stations")) { "歌曲来源不能包含电台" }
                 val obj = root.getJSONObject("search")
-                requireKeys(obj, setOf("url", "results", "id", "title", "artist", "audio", "duration"))
+                requireKeys(obj, setOf("url", "results", "id", "title", "artist", "audio", "duration", "vip", "mvUrl", "album", "size"))
                 Search(url(obj.getString("url"), true), field(obj, "results"), field(obj, "id"),
                     field(obj, "title"), field(obj, "artist"), field(obj, "audio"),
-                    if (obj.has("duration")) field(obj, "duration") else null)
+                    if (obj.has("duration")) field(obj, "duration") else null,
+                    if (obj.has("vip")) field(obj, "vip") else null,
+                    if (obj.has("mvUrl")) field(obj, "mvUrl") else null,
+                    if (obj.has("album")) field(obj, "album") else null,
+                    if (obj.has("size")) field(obj, "size") else null)
             } else null
             val stations = if (type == Type.FM) {
                 require(!root.has("search")) { "FM 来源不能包含歌曲搜索" }

@@ -100,7 +100,7 @@ internal fun visualizerPanel(state: Pair<Boolean, Int>): Int = when {
 }
 
 internal fun nextVisualizerState(exclusive: Boolean, mode: Int, forward: Boolean): Pair<Boolean, Int> {
-    val modes = listOf(SPATIAL_CURVE_MODE, 4, 1) + exclusiveVisualModes.map { it.second }.filter { it != 4 && it != 1 }
+    val modes = listOf(4, 1) + exclusiveVisualModes.map { it.second }.filter { it !in setOf(4, 1, 39) } + listOf(39, SPATIAL_CURVE_MODE)
     val index = if (exclusive) modes.indexOf(mode).takeIf { it >= 0 }?.plus(1) ?: 0 else 0
     val next = (index + if (forward) 1 else -1).mod(modes.size + 1)
     return if (next == 0) false to 0 else true to modes[next - 1]

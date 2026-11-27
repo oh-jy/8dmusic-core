@@ -20,7 +20,9 @@ internal fun isAutoScannedMusic(duration: Long, folder: String): Boolean {
 /** 本机歌曲索引、手动添加歌曲、队列视图与播放列表的持久化入口。 */
 class MusicStore(private val context: Context) {
     private val preferences = context.getSharedPreferences("spatial8d", Context.MODE_PRIVATE)
-    init { splitOnlineReferences() }
+    init {
+        splitOnlineReferences()
+    }
     var sort = preferences.getString("sort", "name")?.takeUnless { it == "album" } ?: "name"
         private set
     var ascending = preferences.getBoolean("ascending", true)
@@ -31,6 +33,8 @@ class MusicStore(private val context: Context) {
         private set
     val playlists = jsonPlaylists(preferences.getString("playlists", "[]")).toMutableList()
     private val favorites = jsonLongs(preferences.getString("favorites", "[]")).toMutableSet()
+
+    init { prunePickedCopies() }
 
     fun isFavorite(id: Long) = id in favorites
 
@@ -96,22 +100,18 @@ class MusicStore(private val context: Context) {
     private fun isBiliAudio(item: MusicItem) = item.album == "B站音频" || item.name.startsWith("BV")
 
     /**
-     * MediaStore/SAF 的 content Uri 不一定允许随机读取和重复打开。
-     * 按歌曲 id 缓存到应用私有目录，解码器后续只读这份稳定副本，绝不改源文件。
+     * MediaStore 与 file Uri 可直接随机读取；只有 SAF 的 content Uri 需要稳定私有副本。
      */
     fun readableUri(item: MusicItem): Uri {
         // 应用私有目录里已落盘的文件（如哔哩哔哩保存的 m4a）直接读取，无需再复制。
         if (item.uri.startsWith("file://")) return Uri.parse(item.uri)
-        val cached = File(context.filesDir, "picked").listFiles()?.firstOrNull {
-            it.name.startsWith("music_${item.id}.") && it.length() > 1024
-        }
-        if (cached != null) return Uri.fromFile(cached)
         // MediaStore 本地音频可被 MediaExtractor 直接随机读取，切歌不再复制整首文件。
         // 手动 SAF 文件仍使用私有副本，保证授权 Uri 重复打开时的稳定性。
         if (item.uri.startsWith("content://media/")) return Uri.parse(item.uri)
+        val cached = pickedCache(item)
+        if (cached != null) return Uri.fromFile(cached)
         val dir = File(context.filesDir, "picked").apply { mkdirs() }
-        val extension = item.name.substringAfterLast('.', "mp3").lowercase()
-        val target = File(dir, "music_${item.id}.$extension")
+        val target = pickedCache(item) ?: File(dir, pickedCacheName(item))
         if (target.exists() && target.length() > 1024) return Uri.fromFile(target)
         context.contentResolver.openInputStream(Uri.parse(item.uri)).use { input ->
             requireNotNull(input) { "打不开音频流" }
@@ -121,29 +121,61 @@ class MusicStore(private val context: Context) {
     }
 
     fun dropCache(item: MusicItem) {
-        File(context.filesDir, "picked").listFiles()?.forEach {
-            if (it.name.startsWith("music_${item.id}.")) it.delete()
+        val ids = (listOf(item) + loadAdded()).filter { it.uri == item.uri }.map { it.id }.toSet()
+        File(context.filesDir, "picked").listFiles()?.forEach { file ->
+            if (file.name.startsWith("music_") && pickedCacheId(file) in ids) file.delete()
         }
+    }
+
+    private fun pickedCache(item: MusicItem): File? {
+        val ids = (listOf(item) + loadAdded()).filter { it.uri == item.uri }.map { it.id }.toSet()
+        return File(context.filesDir, "picked").listFiles()?.filter { file ->
+            file.name.startsWith("music_") && pickedCacheId(file) in ids
+        }?.maxByOrNull { it.lastModified() }
+    }
+
+    private fun pickedCacheId(file: File): Long? =
+        Regex("^music_(?:.+_)?(\\d+)\\.[^.]+$").matchEntire(file.name)?.groupValues?.get(1)?.toLongOrNull()
+
+    private fun prunePickedCopies() {
+        val keepNames = (loadAdded() + cached() + onlineCached())
+            .filter { it.uri.isSafAudioUri() }
+            .map { pickedCacheName(it) }.toSet()
+        File(context.filesDir, "picked").listFiles()?.forEach { file ->
+            if (file.name.startsWith("music_") && file.name !in keepNames) file.delete()
+        }
+    }
+
+    private fun String.isDirectAudioUri() = startsWith("file://") || startsWith("content://media/")
+    private fun String.isSafAudioUri() = startsWith("content://") && !startsWith("content://media/")
+
+    private fun pickedCacheName(item: MusicItem): String {
+        val base = item.name.substringBeforeLast('.', item.name).trim()
+        val safe = base.map { if (it.isLetterOrDigit() || it in " -_（）()【】[]·") it else '_' }
+            .joinToString("").trim('-', '_').take(60).ifBlank { "music" }
+        return "music_${safe}_${item.id}.${item.name.substringAfterLast('.', "mp3").lowercase()}"
     }
 
     /** 仅修改可写歌曲的标签；保持源 URI 与播放队列不变，并同步应用内索引。 */
     fun updateMetadata(item: MusicItem, title: String, artist: String, album: String): MusicItem {
         require(title.isNotBlank()) { "歌名不能为空" }
+        val directUri = item.uri.isDirectAudioUri()
+        if (directUri) dropCache(item)
         val extension = item.name.substringAfterLast('.', "").lowercase()
-        // content Uri 的 path 是媒体库逻辑路径，不能交给 RandomAccessFile。
-        // 标签写入应用私有副本，源文件无需 SAF/MediaStore 写权限。
-        val target = File(File(context.filesDir, "picked").apply { mkdirs() }, "music_${item.id}.$extension")
-        if (!target.exists() || target.length() <= 1024) {
-            context.contentResolver.openInputStream(Uri.parse(item.uri)).use { input ->
-                requireNotNull(input) { "打不开音频流" }
-                target.outputStream().use { output -> input.copyTo(output) }
+        if (!directUri) {
+            // SAF Uri 不能交给 RandomAccessFile；标签写入应用私有副本，源文件保持不变。
+            val target = pickedCache(item) ?: File(File(context.filesDir, "picked").apply { mkdirs() }, pickedCacheName(item))
+            if (!target.exists() || target.length() <= 1024) {
+                context.contentResolver.openInputStream(Uri.parse(item.uri)).use { input ->
+                    requireNotNull(input) { "打不开音频流" }
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
             }
-        }
-        val path = target.absolutePath
-        when (extension) {
-            "mp3" -> writeId3(path, title.trim(), artist.trim(), album.trim())
-            "flac" -> writeFlac(path, title.trim(), artist.trim(), album.trim())
-            else -> error("暂支持 MP3 / FLAC 标签修正")
+            when (extension) {
+                "mp3" -> writeId3(target.absolutePath, title.trim(), artist.trim(), album.trim())
+                "flac" -> writeFlac(target.absolutePath, title.trim(), artist.trim(), album.trim())
+                else -> error("暂支持 MP3 / FLAC 标签修正")
+            }
         }
         val next = item.copy(name = title.trim(), artist = artist.trim(), album = album.trim())
         val updated = cached().map { if (it.uri == item.uri) next else it }
